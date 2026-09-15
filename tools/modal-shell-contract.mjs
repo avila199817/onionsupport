@@ -33,16 +33,14 @@ const pendingShell = (file, until) => ({ kind: "shell", file, until });
 const fixedLayer = (file, reason) => ({ kind: "layer", file, reason });
 const FIXED_INVENTORY = new Map([
   // dialog shells pending migration
-  [".fac-create-root", pendingShell("src/css/views/facturas/create.css", "create-modals-shell")],
-  [".fac-create-overlay", pendingShell("src/css/views/facturas/create.css", "create-modals-shell")],
   [".facturas-resend-confirm-overlay", pendingShell("src/css/views/facturas/resend-confirm.css", "facturas-confirm-shell")],
   [".fpc-overlay", pendingShell("src/features/facturas-paid-confirm/style.css", "facturas-confirm-shell")],
   [".clientes-modal-root", pendingShell("src/css/views/clientes/detail.css", "clientes-detail-shell")],
   [".clientes-modal-overlay", pendingShell("src/css/views/clientes/detail.css", "clientes-detail-shell")],
   [".cli-create-root", pendingShell("src/css/views/clientes/create.css", "create-modals-shell")],
   [".cli-create-overlay", pendingShell("src/css/views/clientes/create.css", "create-modals-shell")],
-  [":is( .cli-create-root, .fac-create-root, #usuarios-create-modal-root, .usuarios-create-modal-host )", pendingShell("src/css/compositions/private-create-modal.css", "create-modals-shell")],
-  [":is( .cli-create-overlay, .fac-create-overlay, .usr-create-overlay )", pendingShell("src/css/compositions/private-create-modal.css", "create-modals-shell")],
+  [":is( .cli-create-root, #usuarios-create-modal-root, .usuarios-create-modal-host )", pendingShell("src/css/compositions/private-create-modal.css", "create-modals-shell")],
+  [":is( .cli-create-overlay, .usr-create-overlay )", pendingShell("src/css/compositions/private-create-modal.css", "create-modals-shell")],
   [".correo-modal-backdrop", pendingShell("src/css/views/correo/index.css", "correo-shell")],
   [".correo-compose", pendingShell("src/css/views/correo/index.css", "correo-shell")],
   [".correo-confirm-overlay", pendingShell("src/css/views/correo/index.css", "correo-shell")],
@@ -91,6 +89,7 @@ const SHELL_CONSUMERS = [
   "src/views/incidencias/incidencias.template.modal.impl.js",
   "src/views/facturas/facturas.template.modal.base.js",
   "src/views/incidencias/incidencias.template.create.impl.js",
+  "src/views/facturas/facturas.template.create.js",
 ];
 
 const STRUCTURAL_CLASS = /\.ui-detail-modal-(?:root|overlay|panel|header|body|footer|close-btn)\b/u;

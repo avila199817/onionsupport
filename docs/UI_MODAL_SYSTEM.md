@@ -104,7 +104,8 @@ Estado de la familia (se actualiza en cada unidad):
 | Detalle de Incidencias | shell canónico: `renderModalShell` (carga, error y detalle), botón cerrar del shell, click exterior por el lifecycle; el dominio conserva `incidencias-modal-root` como ámbito de su contenido |
 | Alta de Incidencias | shell canónico (`renderModalShell`, variante `data-modal-size="form"`; el modo cliente ajusta la anchura por token en `inc-create-root.is-client`), botón cerrar del shell, click exterior por el lifecycle; `private-create-modal.css` conserva sólo el contenido del formulario para las cuatro altas |
 | Detalle de Facturas | shell canónico (`renderModalShell`, variante `data-modal-size="wide"`), botón cerrar del shell, estados de carga y error compartidos, click exterior por el lifecycle; el dominio conserva `facturas-detail-modal-root` como ámbito de su contenido |
-| Alta, reenvío y cobro de Facturas | pendiente: shell `fac-create-*`, `facturas-resend-confirm-*`, `fpc-*` |
+| Alta de Facturas | shell canónico (`renderModalShell`, variante `data-modal-size="form"`), botón cerrar del shell, click exterior por el lifecycle; `create.css` estiliza sólo el formulario |
+| Reenvío y cobro de Facturas | pendiente: shell `facturas-resend-confirm-*`, `fpc-*` |
 | Detalle y alta de Clientes | pendiente: shell `clientes-modal-*` / `cli-create-*` y préstamo de clases de Incidencias |
 | Alta de Usuarios | pendiente: préstamo de `inc-create-*` |
 | Correo (redacción, confirmación, firma) | pendiente de evaluación: host inline del propio shell |

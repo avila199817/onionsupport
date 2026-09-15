@@ -5,128 +5,23 @@
    Contrato:
    - 1:1 con facturas.template.create.js V6.
    - Perfil fiscal visible antes de crear.
-   - Un único scroll en .fac-create-body.
+   - La estructura (root, overlay, panel, header, cierre, scroll) la aporta el
+     shell canónico (components/detail-modal.css); esta hoja estiliza el
+     formulario y su contenido.
    - Responsive y accesible.
    - Sin paleta local paralela: usa tokens del design system.
 ========================================================= */
 
 @layer views {
 
-body.facturas-create-modal-open,
-body.facturas-create-open {
-  overflow: hidden;
-  overscroll-behavior: none;
-}
-
-.fac-create-root,
-.fac-create-root *,
-.fac-create-root *::before,
-.fac-create-root *::after {
-  box-sizing: border-box;
-}
-
-.fac-create-root {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal, 1000);
-  inline-size: 100vw;
-  block-size: 100vh;
-  block-size: 100dvh;
-  color: var(--text-strong);
-  font-family: var(--font-family);
-  line-height: var(--line-normal);
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-}
-
-.fac-create-root:empty { display: none; }
-
-.fac-create-overlay {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: clamp(12px, 2vw, 28px);
-  overflow: auto;
-  background: var(--backdrop-bg, rgba(0, 0, 0, .64));
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  animation: fac-create-overlay-in 140ms ease-out both;
-}
-
-.fac-create-panel {
-  position: relative;
-  isolation: isolate;
-  inline-size: min(1120px, calc(100vw - 48px));
-  max-inline-size: calc(100vw - 24px);
-  max-block-size: min(92dvh, 920px);
-  min-inline-size: 0;
-  min-block-size: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  overflow: hidden;
-  border: 1px solid var(--panel-border, var(--border-default));
-  border-radius: var(--modal-radius, var(--radius-lg));
-  background: var(--panel-bg);
-  color: var(--text-strong);
-  box-shadow: var(--shadow-modal, var(--panel-shadow));
-  outline: none;
-  animation: fac-create-panel-in 180ms var(--ease-standard) both;
-}
-
-.fac-create-panel:focus-visible {
-  box-shadow: var(--shadow-modal, var(--panel-shadow)), var(--focus-ring);
-}
-
-/* =========================================================
-   HEADER
-========================================================= */
-
-.fac-create-header {
-  position: relative;
-  z-index: 3;
-  min-inline-size: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-md);
-  padding: clamp(17px, 1.5vw, 24px) clamp(18px, 2vw, 30px);
-  border-block-end: 1px solid var(--border-soft, var(--border-default));
-  background: var(--surface-2, var(--panel-bg));
-}
-
-.fac-create-header-icon {
-  inline-size: 46px;
-  block-size: 46px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--solid-bg-1, var(--panel-bg));
-  color: var(--text-muted);
-}
-
-.fac-create-header-icon svg {
-  inline-size: 20px;
-  block-size: 20px;
-}
-
+/* Header copy: content inside the shell header. */
 .fac-create-header-copy {
   min-inline-size: 0;
   display: grid;
   gap: 4px;
 }
 
-.fac-create-eyebrow {
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-bold);
-  line-height: 1.1;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-.fac-create-header h2 {
+.fac-create-header-copy h2 {
   margin: 0;
   color: var(--text-strong);
   font-size: clamp(24px, 2.2vw, 34px);
@@ -135,7 +30,7 @@ body.facturas-create-open {
   letter-spacing: var(--letter-tight);
 }
 
-.fac-create-header p {
+.fac-create-header-copy p {
   max-inline-size: 74ch;
   margin: 0;
   color: var(--text-muted);
@@ -144,72 +39,26 @@ body.facturas-create-open {
   line-height: 1.42;
 }
 
-.fac-create-close {
-  appearance: none;
-  inline-size: 42px;
-  block-size: 42px;
-  display: grid;
-  place-items: center;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--btn-secondary-border);
-  border-radius: var(--btn-radius);
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
-  cursor: pointer;
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
-}
-
-.fac-create-close svg { inline-size: 17px; block-size: 17px; }
-
-.fac-create-close:hover:not(:disabled) {
-  background: var(--btn-secondary-bg-hover);
-  border-color: var(--border-strong);
-  color: var(--text-strong);
-  transform: translateY(-1px);
-}
-
-.fac-create-close:active:not(:disabled) { transform: scale(.97); }
-.fac-create-close:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
-.fac-create-close:disabled { cursor: not-allowed; opacity: .48; }
-
 /* =========================================================
    FORM / BODY
 ========================================================= */
 
-#facturas-create-form,
-.fac-create-panel form {
-  min-block-size: 0;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+/* The form is content of the shell body (the only scroll owner); sections
+   space themselves with margins, like every other create form. */
+.fac-create-form {
+  min-inline-size: 0;
 }
 
 .fac-create-body {
-  min-inline-size: 0;
-  min-block-size: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-  scrollbar-gutter: stable;
   padding: clamp(18px, 1.6vw, 26px) clamp(18px, 2vw, 30px) clamp(22px, 2vw, 32px);
 }
 
-.fac-create-body::-webkit-scrollbar,
 .fac-create-search-results::-webkit-scrollbar {
   inline-size: var(--scrollbar-size, 9px);
 }
 
-.fac-create-body::-webkit-scrollbar-track,
 .fac-create-search-results::-webkit-scrollbar-track { background: transparent; }
 
-.fac-create-body::-webkit-scrollbar-thumb,
 .fac-create-search-results::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: var(--radius-pill);
@@ -880,7 +729,6 @@ body.facturas-create-open {
   box-shadow: var(--focus-ring);
 }
 
-
 /* =========================================================
    MULTI-LINE BILLING
 ========================================================= */
@@ -1105,92 +953,10 @@ body.facturas-create-open {
   color: var(--success-strong, var(--success));
 }
 
-.fac-create-footer {
-  min-inline-size: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-md);
-  padding: 14px clamp(18px, 2vw, 30px);
-  border-block-start: 1px solid var(--border-soft, var(--border-default));
-  background: var(--surface-2, var(--panel-bg));
-}
-
-
-.fac-create-footer-actions {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.fac-create-btn {
-  appearance: none;
-  min-block-size: 42px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding-inline: 15px;
-  border: 1px solid var(--btn-secondary-border);
-  border-radius: var(--btn-radius);
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
-  font: inherit;
-  font-size: var(--font-sm);
-  font-weight: var(--weight-bold);
-  cursor: pointer;
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
-}
-
-.fac-create-btn--primary {
-  border-color: var(--btn-primary-border, var(--border-strong));
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-text);
-}
-
-.fac-create-btn--ghost { background: transparent; }
-
-.fac-create-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: var(--btn-shadow-hover, var(--shadow-sm));
-}
-
-.fac-create-btn--primary:hover:not(:disabled) {
-  background: var(--btn-primary-bg-hover);
-}
-
-.fac-create-btn:focus-visible {
-  outline: 0;
-  box-shadow: var(--focus-ring);
-}
-
-.fac-create-btn:disabled {
-  cursor: not-allowed;
-  opacity: .5;
-}
-
 .fac-create-loading {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-}
-
-
-@keyframes fac-create-overlay-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes fac-create-panel-in {
-  from { opacity: 0; transform: translateY(8px) scale(.992); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* =========================================================
@@ -1198,13 +964,6 @@ body.facturas-create-open {
 ========================================================= */
 
 @media (max-width: 900px) {
-  .fac-create-overlay { padding: 12px; }
-
-  .fac-create-panel {
-    inline-size: min(100%, calc(100vw - 24px));
-    max-block-size: 96dvh;
-  }
-
   .fac-create-form-grid,
   .fac-create-total-strip {
     grid-template-columns: 1fr;
@@ -1215,34 +974,13 @@ body.facturas-create-open {
 }
 
 @media (max-width: 640px) {
-  .fac-create-overlay {
-    padding: 0;
-    place-items: stretch;
-  }
-
-  .fac-create-panel {
-    inline-size: 100%;
-    max-inline-size: 100%;
-    min-block-size: 100dvh;
-    max-block-size: 100dvh;
-    border: 0;
-    border-radius: 0;
-  }
-
-  .fac-create-header {
-    grid-template-columns: minmax(0, 1fr) auto;
-    padding: 15px 14px;
-  }
-
-  .fac-create-header-icon { display: none; }
-  .fac-create-header h2 { font-size: 25px; }
-  .fac-create-header p { font-size: var(--font-xs); }
+  .fac-create-header-copy h2 { font-size: 25px; }
+  .fac-create-header-copy p { font-size: var(--font-xs); }
 
   .fac-create-body { padding: 13px; }
   .fac-create-section { padding: 14px; }
 
-  .fac-create-section-head,
-  .fac-create-footer {
+  .fac-create-section-head {
     flex-direction: column;
   }
 
@@ -1259,30 +997,9 @@ body.facturas-create-open {
     justify-self: end;
   }
 
-  .fac-create-footer {
-    align-items: stretch;
-    gap: 9px;
-    padding: 11px 13px max(11px, env(safe-area-inset-bottom));
-  }
-
-  .fac-create-footer-summary span { max-inline-size: 100%; }
-  .fac-create-footer-actions { inline-size: 100%; }
-  .fac-create-footer-actions .fac-create-btn { flex: 1 1 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .fac-create-root *,
-  .fac-create-root *::before,
-  .fac-create-root *::after {
-    scroll-behavior: auto !important;
-    animation-duration: .001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: .001ms !important;
-  }
 }
 
 @media (forced-colors: active) {
-  .fac-create-panel,
   .fac-create-section,
   .fac-create-input,
   .fac-create-select,
@@ -1290,9 +1007,7 @@ body.facturas-create-open {
   .fac-create-search-result,
   .fac-create-selected-card,
   .fac-create-total-cell,
-  .fac-create-tax-policy,
-  .fac-create-btn,
-  .fac-create-close {
+  .fac-create-tax-policy {
     border: 1px solid CanvasText;
   }
 }

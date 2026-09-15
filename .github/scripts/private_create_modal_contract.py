@@ -82,12 +82,14 @@ for snippet, message in [
 
 # Facturas must use the same modal architecture, not its former custom chrome/footer.
 for snippet, message in [
+    ("renderModalShell(", "Facturas Create must render through the canonical modal shell"),
+    ("renderModalCloseButton(", "Facturas Create must use the shell's close control"),
+    ('height: "auto"', "Facturas Create keeps the content-sized panel (auto height up to the form cap)"),
     ('class="fac-create-header-copy"', "Facturas Create must use title/subtitle-only header copy"),
-    ('class="fac-create-body"', "Facturas Create must use one body scroll root"),
+    ('bodyClass: "fac-create-body"', "Facturas Create must keep its form body class on the shell body"),
     ('class="fac-create-form"', "Facturas Create must expose the canonical form class"),
     ('class="fac-create-actions"', "Facturas Create must use the canonical in-body action row"),
     ('class="fac-create-actions-note"', "Facturas Create must expose the canonical action note"),
-    ('class="fac-create-close inc-create-close"', "Facturas Create must consume the canonical Incidencias close class"),
     ('class="fac-create-submit inc-create-submit"', "Facturas Create must consume the canonical Incidencias submit class"),
     ('class="fac-create-loading-overlay"', "Facturas Create must expose the canonical full-panel loading overlay"),
     ('LINE_ADD: "create-line-add"', "Facturas Create must preserve multi-line billing"),

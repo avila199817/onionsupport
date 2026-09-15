@@ -29,25 +29,21 @@
 
 :is(
   .cli-create-root,
-  .fac-create-root,
   #usuarios-create-modal-root,
   .usuarios-create-modal-host
 ),
 :is(
   .cli-create-root,
-  .fac-create-root,
   #usuarios-create-modal-root,
   .usuarios-create-modal-host
 ) *,
 :is(
   .cli-create-root,
-  .fac-create-root,
   #usuarios-create-modal-root,
   .usuarios-create-modal-host
 ) *::before,
 :is(
   .cli-create-root,
-  .fac-create-root,
   #usuarios-create-modal-root,
   .usuarios-create-modal-host
 ) *::after {
@@ -56,7 +52,6 @@
 
 :is(
   .cli-create-root,
-  .fac-create-root,
   #usuarios-create-modal-root,
   .usuarios-create-modal-host
 ) {
@@ -78,8 +73,6 @@
 }
 
 body.modal-open,
-body.facturas-create-modal-open,
-body.facturas-create-open,
 body.clientes-modal-open,
 body.clientes-create-open,
 body.usuarios-modal-open,
@@ -94,7 +87,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-overlay,
-  .fac-create-overlay,
   .usr-create-overlay
 ) {
   position: fixed;
@@ -116,7 +108,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-panel,
-  .fac-create-panel,
   .usr-create-panel
 ) {
   position: relative;
@@ -146,7 +137,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-panel,
-  .fac-create-panel,
   .usr-create-panel
 ):focus-visible {
   box-shadow: var(--shadow-modal, var(--panel-shadow)), var(--focus-ring);
@@ -158,7 +148,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-header,
-  .fac-create-header,
   .usr-create-header
 ) {
   position: relative;
@@ -186,7 +175,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-header,
-  .fac-create-header,
   .usr-create-header
 ) h2 {
   margin: 0;
@@ -200,7 +188,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-header,
-  .fac-create-header,
   .usr-create-header
 ) p {
   max-inline-size: 74ch;
@@ -213,7 +200,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-close,
-  .fac-create-close,
   .usr-create-close
 ) {
   appearance: none;
@@ -241,7 +227,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-close,
-  .fac-create-close,
   .usr-create-close
 ) svg {
   inline-size: 17px;
@@ -250,7 +235,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-close,
-  .fac-create-close,
   .usr-create-close
 ):focus-visible {
   outline: none;
@@ -259,7 +243,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-close,
-  .fac-create-close,
   .usr-create-close
 ):disabled {
   cursor: not-allowed;
@@ -272,7 +255,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-body,
-  .fac-create-body,
   .usr-create-body
 ) {
   min-inline-size: 0;
@@ -288,7 +270,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-body,
-  .fac-create-body,
   .usr-create-body
 )::-webkit-scrollbar {
   inline-size: var(--scrollbar-size, 9px);
@@ -296,7 +277,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-body,
-  .fac-create-body,
   .usr-create-body
 )::-webkit-scrollbar-track {
   background: transparent;
@@ -304,7 +284,6 @@ body.usuarios-create-modal-open {
 
 :is(
   .cli-create-body,
-  .fac-create-body,
   .usr-create-body
 )::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
@@ -914,33 +893,32 @@ body.usuarios-create-modal-open {
 
 [data-theme="light"] :is(
   .cli-create-overlay,
-  .fac-create-overlay,
   .usr-create-overlay
 ) {
   background: rgba(15, 23, 42, .46);
 }
 
 @media (max-width: 760px) {
-  :is(.cli-create-overlay, .fac-create-overlay, .usr-create-overlay) {
+  :is(.cli-create-overlay, .usr-create-overlay) {
     padding: 10px;
   }
 
-  :is(.cli-create-panel, .fac-create-panel, .usr-create-panel) {
+  :is(.cli-create-panel, .usr-create-panel) {
     inline-size: 100%;
     max-inline-size: 100%;
     max-block-size: calc(100dvh - 20px);
     border-radius: var(--radius-lg);
   }
 
-  :is(.cli-create-header, .fac-create-header, .usr-create-header) {
+  :is(.cli-create-header, .usr-create-header) {
     padding: 15px 16px;
   }
 
-  :is(.cli-create-header, .fac-create-header, .usr-create-header) h2 {
+  :is(.cli-create-header, .usr-create-header) h2 {
     font-size: clamp(22px, 7vw, 29px);
   }
 
-  :is(.cli-create-body, .fac-create-body, .usr-create-body) {
+  :is(.cli-create-body, .usr-create-body) {
     padding: 16px;
   }
 
@@ -977,22 +955,22 @@ body.usuarios-create-modal-open {
 }
 
 @media (max-width: 480px) {
-  :is(.cli-create-overlay, .fac-create-overlay, .usr-create-overlay) {
+  :is(.cli-create-overlay, .usr-create-overlay) {
     padding: 0;
   }
 
-  :is(.cli-create-panel, .fac-create-panel, .usr-create-panel) {
+  :is(.cli-create-panel, .usr-create-panel) {
     block-size: 100dvh;
     max-block-size: 100dvh;
     border-inline: 0;
     border-radius: 0;
   }
 
-  :is(.cli-create-header, .fac-create-header, .usr-create-header) {
+  :is(.cli-create-header, .usr-create-header) {
     padding-inline: 14px;
   }
 
-  :is(.cli-create-body, .fac-create-body, .usr-create-body) {
+  :is(.cli-create-body, .usr-create-body) {
     padding: 14px;
   }
 
@@ -1027,13 +1005,10 @@ body.usuarios-create-modal-open {
 @media (prefers-reduced-motion: reduce) {
   :is(
     .cli-create-overlay,
-    .fac-create-overlay,
     .usr-create-overlay,
     .cli-create-panel,
-    .fac-create-panel,
     .usr-create-panel,
     .cli-create-close,
-    .fac-create-close,
     .usr-create-close,
     .inc-create-submit,
     .cli-create-submit,
@@ -1049,10 +1024,8 @@ body.usuarios-create-modal-open {
 @media (forced-colors: active) {
   :is(
     .cli-create-panel,
-    .fac-create-panel,
     .usr-create-panel,
     .cli-create-close,
-    .fac-create-close,
     .usr-create-close,
     .inc-create-input,
     .cli-create-input,
@@ -1070,7 +1043,6 @@ body.usuarios-create-modal-open {
 @media print {
   :is(
     .cli-create-root,
-    .fac-create-root,
     #usuarios-create-modal-root,
     .usuarios-create-modal-host
   ) {

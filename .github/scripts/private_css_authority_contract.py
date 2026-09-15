@@ -30,7 +30,6 @@ if "SINGLE VISUAL AUTHORITY" not in parity:
 
 for forbidden in (
     ".cli-create-overlay",
-    ".fac-create-overlay",
     ".usr-create-overlay",
     ".ui-detail-modal-overlay",
     ".clientes-detail-overlay",

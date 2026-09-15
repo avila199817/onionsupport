@@ -1,4 +1,5 @@
 import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+import { renderModalCloseButton, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 import { normalizeClienteModel } from "../clientes/clientes.model.js";
 /* =========================================================
    Onion Support - Facturas Create Template
@@ -1097,192 +1098,185 @@ export function renderFacturasCreateModal(input = {}) {
   const clientCount = vm.selectedClientes.length;
   const disabled = vm.submitting || !vm.canCreate;
 
-  return `
-    <section
-      id="${MODAL_ID}"
-      class="fac-create-root"
-      data-facturas-create-root="true"
-      data-open="true"
-      data-template-version="${attr(FACTURAS_CREATE_TEMPLATE_VERSION)}"
-      role="presentation"
-    >
-      <div class="fac-create-overlay" data-facturas-create-modal-overlay="true">
-        <div
-          id="${PANEL_ID}"
-          class="fac-create-panel"
-          data-facturas-create-modal-panel="true"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="${PANEL_ID}-title"
-          aria-describedby="${PANEL_ID}-subtitle"
-          tabindex="-1"
-        >
-          <header class="fac-create-header">
-            <div class="fac-create-header-copy">
-              <h2 id="${PANEL_ID}-title">Crear factura</h2>
-              <p id="${PANEL_ID}-subtitle">Selecciona el cliente, vincula la incidencia y añade todas las partidas que deban facturarse.</p>
+  return renderModalShell({
+    id: MODAL_ID,
+    rootClass: "fac-create-root",
+    rootAttributes: {
+      "data-facturas-create-root": "true",
+      "data-template-version": FACTURAS_CREATE_TEMPLATE_VERSION,
+    },
+    overlayAttributes: { "data-facturas-create-modal-overlay": "true" },
+    panelId: PANEL_ID,
+    panelAttributes: { "data-facturas-create-modal-panel": "true" },
+    labelledBy: `${PANEL_ID}-title`,
+    describedBy: `${PANEL_ID}-subtitle`,
+    size: "form",
+    height: "auto",
+    submitting: vm.submitting,
+    prelude: vm.submitting ? renderFacturaCreateLoadingOverlay(vm) : "",
+    header: `
+      <div class="fac-create-header-copy">
+        <h2 id="${PANEL_ID}-title">Crear factura</h2>
+        <p id="${PANEL_ID}-subtitle">Selecciona el cliente, vincula la incidencia y añade todas las partidas que deban facturarse.</p>
+      </div>
+      ${renderModalCloseButton({
+        label: "Cerrar",
+        attributes: {
+          "data-factura-create-action": FACTURA_CREATE_ACTIONS.CLOSE,
+          disabled: Boolean(vm.submitting),
+          "aria-disabled": vm.submitting ? "true" : false,
+        },
+      })}
+    `,
+    bodyClass: "fac-create-body",
+    bodyAttributes: { "data-facturas-create-body": "true" },
+    body: `
+      ${vm.serverError ? `<div class="fac-create-alert is-error" role="alert">${escapeHtml(vm.serverError)}</div>` : ""}
+      ${vm.successMessage ? `<div class="fac-create-alert is-success" role="status">${escapeHtml(vm.successMessage)}</div>` : ""}
+
+      <form id="${FORM_ID}" class="fac-create-form" data-facturas-create-form="true" novalidate>
+        <section data-render-key="clients" class="fac-create-section">
+          <div class="fac-create-section-head">
+            <div>
+              <span>Cliente</span>
+              <strong>Cliente y perfil fiscal</strong>
             </div>
-            <button
-              type="button"
-              class="fac-create-close inc-create-close"
-              data-factura-create-action="${FACTURA_CREATE_ACTIONS.CLOSE}"
-              aria-label="Cerrar"
-              ${vm.submitting ? "disabled" : ""}
-            >${icon("close")}</button>
-          </header>
-
-          <div class="fac-create-body" data-facturas-create-body="true">
-            ${vm.serverError ? `<div class="fac-create-alert is-error" role="alert">${escapeHtml(vm.serverError)}</div>` : ""}
-            ${vm.successMessage ? `<div class="fac-create-alert is-success" role="status">${escapeHtml(vm.successMessage)}</div>` : ""}
-
-            <form id="${FORM_ID}" class="fac-create-form" data-facturas-create-form="true" novalidate>
-              <section data-render-key="clients" class="fac-create-section">
-                <div class="fac-create-section-head">
-                  <div>
-                    <span>Cliente</span>
-                    <strong>Cliente y perfil fiscal</strong>
-                  </div>
-                  <small>El cliente principal determina el perfil fiscal de la factura.</small>
-                </div>
-
-                <div data-slot="selected-clientes">${renderSelectedClientes(vm)}</div>
-                <div data-error-slot="clienteId">${renderFieldError(errors.clienteId)}</div>
-
-                <label class="fac-create-field fac-create-field--search">
-                  <span class="fac-create-label">${clientCount ? "Añadir otro cliente" : "Buscar cliente"}</span>
-                  <span class="fac-create-search-shell">
-                    <span aria-hidden="true">${icon("search")}</span>
-                    <input
-                      class="fac-create-input${errors.clienteId ? " is-error" : ""}"
-                      data-field="clienteSearch"
-                      data-create-field="clienteSearch"
-                      name="clienteSearch"
-                      type="search"
-                      value="${attr(vm.clientSearch.query)}"
-                      placeholder="Nombre, email, empresa o NIF..."
-                      autocomplete="off"
-                      spellcheck="false"
-                      ${disabled ? "disabled" : ""}
-                    >
-                  </span>
-                </label>
-
-                <div
-                  class="fac-create-search-slot"
-                  data-slot="client-search-results"
-                  aria-live="polite"
-                  aria-busy="${vm.clientSearch.loading ? "true" : "false"}"
-                >${renderClientSearchResults(vm)}</div>
-
-                ${vm.primaryClient ? `
-                  <div class="fac-create-tax-policy ${vm.taxProfile.aplicaIrpf ? "is-business" : "is-particular"}">
-                    <span class="fac-create-tax-policy-icon">${icon("shield")}</span>
-                    <div>
-                      <strong>${escapeHtml(vm.taxProfile.label)}</strong>
-                      <span>${escapeHtml(vm.taxProfile.detail)}${vm.primaryClient.nif ? ` · ${escapeHtml(vm.primaryClient.nif)}` : ""}</span>
-                    </div>
-                  </div>
-                ` : ""}
-              </section>
-
-              <section data-render-key="tickets" class="fac-create-section">
-                <div class="fac-create-section-head">
-                  <div>
-                    <span>Incidencia</span>
-                    <strong>Incidencia vinculada</strong>
-                  </div>
-                  <div class="fac-create-section-actions">
-                    <button
-                      type="button"
-                      class="fac-create-link-btn"
-                      data-factura-create-action="${FACTURA_CREATE_ACTIONS.TICKET_REFRESH}"
-                      ${disabled || !clientCount || vm.ticketSearch.loading ? "disabled" : ""}
-                      aria-busy="${vm.ticketSearch.loading ? "true" : "false"}"
-                    >${vm.ticketSearch.loading ? "Cargando..." : "Recargar"}</button>
-                  </div>
-                </div>
-
-                <div data-slot="selected-tickets">${renderSelectedTickets(vm)}</div>
-                <div data-error-slot="incidenciaId">${renderFieldError(errors.incidenciaId)}</div>
-
-                <label class="fac-create-field fac-create-field--search">
-                  <span class="fac-create-label">Filtrar incidencias del cliente</span>
-                  <span class="fac-create-search-shell">
-                    <span aria-hidden="true">${icon("search")}</span>
-                    <input
-                      class="fac-create-input${errors.incidenciaId ? " is-error" : ""}"
-                      data-field="ticketSearch"
-                      data-create-field="ticketSearch"
-                      name="ticketSearch"
-                      type="search"
-                      value="${attr(vm.ticketSearch.query)}"
-                      placeholder="ID, asunto o estado..."
-                      autocomplete="off"
-                      spellcheck="false"
-                      ${disabled || !clientCount ? "disabled" : ""}
-                    >
-                  </span>
-                </label>
-
-                <div
-                  class="fac-create-search-slot"
-                  data-slot="ticket-search-results"
-                  aria-live="polite"
-                  aria-busy="${vm.ticketSearch.loading ? "true" : "false"}"
-                >${renderTicketSearchResults(vm)}</div>
-              </section>
-
-              <section data-render-key="billing" class="fac-create-section">
-                <div class="fac-create-section-head">
-                  <div>
-                    <span>Facturación</span>
-                    <strong>Conceptos e importes</strong>
-                  </div>
-                  <div class="fac-create-section-actions">
-                    <button type="button" class="fac-create-link-btn fac-create-line-add" data-factura-create-action="${FACTURA_CREATE_ACTIONS.LINE_ADD}" ${disabled ? "disabled" : ""}>${icon("plus")}<span>Añadir concepto</span></button>
-                  </div>
-                </div>
-
-                ${renderLineItems(vm, disabled)}
-                ${renderFieldError(errors.lineas)}
-
-                <div class="fac-create-form-grid fac-create-form-grid--meta">
-                  ${renderInput({ label: "Fecha de servicio", name: "fechaServicio", value: vm.form.fechaServicio, type: "date", required: true, error: errors.fechaServicio, disabled })}
-                  ${renderSelect({ label: "Forma de pago", name: "formaPago", value: vm.form.formaPago, options: PAYMENT_OPTIONS, error: errors.formaPago, disabled })}
-                  ${renderSelect({ label: "Estado de pago", name: "estadoPago", value: vm.form.estadoPago, options: PAYMENT_STATUS_OPTIONS, error: errors.estadoPago, disabled })}
-
-                  <label class="fac-create-toggle">
-                    <span><strong>Enviar por email</strong><small>Enviar la factura al cliente al finalizar.</small></span>
-                    <span class="fac-create-toggle-control">
-                      <input data-field="sendEmail" name="sendEmail" type="checkbox" ${vm.form.sendEmail ? "checked" : ""} ${disabled ? "disabled" : ""}>
-                      <span aria-hidden="true"></span>
-                    </span>
-                  </label>
-                </div>
-              </section>
-
-              ${renderTotalStrip(vm)}
-
-              <div class="fac-create-actions">
-                <span class="fac-create-actions-note">La factura se creará con el cliente, las incidencias y todas las partidas seleccionadas.</span>
-                <button
-                  type="submit"
-                  class="fac-create-submit inc-create-submit"
-                  data-factura-create-action="${FACTURA_CREATE_ACTIONS.SUBMIT}"
-                  ${disabled ? "disabled" : ""}
-                  aria-busy="${vm.submitting ? "true" : "false"}"
-                >
-                  ${vm.submitting ? renderSpinner("Creando...") : `<span>Crear factura</span>`}
-                </button>
-              </div>
-            </form>
+            <small>El cliente principal determina el perfil fiscal de la factura.</small>
           </div>
 
-          ${vm.submitting ? renderFacturaCreateLoadingOverlay(vm) : ""}
+          <div data-slot="selected-clientes">${renderSelectedClientes(vm)}</div>
+          <div data-error-slot="clienteId">${renderFieldError(errors.clienteId)}</div>
+
+          <label class="fac-create-field fac-create-field--search">
+            <span class="fac-create-label">${clientCount ? "Añadir otro cliente" : "Buscar cliente"}</span>
+            <span class="fac-create-search-shell">
+              <span aria-hidden="true">${icon("search")}</span>
+              <input
+                class="fac-create-input${errors.clienteId ? " is-error" : ""}"
+                data-field="clienteSearch"
+                data-create-field="clienteSearch"
+                name="clienteSearch"
+                type="search"
+                value="${attr(vm.clientSearch.query)}"
+                placeholder="Nombre, email, empresa o NIF..."
+                autocomplete="off"
+                spellcheck="false"
+                ${disabled ? "disabled" : ""}
+              >
+            </span>
+          </label>
+
+          <div
+            class="fac-create-search-slot"
+            data-slot="client-search-results"
+            aria-live="polite"
+            aria-busy="${vm.clientSearch.loading ? "true" : "false"}"
+          >${renderClientSearchResults(vm)}</div>
+
+          ${vm.primaryClient ? `
+            <div class="fac-create-tax-policy ${vm.taxProfile.aplicaIrpf ? "is-business" : "is-particular"}">
+              <span class="fac-create-tax-policy-icon">${icon("shield")}</span>
+              <div>
+                <strong>${escapeHtml(vm.taxProfile.label)}</strong>
+                <span>${escapeHtml(vm.taxProfile.detail)}${vm.primaryClient.nif ? ` · ${escapeHtml(vm.primaryClient.nif)}` : ""}</span>
+              </div>
+            </div>
+          ` : ""}
+        </section>
+
+        <section data-render-key="tickets" class="fac-create-section">
+          <div class="fac-create-section-head">
+            <div>
+              <span>Incidencia</span>
+              <strong>Incidencia vinculada</strong>
+            </div>
+            <div class="fac-create-section-actions">
+              <button
+                type="button"
+                class="fac-create-link-btn"
+                data-factura-create-action="${FACTURA_CREATE_ACTIONS.TICKET_REFRESH}"
+                ${disabled || !clientCount || vm.ticketSearch.loading ? "disabled" : ""}
+                aria-busy="${vm.ticketSearch.loading ? "true" : "false"}"
+              >${vm.ticketSearch.loading ? "Cargando..." : "Recargar"}</button>
+            </div>
+          </div>
+
+          <div data-slot="selected-tickets">${renderSelectedTickets(vm)}</div>
+          <div data-error-slot="incidenciaId">${renderFieldError(errors.incidenciaId)}</div>
+
+          <label class="fac-create-field fac-create-field--search">
+            <span class="fac-create-label">Filtrar incidencias del cliente</span>
+            <span class="fac-create-search-shell">
+              <span aria-hidden="true">${icon("search")}</span>
+              <input
+                class="fac-create-input${errors.incidenciaId ? " is-error" : ""}"
+                data-field="ticketSearch"
+                data-create-field="ticketSearch"
+                name="ticketSearch"
+                type="search"
+                value="${attr(vm.ticketSearch.query)}"
+                placeholder="ID, asunto o estado..."
+                autocomplete="off"
+                spellcheck="false"
+                ${disabled || !clientCount ? "disabled" : ""}
+              >
+            </span>
+          </label>
+
+          <div
+            class="fac-create-search-slot"
+            data-slot="ticket-search-results"
+            aria-live="polite"
+            aria-busy="${vm.ticketSearch.loading ? "true" : "false"}"
+          >${renderTicketSearchResults(vm)}</div>
+        </section>
+
+        <section data-render-key="billing" class="fac-create-section">
+          <div class="fac-create-section-head">
+            <div>
+              <span>Facturación</span>
+              <strong>Conceptos e importes</strong>
+            </div>
+            <div class="fac-create-section-actions">
+              <button type="button" class="fac-create-link-btn fac-create-line-add" data-factura-create-action="${FACTURA_CREATE_ACTIONS.LINE_ADD}" ${disabled ? "disabled" : ""}>${icon("plus")}<span>Añadir concepto</span></button>
+            </div>
+          </div>
+
+          ${renderLineItems(vm, disabled)}
+          ${renderFieldError(errors.lineas)}
+
+          <div class="fac-create-form-grid fac-create-form-grid--meta">
+            ${renderInput({ label: "Fecha de servicio", name: "fechaServicio", value: vm.form.fechaServicio, type: "date", required: true, error: errors.fechaServicio, disabled })}
+            ${renderSelect({ label: "Forma de pago", name: "formaPago", value: vm.form.formaPago, options: PAYMENT_OPTIONS, error: errors.formaPago, disabled })}
+            ${renderSelect({ label: "Estado de pago", name: "estadoPago", value: vm.form.estadoPago, options: PAYMENT_STATUS_OPTIONS, error: errors.estadoPago, disabled })}
+
+            <label class="fac-create-toggle">
+              <span><strong>Enviar por email</strong><small>Enviar la factura al cliente al finalizar.</small></span>
+              <span class="fac-create-toggle-control">
+                <input data-field="sendEmail" name="sendEmail" type="checkbox" ${vm.form.sendEmail ? "checked" : ""} ${disabled ? "disabled" : ""}>
+                <span aria-hidden="true"></span>
+              </span>
+            </label>
+          </div>
+        </section>
+
+        ${renderTotalStrip(vm)}
+
+        <div class="fac-create-actions">
+          <span class="fac-create-actions-note">La factura se creará con el cliente, las incidencias y todas las partidas seleccionadas.</span>
+          <button
+            type="submit"
+            class="fac-create-submit inc-create-submit"
+            data-factura-create-action="${FACTURA_CREATE_ACTIONS.SUBMIT}"
+            ${disabled ? "disabled" : ""}
+            aria-busy="${vm.submitting ? "true" : "false"}"
+          >
+            ${vm.submitting ? renderSpinner("Creando...") : `<span>Crear factura</span>`}
+          </button>
         </div>
-      </div>
-    </section>
-  `;
+      </form>
+    `,
+  });
 }
 
 export function renderFacturasCreateModalClosed() {

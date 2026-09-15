@@ -138,7 +138,7 @@ try {
   });
   await check('new client without a login user loads its incidents and keeps modal/input nodes',async()=>{
     const p=await fresh();await p.evaluate(()=>{
-      window.nodes={root:document.querySelector('.fac-create-root'),overlay:document.querySelector('.fac-create-overlay'),panel:document.querySelector('.fac-create-panel'),form:document.querySelector('form'),client:document.querySelector('[data-field="clienteSearch"]'),ticket:document.querySelector('[data-field="ticketSearch"]'),line:document.querySelector('[data-line-field="concepto"]')};
+      window.nodes={root:document.querySelector('.fac-create-root'),overlay:document.querySelector('[data-facturas-create-modal-overlay="true"]'),panel:document.querySelector('[data-facturas-create-modal-panel="true"]'),form:document.querySelector('form'),client:document.querySelector('[data-field="clienteSearch"]'),ticket:document.querySelector('[data-field="ticketSearch"]'),line:document.querySelector('[data-line-field="concepto"]')};
     });
     await p.locator('[data-line-field="concepto"]').fill('Trabajo en borrador');
     await choose(p,'Nuevo');
@@ -203,14 +203,14 @@ try {
     assert.equal(await p.locator('[data-line-field="concepto"]').inputValue(),'Material');await p.close();
   });
   await check('validation and duplicate submit keep a single modal and immutable selected payload',async()=>{
-    const p=await fresh();await p.evaluate(()=>{window.originalPanel=document.querySelector('.fac-create-panel')});
+    const p=await fresh();await p.evaluate(()=>{window.originalPanel=document.querySelector('[data-facturas-create-modal-panel="true"]')});
     await p.locator(action('submit')).evaluate(n=>n.click());assert.match(await p.locator('[data-error-slot="clienteId"]').innerText(),/Selecciona/);
-    assert.equal(await p.evaluate(()=>originalPanel===document.querySelector('.fac-create-panel')),true);
+    assert.equal(await p.evaluate(()=>originalPanel===document.querySelector('[data-facturas-create-modal-panel="true"]')),true);
     await choose(p,'Nuevo');await p.locator(action('ticket-select')).first().click();
     await p.locator('[data-field="sendEmail"]').uncheck();
     await p.locator(action('submit')).evaluate(n=>n.click());await p.waitForFunction(()=>creates.length===1);
     await p.evaluate(()=>{document.querySelector('form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));document.querySelector('[data-factura-create-action="create-client-remove"]').dispatchEvent(new MouseEvent('click',{bubbles:true}))});
-    const data=await p.evaluate(()=>({count:creates.length,payload:creates[0],panel:originalPanel===document.querySelector('.fac-create-panel'),clients:document.querySelectorAll('[data-slot="selected-clientes"] article').length}));
+    const data=await p.evaluate(()=>({count:creates.length,payload:creates[0],panel:originalPanel===document.querySelector('[data-facturas-create-modal-panel="true"]'),clients:document.querySelectorAll('[data-slot="selected-clientes"] article').length}));
     assert.equal(data.count,1);assert.equal(data.panel,true);assert.equal(data.clients,1);assert.equal(data.payload.clienteId,'CON-NEW');assert.equal(data.payload.ticketId,'INC-NEW');assert.equal(data.payload.sendEmail,false);
     await p.evaluate(()=>createReject(Error('Creacion rechazada de prueba')));await p.waitForFunction(()=>!controller.getSnapshot().creating);
     assert.match(await p.locator('.fac-create-alert').innerText(),/Creacion rechazada/);assert.equal(await p.locator(selected).count(),1);await p.close();
@@ -260,7 +260,7 @@ try {
     const p=await fresh({width:390,height:844});await choose(p,'Nuevo');
     await p.evaluate(()=>{window.bodyNode=document.querySelector('.fac-create-body');bodyNode.scrollTop=180;window.beforeScroll=bodyNode.scrollTop;document.querySelector('[data-factura-create-action="create-ticket-select"]').click()});
     await p.waitForTimeout(30);
-    const geometry=await p.evaluate(()=>({same:bodyNode===document.querySelector('.fac-create-body'),scroll:bodyNode.scrollTop,before:beforeScroll,panel:document.querySelector('.fac-create-panel').getBoundingClientRect().width,viewport:innerWidth}));
+    const geometry=await p.evaluate(()=>({same:bodyNode===document.querySelector('.fac-create-body'),scroll:bodyNode.scrollTop,before:beforeScroll,panel:document.querySelector('[data-facturas-create-modal-panel="true"]').getBoundingClientRect().width,viewport:innerWidth}));
     assert.equal(geometry.same,true);assert.equal(geometry.scroll,geometry.before);assert.ok(geometry.panel<=geometry.viewport);await p.close();
   });
   assert.deepEqual(errors,[],"No uncaught browser errors");

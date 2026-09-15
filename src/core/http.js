@@ -1074,30 +1074,34 @@ function applyAuthPayload(
    AUTH POLICY
 ========================================================= */
 
+/*
+  Códigos de auth que un refresh no puede arreglar. Autoridad: los códigos
+  que emite el backend en config/jwt.js (requireAuth, 401), router/auth/refresh.js
+  y router/auth/login.impl.js. Un 401 con cualquier otro código (TOKEN_EXPIRED,
+  MISSING_TOKEN, SESSION_REQUIRED, TOKEN_VERSION_MISMATCH…) sí se reintenta
+  tras refrescar, porque un token nuevo lo resuelve.
+*/
 const NON_REFRESHABLE_AUTH_CODES =
   new Set([
+    // login
     "INVALID_CREDENTIALS",
-    "BAD_CREDENTIALS",
     "LOGIN_FAILED",
-    "MFA_REQUIRED",
-    "2FA_REQUIRED",
-    "OTP_REQUIRED",
 
-    "SESSION_REVOKED",
+    // sesión persistente inválida, revocada o expirada
     "SESSION_INVALID",
+    "SESSION_REVOKED",
+    "SESSION_EXPIRED",
     "SESSION_NOT_FOUND",
-    "REFRESH_TOKEN_REVOKED",
-    "REFRESH_TOKEN_INVALID",
-    "REFRESH_TOKEN_EXPIRED",
+    "SESSION_USER_MISMATCH",
+    "SESSION_ID_MISMATCH",
+    "SESSION_TOKEN_MISMATCH",
 
+    // estado de cuenta
+    "USER_INVALID",
+    "USER_INACTIVE",
     "USER_DISABLED",
-    "USER_DESACTIVADO",
-    "USUARIO_DESACTIVADO",
-    "USER_DELETED",
-    "USER_ARCHIVED",
-    "USER_BLOCKED",
-    "USER_BANNED",
-    "USER_SUSPENDED",
+    "USER_NOT_FOUND",
+    "USER_EMAIL_UNVERIFIED",
   ]);
 
 function endpointIsPublic(

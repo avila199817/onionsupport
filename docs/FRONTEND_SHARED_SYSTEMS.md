@@ -51,6 +51,12 @@ El backend determina los totales autorizados. `statistics.js` interpreta valores
 
 La caché estándar de Home pertenece a la sesión y al dashboard sin filtros especiales. Las consultas particulares no la sobrescriben. Las peticiones concurrentes de estadísticas de Facturas se separan por sesión, consulta y revisión de escrituras; una respuesta invalidada no se convierte en la nueva cifra visible. Las facetas de Incidencias invalidan también la petición anterior cuando resuelven desde caché o desde una primera página completa.
 
+## Contrato de errores de autenticación
+
+`src/core/http.js` reintenta una petición privada tras refrescar el token cuando recibe un `401`, salvo que el código pertenezca a `NON_REFRESHABLE_AUTH_CODES`. Esa lista es exactamente el catálogo que el backend emite y que un refresh no puede resolver: `INVALID_CREDENTIALS` (login), sesión inválida, revocada, expirada, inexistente o con usuario/id/token que no coinciden (`SESSION_*`) y cuenta no operativa (`USER_INVALID`, `USER_INACTIVE`, `USER_DISABLED`, `USER_NOT_FOUND`, `USER_EMAIL_UNVERIFIED`). La autoridad es el backend (`config/jwt.js`, `router/auth/refresh.js`, `router/auth/login.impl.js`); ambos repositorios pinan la misma lista con un contrato (`tools/auth-error-code-alignment-contract.mjs` aquí, `tools/auth-error-code-catalog-contracts.mjs` en oniontech). Los códigos que un token nuevo sí resuelve (`TOKEN_EXPIRED`, `MISSING_TOKEN`, `SESSION_REQUIRED`, `TOKEN_VERSION_*`) nunca entran en la lista. `PASSWORD_CHANGE_REQUIRED` llega como `403` y no cierra sesión desde `http.js`.
+
+El login trata el bloqueo temporal por intentos fallidos (`423 ACCOUNT_TEMPORARILY_LOCKED`, con `lockUntil`) con un mensaje propio que indica los minutos de espera, en lugar del mensaje genérico de credenciales.
+
 ## Errores corregidos
 
 - En Correo, cambiar de carpeta invalida el lector anterior. Una respuesta tardía de mensajes, estado o buzones no puede escribir sobre otra operación ni después de desmontar la vista, incluso cuando el transporte ignora la cancelación.

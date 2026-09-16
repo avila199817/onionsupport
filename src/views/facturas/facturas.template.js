@@ -20,6 +20,7 @@ import { safeArray } from "../../core/arrays.js";
 import { clamp } from "../../core/numbers.js";
 import { labelKey } from "../../core/slug-key.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
+import { CURRENCY_POLICIES, currencyCode, formatCurrency } from "../../core/format.js";
 
 export const FACTURAS_TEMPLATE_VERSION =
   "facturas.template.private.v7.admin-visual-parity";
@@ -243,30 +244,13 @@ function isAdmin(input = {}) {
    DATE / MONEY
 ========================================================= */
 
-const MONEY_FORMATTERS = new Map();
 const DATE_SHORT = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
 const DATE_TIME = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
   const amount = number(value, NaN);
-  const code = cleanText(currency, DEFAULT_CURRENCY).toUpperCase();
   if (!Number.isFinite(amount)) return "—";
-
-  let formatter = MONEY_FORMATTERS.get(code);
-  if (!formatter) {
-    try {
-      formatter = new Intl.NumberFormat("es-ES", {
-        style: "currency",
-        currency: code,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
-      MONEY_FORMATTERS.set(code, formatter);
-    } catch {
-      return `${amount.toFixed(2).replace(".", ",")} ${code}`;
-    }
-  }
-  return formatter.format(amount);
+  return formatCurrency(amount, currencyCode(currency, DEFAULT_CURRENCY), CURRENCY_POLICIES.standard);
 }
 
 function formatDateShort(value = null) {

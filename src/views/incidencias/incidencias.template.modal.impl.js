@@ -46,6 +46,7 @@ import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
+import { CURRENCY_POLICIES, currencyCode, currencyFormatter } from "../../core/format.js";
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
   "incidencias.template.modal.extreme.v36-owned-attachment-delete-confirm";
@@ -736,7 +737,6 @@ function formatBytes(bytes = 0) {
   ).toFixed(1)} GB`;
 }
 
-const MODAL_MONEY_FORMATTERS = new Map();
 const MODAL_DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", {
   day: "2-digit",
   month: "2-digit",
@@ -746,17 +746,8 @@ const MODAL_DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", {
 });
 
 function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
-  const code = cleanText(currency, DEFAULT_CURRENCY).toUpperCase();
-  let formatter = MODAL_MONEY_FORMATTERS.get(code);
-  if (!formatter) {
-    try {
-      formatter = new Intl.NumberFormat("es-ES", { style: "currency", currency: code, maximumFractionDigits: 2 });
-      MODAL_MONEY_FORMATTERS.set(code, formatter);
-    } catch {
-      return `${number(value, 0).toFixed(2)} €`;
-    }
-  }
-  return formatter.format(number(value, 0));
+  const formatter = currencyFormatter(currencyCode(currency, DEFAULT_CURRENCY), CURRENCY_POLICIES.currencyDigits);
+  return formatter ? formatter.format(number(value, 0)) : `${number(value, 0).toFixed(2)} €`;
 }
 
 function formatDate(value = "") {

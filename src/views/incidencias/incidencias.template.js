@@ -17,6 +17,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { CURRENCY_POLICIES, currencyCode, currencyFormatter, formatDecimal } from "../../core/format.js";
 export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v35-visible-date-minute-precision-linked-invoice-row-total";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
@@ -155,33 +156,16 @@ function icon(name = "") { return ICONS[name] || ICONS.ticket; }
    FORMATTERS
 ========================================================= */
 
-const NUMBER_FORMATTER = new Intl.NumberFormat("es-ES");
 const DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 const TIME_FORMATTER = new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-const MONEY_FORMATTERS = new Map();
-function formatNumber(v = 0) { return NUMBER_FORMATTER.format(num(v, 0)); }
+function formatNumber(v = 0) { return formatDecimal(num(v, 0)); }
 function formatMoney(v = 0, currency = DEFAULT_CURRENCY) {
-  const code = cleanText(currency, DEFAULT_CURRENCY).toUpperCase();
-  let formatter = MONEY_FORMATTERS.get(code);
-  if (!formatter) {
-    try {
-      formatter = new Intl.NumberFormat("es-ES", {
-        style: "currency",
-        currency: code,
-        useGrouping: "always",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
-    } catch {
-      const amount = num(v, 0).toFixed(2).replace(".", ",");
-      const [integer, decimals = "00"] = amount.split(",");
-      const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-      return `${grouped},${decimals} €`;
-    }
-    MONEY_FORMATTERS.set(code, formatter);
-  }
-  return formatter.format(num(v, 0));
+  const formatter = currencyFormatter(currencyCode(currency, DEFAULT_CURRENCY), CURRENCY_POLICIES.grouped);
+  if (formatter) return formatter.format(num(v, 0));
+  const amount = num(v, 0).toFixed(2).replace(".", ",");
+  const [integer, decimals = "00"] = amount.split(",");
+  return `${integer.replace(/\B(?=(\d{3})+(?!\d))/g, ".")},${decimals} €`;
 }
 function formatDate(v = "") {
   const raw = firstNonEmpty(v, "");

@@ -31,6 +31,7 @@ import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { coercedNumber } from "../../core/numbers.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
+import { formatDecimal } from "../../core/format.js";
 
 
 export const USUARIOS_TEMPLATE_VERSION =
@@ -123,11 +124,7 @@ function sessionSortLabel(order = USUARIOS_DEFAULT_SORT_ORDER) {
     : "Inicio sesión ↓";
 }
 function formatNumber(value = 0) {
-  try {
-    return new Intl.NumberFormat("es-ES").format(coercedNumber(value, 0));
-  } catch {
-    return String(coercedNumber(value, 0));
-  }
+  return formatDecimal(coercedNumber(value, 0));
 }
 function formatDateTime(value = null) {
   const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.epoch);

@@ -32,6 +32,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { safeObject, firstNonEmpty } from "../../core/objects.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 import { finiteNumber } from "../../core/numbers.js";
+import { formatDecimal } from "../../core/format.js";
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
   "incidencias-technician-profile.v9-public-metrics-rating-ready";
@@ -168,11 +169,7 @@ function nonNegativeInteger(value = null, fallback = null) {
 }
 
 function numberLabel(value = 0) {
-  try {
-    return new Intl.NumberFormat("es-ES").format(Number(value) || 0);
-  } catch {
-    return String(Number(value) || 0);
-  }
+  return formatDecimal(Number(value) || 0);
 }
 
 function ratingLabel(value = 0) {

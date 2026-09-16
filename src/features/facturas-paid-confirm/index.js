@@ -22,6 +22,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { CURRENCY_POLICIES, currencyCode, formatCurrency } from "../../core/format.js";
 
 export const FACTURAS_PAID_CONFIRM_VERSION =
   "facturas.paid-confirm.v2.verified-resumable";
@@ -62,19 +63,7 @@ function isBrowser() {
 
 function formatMoney(value = 0, currency = "EUR") {
   const amount = Number(value);
-  const safeAmount = Number.isFinite(amount) ? amount : 0;
-  const safeCurrency = cleanText(currency, "EUR").toUpperCase();
-
-  try {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: safeCurrency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(safeAmount);
-  } catch {
-    return `${safeAmount.toFixed(2).replace(".", ",")} ${safeCurrency}`;
-  }
+  return formatCurrency(Number.isFinite(amount) ? amount : 0, currencyCode(currency, "EUR"), CURRENCY_POLICIES.standard);
 }
 
 function facturaId(factura = {}) {

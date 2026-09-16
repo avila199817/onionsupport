@@ -4,6 +4,7 @@ import { isObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { clamp, finiteNumber } from "../../core/numbers.js";
 import { TIMESTAMP_POLICIES, toDate } from "../../core/dates.js";
+import { CURRENCY_POLICIES, currencyCode, formatCurrency, formatDecimal } from "../../core/format.js";
 
 export { isObject, safeArray };
 export { cleanText, escapeHtml };
@@ -105,7 +106,6 @@ const ICON_ALIASES = Object.freeze({
   refresh: "refresh",
 });
 
-const NUMBER_FORMATTER = new Intl.NumberFormat("es-ES");
 const PERCENT_FORMATTER = new Intl.NumberFormat("es-ES", {
   maximumFractionDigits: 0,
 });
@@ -116,8 +116,6 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("es-ES", {
   hour: "2-digit",
   minute: "2-digit",
 });
-const MONEY_FORMATTERS = new Map();
-
 /* =========================================================
    BASICS
 ========================================================= */
@@ -184,11 +182,7 @@ export function hasAmount(value = null) {
 ========================================================= */
 
 export function formatNumber(value = 0) {
-  try {
-    return NUMBER_FORMATTER.format(finiteNumber(value, 0));
-  } catch {
-    return String(finiteNumber(value, 0));
-  }
+  return formatDecimal(finiteNumber(value, 0));
 }
 
 export function formatPercent(value = 0) {
@@ -199,41 +193,8 @@ export function formatPercent(value = 0) {
   }
 }
 
-export function getMoneyFormatter(currency = "EUR") {
-  const code = cleanText(currency, "EUR").toUpperCase();
-
-  if (!MONEY_FORMATTERS.has(code)) {
-    try {
-      MONEY_FORMATTERS.set(
-        code,
-        new Intl.NumberFormat("es-ES", {
-          style: "currency",
-          currency: code,
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })
-      );
-    } catch {
-      MONEY_FORMATTERS.set(code, null);
-    }
-  }
-
-  return { code, formatter: MONEY_FORMATTERS.get(code) };
-}
-
 export function formatMoney(value = 0, currency = "EUR") {
-  const amount = finiteNumber(value, 0);
-  const { code, formatter } = getMoneyFormatter(currency);
-
-  if (formatter) {
-    try {
-      return formatter.format(amount);
-    } catch {
-      // fallback below
-    }
-  }
-
-  return `${amount.toFixed(2).replace(".", ",")} ${code}`;
+  return formatCurrency(finiteNumber(value, 0), currencyCode(currency, "EUR"), CURRENCY_POLICIES.standard);
 }
 
 export function formatDate(value = "") {

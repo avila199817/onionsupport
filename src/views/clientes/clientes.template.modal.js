@@ -8,6 +8,7 @@ import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
+import { CURRENCY_POLICIES, currencyCode, currencyFormatter } from "../../core/format.js";
 /* =========================================================
    Onion Support - Clientes Detail Template
    Archivo: /src/views/clientes/clientes.template.modal.js
@@ -654,40 +655,9 @@ function icon(
    FORMATTERS
 ========================================================= */
 
-function formatMoney(
-  value = 0,
-  currency =
-    DEFAULT_CURRENCY
-) {
-  try {
-    return new Intl.NumberFormat(
-      "es-ES",
-      {
-        style:
-          "currency",
-
-        currency:
-          cleanText(
-            currency,
-            DEFAULT_CURRENCY
-          ).toUpperCase(),
-
-        maximumFractionDigits:
-          2,
-      }
-    ).format(
-      number(
-        value,
-        0
-      )
-    );
-  } catch {
-    return (
-      `${number(value, 0)
-        .toFixed(2)
-        .replace(".", ",")} €`
-    );
-  }
+function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
+  const formatter = currencyFormatter(currencyCode(currency, DEFAULT_CURRENCY), CURRENCY_POLICIES.currencyDigits);
+  return formatter ? formatter.format(number(value, 0)) : `${number(value, 0).toFixed(2).replace(".", ",")} €`;
 }
 
 function formatDate(

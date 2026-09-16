@@ -21,7 +21,7 @@ import { safeArray } from "../../core/arrays.js";
 export const INCIDENCIAS_DETAIL_INTEGRITY_VERSION =
   "incidencias.detail-integrity.authoritative.v1";
 
-export const INCIDENCIAS_DETAIL_INTEGRITY_RETRY_DELAYS_MS =
+const INCIDENCIAS_DETAIL_INTEGRITY_RETRY_DELAYS_MS =
   Object.freeze([0, 180, 650, 1600]);
 
 function finite(value = null) {

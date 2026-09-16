@@ -140,10 +140,6 @@ export function normalizeIncidenciaCategory(value = "", fallback = "") {
   return normalizeWith(CATEGORY_ALIASES, value, fallback);
 }
 
-export function incidenciaOptionLabel(options = [], value = "", fallback = "") {
-  return options.find((item) => item.value === value)?.label || fallback;
-}
-
 export default Object.freeze({
   status: INCIDENCIA_STATUS_OPTIONS,
   priority: INCIDENCIA_PRIORITY_OPTIONS,

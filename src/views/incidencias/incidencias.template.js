@@ -47,7 +47,7 @@ const FILTERS = Object.freeze([
   { key: "urgent", label: "Urgentes" },
 ]);
 
-export const INCIDENCIAS_TABLE_COLUMNS = Object.freeze([
+const INCIDENCIAS_TABLE_COLUMNS = Object.freeze([
   { key: "main", label: "Incidencia", colClass: "incidencias-col--main", thClass: "incidencias-th incidencias-th--main", cellClass: "incidencias-cell incidencias-cell--main" },
   { key: "status", label: "Estado", colClass: "incidencias-col--status", thClass: "incidencias-th incidencias-th--status", cellClass: "incidencias-cell incidencias-cell--status" },
   { key: "created", label: "Creada", colClass: "incidencias-col--created", thClass: "incidencias-th incidencias-th--created", cellClass: "incidencias-cell incidencias-cell--date incidencias-cell--created" },

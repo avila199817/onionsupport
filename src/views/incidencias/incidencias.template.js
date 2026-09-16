@@ -852,22 +852,22 @@ function renderHeader(vm = {}) {
       </div>
       <div class="incidencias-stats" aria-label="Accesos rápidos del historial">
         <button type="button" class="incidencias-stat-card incidencias-stat-card--open${vm.filter === "open" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="open" data-stat-scope="${facetsLoaded ? "loaded" : "complete"}" aria-pressed="${vm.filter === "open" ? "true" : "false"}" aria-label="Mostrar solo incidencias abiertas">
-          <div class="incidencias-stat-label">${facetsLoaded ? "Abiertas cargadas" : "Abiertas"}</div>
+          <div class="incidencias-stat-label">Abiertas</div>
           <div class="incidencias-stat-value">${escapeHtml(formatNumber(s.open))}</div>
           <div class="incidencias-stat-text">${facetsLoaded ? "Solicitudes activas entre las incidencias ya cargadas." : "Solicitudes activas, pendientes o en proceso."}</div>
         </button>
         <button type="button" class="incidencias-stat-card incidencias-stat-card--closed${vm.filter === "closed" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="closed" data-stat-scope="${facetsLoaded ? "loaded" : "complete"}" aria-pressed="${vm.filter === "closed" ? "true" : "false"}" aria-label="Mostrar solo incidencias cerradas">
-          <div class="incidencias-stat-label">${facetsLoaded ? "Cerradas cargadas" : "Cerradas"}</div>
+          <div class="incidencias-stat-label">Cerradas</div>
           <div class="incidencias-stat-value">${escapeHtml(formatNumber(s.closed))}</div>
           <div class="incidencias-stat-text">${facetsLoaded ? "Casos cerrados entre las incidencias ya cargadas." : "Casos resueltos o cerrados."}</div>
         </button>
         <button type="button" class="incidencias-stat-card incidencias-stat-card--urgent${vm.filter === "urgent" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="urgent" data-stat-scope="${facetsLoaded ? "loaded" : "complete"}" aria-pressed="${vm.filter === "urgent" ? "true" : "false"}" aria-label="Mostrar solo incidencias urgentes o críticas">
-          <div class="incidencias-stat-label">${facetsLoaded ? "Urgentes cargadas" : "Urgentes"}</div>
+          <div class="incidencias-stat-label">Urgentes</div>
           <div class="incidencias-stat-value">${escapeHtml(formatNumber(s.urgent))}</div>
           <div class="incidencias-stat-text">${facetsLoaded ? "Prioridades altas entre las incidencias ya cargadas." : "Incidencias con prioridad alta."}</div>
         </button>
         <button type="button" class="incidencias-stat-card incidencias-stat-card--amount${vm.sortMode === "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="amount" data-stat-scope="${vm.statsPartial ? "loaded" : "complete"}" aria-pressed="${vm.sortMode === "amount" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por importe disponible al completar el historial" : vm.sortMode === "amount" ? `Cambiar orden de importe a ${vm.sortOrder === "desc" ? "menor a mayor" : "mayor a menor"}` : "Ordenar incidencias por importe asociado de mayor a menor"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por importe"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>
-          <div class="incidencias-stat-label">${vm.statsPartial ? "Importe cargado" : "Importe asociado"}</div>
+          <div class="incidencias-stat-label">Importe</div>
           <div class="incidencias-stat-value">${escapeHtml(formatMoney(s.invoiceTotal, DEFAULT_CURRENCY))}</div>
           <div class="incidencias-stat-text">${vm.statsPartial ? "Suma asociada únicamente a las incidencias ya cargadas." : "Ordenar incidencias de mayor a menor importe."}</div>
         </button>

@@ -1,5 +1,5 @@
 import { getIncidenciaEntityId } from "../../core/entity-identity.js";
-import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
+import { createModalLifecycle, modalStackProtects, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support - Incidencias Index
    Archivo: /src/views/incidencias/index.js
@@ -1835,6 +1835,11 @@ export function createIncidenciasController(
           []
         )
       ) {
+        /* The modal stack owns isolation ON A PANEL IT IS HOLDING; a template render knows
+           nothing about the layer above it and must not take it off. Anywhere else these are
+           ordinary content attributes and are synced normally. */
+        if (modalStackProtects(target, attribute.name)) continue;
+
         if (
           !source.hasAttribute(
             attribute.name
@@ -1853,6 +1858,8 @@ export function createIncidenciasController(
           []
         )
       ) {
+        if (modalStackProtects(target, attribute.name)) continue;
+
         if (
           target.getAttribute(
             attribute.name

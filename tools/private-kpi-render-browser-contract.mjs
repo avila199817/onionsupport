@@ -20,13 +20,18 @@ if (!facturasOnly) {
     assert.ok(to > from, `Controller end boundary: ${end}`);
     return source.slice(from, to);
   };
-  // cleanText and firstNonEmpty are no longer controller helpers: the closure
-  // binds the same canonical imports the controller does.
+  // cleanText, firstNonEmpty and modalStackProtects are not controller helpers: the
+  // closure binds the same canonical imports the controller does, so every one of
+  // them must be declared here too. A free variable inside the extracted slice is a
+  // ReferenceError the controller's own try/catch swallows, which shows up as a patch
+  // that silently fails rather than as a browser error.
   assert.match(source, /^import \{ cleanText \} from "\.\.\/\.\.\/core\/presentation-text\.js";$/m, "Controller imports the canonical cleanText");
   assert.match(source, /^import \{[^}]*\bfirstNonEmpty\b[^}]*\} from "\.\.\/\.\.\/core\/objects\.js";$/m, "Controller imports the canonical firstNonEmpty");
+  assert.match(source, /^import \{[^}]*\bmodalStackProtects\b[^}]*\} from "\.\.\/\.\.\/features\/entity-overlay\/modal-lifecycle\.js";$/m, "Controller imports the canonical modal-stack attribute authority");
   const helpers = [
     'import { cleanText } from "/src/core/presentation-text.js";',
     'import { firstNonEmpty } from "/src/core/objects.js";',
+    'import { modalStackProtects } from "/src/features/entity-overlay/modal-lifecycle.js";',
     extract("function isBrowser()", "function isDomNode("),
   ].join("\n");
   const patch = extract("  function activeElementInside(", "  function syncCreateAlerts(");

@@ -1,4 +1,4 @@
-import { createModalLifecycle, modalFocusableElements, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
+import { createModalLifecycle, holdModalPanel, liveModalOpener, modalFocusableElements, releaseModalPanel, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 import { MODAL_SHELL_SELECTORS, renderModalShell } from "../entity-overlay/modal-host.js";
 import { cleanText } from "../../core/presentation-text.js";
 /* =========================================================
@@ -460,7 +460,14 @@ function finalizeReturnToTicket(
       ? resolveOpener(session, root)
       : null;
 
-    restoreModalFocus(opener);
+    /* An attachment card rebuilt while the viewer covered it would leave a detached opener;
+       the same stack rule finds the live control instead of dropping focus on the body. */
+    restoreModalFocus(
+      liveModalOpener(opener, {
+        within: root?.querySelector?.(PANEL) || null,
+        identity: ["data-attachment-id", "id"],
+      }) || opener
+    );
 
     restoreSessionScroll(session);
 
@@ -489,47 +496,32 @@ function finalizeReturnToTicket(
   return true;
 }
 
+/* The viewer keeps focus inside its own layer with the shared helper; it never installs a
+   focus manager of its own. */
+function focusViewerElement(target = null) {
+  if (!target?.isConnected) return false;
+
+  try {
+    if (!target.hasAttribute("tabindex") && !modalFocusableElements(target.parentElement || target).includes(target)) {
+      target.setAttribute("tabindex", "-1");
+    }
+    target.focus({ preventScroll: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function setPanelInert(root = null, inert = true) {
   const panel = root?.querySelector?.(PANEL);
   if (!panel) return false;
 
-  if (inert) {
-    if (!panel.dataset.viewerPreviousAriaHidden) {
-      panel.dataset.viewerPreviousAriaHidden =
-        panel.getAttribute("aria-hidden") ?? "__missing__";
-    }
-
-    panel.setAttribute("aria-hidden", "true");
-
-    try {
-      panel.inert = true;
-    } catch {
-      panel.setAttribute("inert", "");
-    }
-
-    panel.dataset.mediaViewerBackground = "true";
-    return true;
-  }
-
-  const previous = panel.dataset.viewerPreviousAriaHidden;
-
-  try {
-    panel.inert = false;
-  } catch {
-    panel.removeAttribute("inert");
-  }
-
-  panel.removeAttribute("inert");
-  panel.dataset.mediaViewerBackground = "false";
-
-  if (previous === "__missing__" || !previous) {
-    panel.removeAttribute("aria-hidden");
-  } else {
-    panel.setAttribute("aria-hidden", previous);
-  }
-
-  delete panel.dataset.viewerPreviousAriaHidden;
-  return true;
+  /* The stack's hold and release live in ONE authority (modal-lifecycle.js), shared with
+     every other layer that covers a panel. The viewer only says which panel it covers and
+     which layer must stay reachable. */
+  return inert
+    ? holdModalPanel(panel, { activeLayer: activeViewer?.root === root ? activeViewer.layer : null })
+    : releaseModalPanel(panel);
 }
 
 function clearCloseTimer() {
@@ -780,6 +772,25 @@ function adoptPreview(root = null, preview = null) {
 
   preview.classList.add("incidencias-modal-preview--viewer");
   preview.dataset.viewerOwned = "true";
+
+  /* Changing file is a content change of THIS layer, not a close and reopen. The element
+     holding focus usually lives inside the preview about to be removed, and removing a
+     focused node drops focus to the body -- the owner underneath becomes the focused
+     context for a frame. So focus is handed, before the swap, to a control of the viewer
+     that survives it: the navigation control the reader is operating when it is still
+     usable, otherwise the panel itself. Nothing is focused after the swap, so a reader
+     using the arrows is never interrupted. */
+  const holder = stage.ownerDocument?.activeElement || null;
+
+  if (holder && stage.contains(holder)) {
+    const survivor =
+      panel.querySelector(
+        "[data-media-gallery-action]:not([disabled])"
+      ) || panel;
+
+    focusViewerElement(survivor);
+  }
+
   stage.replaceChildren(preview);
 
   activeViewer = { root, layer, panel, stage, preview, opener };

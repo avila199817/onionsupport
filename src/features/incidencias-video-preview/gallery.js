@@ -469,6 +469,65 @@ function ensureControls(preview = currentPreview()) {
   return { previous, next, counter };
 }
 
+/* The control that was holding focus when it had to be disabled, so it can be given back
+   exactly that one and nothing else. Scoped to the viewer; there is no focus manager here. */
+let parkedControl = null;
+
+function viewerPanelOf(control = null) {
+  return control?.closest?.("[data-modal-panel='true']") || null;
+}
+
+function parkFocusBeforeDisable(controls = null, holder = null, disabling = {}) {
+  if (!holder) return false;
+
+  const losing =
+    (disabling.previous && holder === controls?.previous) ||
+    (disabling.next && holder === controls?.next);
+
+  if (!losing) return false;
+
+  const panel = viewerPanelOf(holder);
+  if (!panel?.isConnected) return false;
+
+  parkedControl = holder;
+
+  try {
+    panel.focus({ preventScroll: true });
+  } catch {
+    parkedControl = null;
+    return false;
+  }
+
+  return true;
+}
+
+function returnParkedFocus(controls = null) {
+  if (!parkedControl?.isConnected || parkedControl.disabled) return false;
+  if (parkedControl !== controls?.previous && parkedControl !== controls?.next) {
+    parkedControl = null;
+    return false;
+  }
+
+  const panel = viewerPanelOf(parkedControl);
+  const active = parkedControl.ownerDocument?.activeElement;
+
+  /* Only if the reader has not moved focus themselves in the meantime. */
+  if (active !== panel) {
+    parkedControl = null;
+    return false;
+  }
+
+  const control = parkedControl;
+  parkedControl = null;
+
+  try {
+    control.focus({ preventScroll: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function syncControls(
   root = currentRoot(),
   viewer = currentViewer(root),
@@ -501,8 +560,25 @@ function syncControls(
   const previousItem = items[index - 1] || null;
   const nextItem = items[index + 1] || null;
 
-  controls.previous.disabled = navigating || !previousItem;
-  controls.next.disabled = navigating || !nextItem;
+  /* Navigating disables both arrows for the moment the swap takes, and disabling the button
+     that HOLDS focus is what dropped focus to the body: the covered incidencia became the
+     focused context for a few frames on every file change. The control keeps its disabled
+     affordance -- it really is unusable meanwhile -- but focus is handed to the viewer's own
+     panel first and handed back to the same control the moment it is usable again, so the
+     reader never leaves the layer and is not interrupted. */
+  const focusHolder = controls.previous.ownerDocument?.activeElement || null;
+  const nextPreviousDisabled = navigating || !previousItem;
+  const nextNextDisabled = navigating || !nextItem;
+
+  parkFocusBeforeDisable(controls, focusHolder, {
+    previous: nextPreviousDisabled,
+    next: nextNextDisabled,
+  });
+
+  controls.previous.disabled = nextPreviousDisabled;
+  controls.next.disabled = nextNextDisabled;
+
+  returnParkedFocus(controls);
   controls.previous.setAttribute(
     "aria-label",
     previousItem?.name

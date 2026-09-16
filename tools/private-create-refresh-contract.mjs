@@ -38,9 +38,13 @@ const noop = () => {};
 const defaults = () => ({ subject: "Fixture", targetUserId: "U1", attachments: [] });
 
 function incidentFixture() {
-  const gate = Promise.withResolvers(), reads = [];
+  const gate = Promise.withResolvers(), reads = [], detailReads = [];
   const context = vm.createContext({
     domainRefreshPending: false, destroyed: false, mounted: true, detailOnly: false,
+    // El detalle abierto es un consumidor más de la invalidación de dominio: la lista se
+    // aplaza mientras hay un modal delante, pero el modal relee su propio endpoint.
+    detailModal: { open: false, submitting: false },
+    refreshDetail: (options) => { detailReads.push(options); return Promise.resolve(); },
     creating: false, createModal: { open: true, submitting: false, form: defaults() },
     userSearchSeq: 0, items: [], total: 0, entityOverlay: null, host: null,
     safeObject, isAdmin: () => true, getCreateDefaults: defaults, dedupeFiles: (value) => value,
@@ -60,7 +64,7 @@ function incidentFixture() {
     `globalThis.submit = submitCreate; globalThis.close = closeCreateModal; globalThis.changed = ${listener(incidencias)};`,
   ].join("\n");
   vm.runInContext(source, context);
-  return { context, gate, reads };
+  return { context, gate, reads, detailReads };
 }
 
 function clientFixture() {
@@ -169,4 +173,30 @@ for (const name of ["incidencias", "clientes"]) {
     scenarios++;
   }
 }
-console.log(`Private create refresh: PASS · ${scenarios} production submit/cancel paths · pending user changes · one refresh after close · incident facets included`);
+/* UN CAMBIO CONFIRMADO LLEGA AL DETALLE ABIERTO, Y SÓLO SI HAY UNO.
+ *
+ * La lista se aplaza a propósito mientras hay una capa delante; esa misma puerta dejaba al
+ * modal sin enterarse de una fotografía de perfil ya confirmada. Aquí se prueban las dos
+ * caras: sin detalle abierto no se pide nada, y con detalle abierto se relee su endpoint
+ * autoritativo (forzado y silencioso) sin desaplazar la lista. */
+{
+  const fixture = incidentFixture();
+  fixture.context.changed("usuarios");
+  assert.equal(fixture.detailReads.length, 0, "incidencias: sin detalle abierto no se relee ningún detalle");
+
+  fixture.context.detailModal.open = true;
+  fixture.context.changed("usuarios");
+  assert.equal(fixture.detailReads.length, 1, "incidencias: el detalle abierto relee una vez por cambio confirmado");
+  assert.equal(fixture.detailReads[0].force, true, "incidencias: la relectura del detalle es autoritativa");
+  assert.equal(fixture.detailReads[0].silent, true, "incidencias: la relectura del detalle no interrumpe la lectura en curso");
+  assert.equal(fixture.reads.length, 0, "incidencias: la lista sigue aplazada mientras hay una capa delante");
+
+  fixture.context.changed("facturas");
+  assert.equal(fixture.detailReads.length, 1, "incidencias: un dominio ajeno no relee el detalle");
+
+  fixture.context.destroyed = true;
+  fixture.context.changed("usuarios");
+  assert.equal(fixture.detailReads.length, 1, "incidencias: una vista destruida no relee nada");
+  scenarios++;
+}
+console.log(`Private create refresh: PASS · ${scenarios} production submit/cancel paths · pending user changes · one refresh after close · incident facets included · open detail re-read`);

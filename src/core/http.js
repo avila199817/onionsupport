@@ -34,7 +34,7 @@ import {
 import { cleanText, normalizeKey, codeKey } from "./presentation-text.js";
 import { isObject, isFunction, firstNonBlank } from "./objects.js";
 import { nowIso } from "./clock.js";
-import { SENSITIVE_QUERY_KEYS, redactUrl } from "./redact.js";
+import { SENSITIVE_QUERY_KEYS, redactSecrets, redactUrl } from "./redact.js";
 
 export const HTTP_VERSION =
   "core.http.refresh.blob.v9-runtime-state-port";
@@ -146,7 +146,7 @@ function sanitizeData(
   if (
     type === "string"
   ) {
-    return redactUrl(value).slice(
+    return redactSecrets(value).slice(
       0,
       1200
     );
@@ -2356,7 +2356,7 @@ function setLastErrorStat(
       normalized.status,
 
     message:
-      redactUrl(normalized.message),
+      redactSecrets(cleanText(normalized.message, "")),
 
     endpoint:
       redactUrl(endpoint),
@@ -2686,7 +2686,7 @@ async function runRefresh(
             null,
 
           message:
-            redactUrl(error?.message || "No se pudo renovar la sesión."),
+            redactSecrets(cleanText(error?.message || "No se pudo renovar la sesión.", "")),
 
           at:
             nowIso(),

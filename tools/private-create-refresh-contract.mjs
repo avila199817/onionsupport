@@ -34,7 +34,8 @@ function incidentFixture() {
     readCreateForm: noop, validateCreateForm: () => ({ valid: true, errors: {} }),
     renderModals: noop, render: noop, restoreModalReturnFocus: noop,
     clearUserSearchTimer: noop, syncInfiniteObserver: noop, queueMicrotask,
-    safeError: (error) => error.message, upsertByTicketId: (items, item) => [...items, item],
+    // message extractor stubs: the local safeError until the error message authority, errorMessage + its orders after it
+    safeError: (error) => error.message, errorMessage: (error, fallback) => error?.message || fallback, ERROR_MESSAGE_POLICIES: { messageFirst: "messageFirst", payloadFirst: "payloadFirst" }, upsertByTicketId: (items, item) => [...items, item],
     load: (query) => { reads.push(query); return Promise.resolve(); },
     createIncidencia: async () => { const created = await gate.promise; context.changed("incidencias"); return created; },
   });
@@ -56,7 +57,7 @@ function clientFixture() {
     detailOnly: false, destroyed: false, creating: false, domainDirty: false, createController: null, context: {},
     alive: () => !parent.destroyed, originModalIsOpen: () => false,
     getCurrentRole: () => "admin", getCurrentUser: () => ({ userId: "U1" }), isAdmin: () => true,
-    showToast: noop, emitEvent: noop, scheduleRender: noop, safeError: (error) => error.message,
+    showToast: noop, emitEvent: noop, scheduleRender: noop, safeError: (error) => error.message, errorMessage: (error, fallback) => error?.message || fallback, ERROR_MESSAGE_POLICIES: { messageFirst: "messageFirst", payloadFirst: "payloadFirst" },
     refresh: () => { reads.push("clientes"); return Promise.resolve(); },
     createClientesCreateController: (callbacks) => {
       child = vm.createContext({
@@ -69,7 +70,7 @@ function clientFixture() {
         validateCreateForm: () => ({ valid: true, errors: {}, payload: {} }),
         scheduleRender: noop, renderNow: noop, removeModalHost: noop,
         modalLifecycle: { activate: noop, deactivate: noop },
-        safeError: (error) => error.message, normalizeClienteModel: (value) => value,
+        safeError: (error) => error.message, errorMessage: (error, fallback) => error?.message || fallback, ERROR_MESSAGE_POLICIES: { messageFirst: "messageFirst", payloadFirst: "payloadFirst" }, normalizeClienteModel: (value) => value,
         createClienteRequest: async () => { const created = await gate.promise; parent.changed("clientes"); return created; },
         loadClienteDetailRequest: async () => ({ clienteId: "C1" }),
       });

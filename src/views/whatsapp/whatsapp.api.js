@@ -14,6 +14,7 @@ import Http from "../../core/http.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { errorStatus } from "../../core/errors.js";
 
 export const WHATSAPP_API_VERSION =
   "whatsapp.api.v1.onion-backend-authority";
@@ -95,12 +96,7 @@ function requestError(error = null, fallback = "No se pudo comunicar con WhatsAp
     "WHATSAPP_REQUEST_FAILED",
     120
   );
-  output.status = Number(
-    error?.status ||
-      error?.statusCode ||
-      error?.response?.status ||
-      0
-  ) || 0;
+  output.status = errorStatus(error, 0);
   return output;
 }
 

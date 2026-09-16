@@ -24,6 +24,7 @@ import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { nowIso } from "../../core/clock.js";
 import { redactSecrets } from "../../core/redact.js";
+import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage, errorStatus } from "../../core/errors.js";
 
 export const FACTURAS_API_VERSION =
   "facturas.api.production.v9.continuous-list-snapshot";
@@ -1683,10 +1684,10 @@ export function computeFacturasStats(items = lastList.items) {
 
 function normalizeError(error = null) {
   return {
-    message: redactSecrets(error?.message || "No se pudieron cargar las facturas."),
-    status: error?.status || error?.statusCode || error?.response?.status || null,
-    code: error?.code || error?.error || null,
-    at: nowIso()
+    message: errorMessage(error, "No se pudieron cargar las facturas.", ERROR_MESSAGE_POLICIES.messageFirst),
+    status: errorStatus(error, null),
+    code: errorCode(error) || null,
+    at: nowIso(),
   };
 }
 

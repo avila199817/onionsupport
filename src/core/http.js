@@ -35,6 +35,7 @@ import { cleanText, normalizeKey, codeKey } from "./presentation-text.js";
 import { isObject, isFunction, firstNonBlank } from "./objects.js";
 import { nowIso } from "./clock.js";
 import { SENSITIVE_QUERY_KEYS, redactSecrets, redactUrl } from "./redact.js";
+import { errorCode, errorStatus } from "../core/errors.js";
 
 export const HTTP_VERSION =
   "core.http.refresh.blob.v9-runtime-state-port";
@@ -1016,11 +1017,7 @@ export function isAuthError(
   error = null
 ) {
   const status =
-    Number(
-      error?.status ||
-      error?.statusCode ||
-      0
-    );
+    errorStatus(error, 0);
 
   return (
     status === 401 ||
@@ -1032,19 +1029,10 @@ export function shouldClearSessionForAuthError(
   error = null
 ) {
   const status =
-    Number(
-      error?.status ||
-      error?.statusCode ||
-      0
-    );
+    errorStatus(error, 0);
 
   const code =
-    codeKey(
-      error?.code ||
-      error?.payload?.code ||
-      error?.payload?.error ||
-      ""
-    );
+    errorCode(error);
 
   if (
     isRefreshEndpoint(
@@ -1070,19 +1058,10 @@ export function isRefreshableAuthError(
   error = null
 ) {
   const status =
-    Number(
-      error?.status ||
-      error?.statusCode ||
-      0
-    );
+    errorStatus(error, 0);
 
   const code =
-    codeKey(
-      error?.code ||
-      error?.payload?.code ||
-      error?.payload?.error ||
-      ""
-    );
+    errorCode(error);
 
   if (
     status !== 401
@@ -2680,10 +2659,7 @@ async function runRefresh(
             error?.code ||
             "REFRESH_FAILED",
 
-          status:
-            error?.status ||
-            error?.statusCode ||
-            null,
+          status: errorStatus(error, null),
 
           message:
             redactSecrets(cleanText(error?.message || "No se pudo renovar la sesión.", "")),

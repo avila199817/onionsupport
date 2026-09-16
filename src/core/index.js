@@ -25,6 +25,7 @@ import { userNameFromIdentity } from "./user-identity.js";
 import { cleanText, normalizeKey } from "./presentation-text.js";
 import { isObject, isFunction, firstNonBlank } from "./objects.js";
 import { SENSITIVE_QUERY_KEYS, redactSecrets, redactTokenPaths, redactUrl } from "./redact.js";
+import { describeError } from "../core/errors.js";
 
 export const CORE_VERSION = "core.minimal.v9-specialized-snapshot";
 const RUNTIME_STATE_VERSION = "core.runtime-state.v2-dirty-guard";
@@ -126,14 +127,6 @@ function mutate(mutator = null, options = {}) {
   return changed;
 }
 
-function safeError(error = null) {
-  if (!error) return null;
-  return {
-    name: cleanText(error?.name, "Error"), message: redactSecrets(cleanText(error?.message || String(error), "")),
-    status: error?.status || error?.statusCode || error?.response?.status || null,
-    code: cleanText(error?.code || error?.error || "", "") || null,
-  };
-}
 function sanitizeObject(value, depth = 0) {
   if (depth > 6) return null;
   if (value === null || value === undefined) return value;
@@ -356,7 +349,7 @@ function normalizeSessionContext(value = null, user = null) {
 function sanitizePatchValue(key = "", value = null) {
   const normalizedKey = normalizeKey(key);
   if (SENSITIVE_STATE_KEYS.has(normalizedKey)) return undefined;
-  if (normalizedKey === "error" || normalizedKey === "lasterror") return safeError(value);
+  if (normalizedKey === "error" || normalizedKey === "lasterror") return describeError(value);
   if (normalizedKey === "route" || normalizedKey === "publicpath") return normalizePublicPath(value);
   if (normalizedKey === "canonicalpath") return normalizeCanonicalPath(value);
   if (normalizedKey === "routeparams") { const safe = sanitizeObject(isObject(value) ? value : {}); return isObject(safe) ? safe : {}; }
@@ -523,7 +516,7 @@ function setTheme() { if (state.theme !== "system") { state.theme = "system"; to
 function setLang() { const changed = state.lang !== "es" || state.locale !== "es-ES"; state.lang = "es"; state.locale = "es-ES"; if (changed) touch(); return getState(); }
 function setSidebarOpen(value = false) { const next = value === true; if (state.sidebarOpen !== next) { state.sidebarOpen = next; touch(); } return getState(); }
 function setLoading(value = false) { const next = value === true; if (state.loading !== next) { state.loading = next; touch(); } return getState(); }
-function setError(error = null) { state.error = safeError(error); touch(); return getState(); }
+function setError(error = null) { state.error = describeError(error); touch(); return getState(); }
 
 function isAuthenticated() { return getRuntimeState().authenticated === true; }
 function getCurrentUser() { const current = getRuntimeState(); return current.hasUser ? cloneCanonicalUser(current.user) : null; }
@@ -592,7 +585,7 @@ async function init() {
   try {
     installHttpBridge(Http); state.initialized = true; state.booting = false; state.loading = false; state.ready = true; touch(); captureAuthInputs(); return AppCore;
   } catch (error) {
-    state.booting = false; state.loading = false; state.ready = false; state.error = safeError(error); touch(); throw error;
+    state.booting = false; state.loading = false; state.ready = false; state.error = describeError(error); touch(); throw error;
   }
 }
 function snapshotUser(user = null) { const safe = publicUser(user); return safe ? { ...safe, avatarUrl: safe.avatarUrl ? "***" : "" } : null; }
@@ -622,7 +615,7 @@ export const AppCore = {
   installHttpBridge, setHttpClient, getHttpClient, getActiveRequest, getActiveApiClient, request,
   normalizeRole, normalizeUser, normalizeSlug, extractUserSlug, buildUserHomePath, publicUser, isUsableUser,
   normalizeSessionContext, normalizePublicPath, normalizeCanonicalPath, getUserScopedRouteInfo, safeInternalPath,
-  utils: { cleanText, text: cleanText, clone, safeError, isObject, isFunction },
+  utils: { cleanText, text: cleanText, clone, isObject, isFunction },
   getSnapshot, getDebugSnapshot: getSnapshot, snapshot: getSnapshot,
 };
 

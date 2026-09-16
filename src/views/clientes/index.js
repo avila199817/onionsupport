@@ -32,7 +32,7 @@ import {
 import { createClientesCreateController } from "./clientes.create-controller.js";
 import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
-import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage } from "../../core/errors.js";
 
 export const CLIENTES_MODULE_NAME = "clientes";
 export const CLIENTES_VIEW_NAME = "ClientesView";
@@ -70,21 +70,6 @@ function number(value = 0, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-
-function errorCode(error = null) {
-  return cleanText(
-    firstNonBlank(
-      error?.code,
-      error?.data?.code,
-      error?.payload?.code,
-      error?.response?.data?.code,
-      error?.response?.code,
-      error?.error,
-      ""
-    ),
-    ""
-  ).toUpperCase();
-}
 
 function isAbortError(error = null) {
   return (

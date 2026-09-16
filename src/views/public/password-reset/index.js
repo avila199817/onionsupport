@@ -41,6 +41,7 @@ import {
 import createPasswordResetTemplate from "./template.js";
 import { cleanText } from "../../../core/presentation-text.js";
 import { isObject, isFunction } from "../../../core/objects.js";
+import { errorCode, errorStatus } from "../../../core/errors.js";
 
 export const PASSWORD_RESET_VIEW_VERSION =
   "password-reset.view.public.controller.v3-production";
@@ -1657,24 +1658,9 @@ function applyErrors(
    ERROR NORMALIZATION
 ========================================================= */
 
-function errorCode(
-  error = null
-) {
-  return cleanText(
-    error?.code ||
-      error?.error ||
-      error?.payload?.code ||
-      error?.payload?.error ||
-      error?.data?.code ||
-      error?.data?.error ||
-      "",
-    ""
-  ).toUpperCase();
-}
-
 function tokenIsUnavailable(error = null) {
   const code = errorCode(error);
-  const status = Number(error?.status || error?.statusCode || error?.response?.status || 0);
+  const status = errorStatus(error, 0);
   return status === 401 || status === 410 ||
     /^(?:RESET_)?TOKEN_(?:EXPIRED|INVALID|INVALID_OR_EXPIRED|ALREADY_USED)$/.test(code);
 }
@@ -1685,13 +1671,7 @@ function authErrorMessage(
     "No se pudo completar la operación."
 ) {
   const status =
-    Number(
-      error?.status ||
-        error?.statusCode ||
-        error?.response
-          ?.status ||
-        0
-    );
+    errorStatus(error, 0);
 
   const code =
     errorCode(error);

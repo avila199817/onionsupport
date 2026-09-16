@@ -31,6 +31,7 @@ import {
 import { cleanText } from "../core/presentation-text.js";
 import { isObject, isFunction } from "../core/objects.js";
 import { redactSecrets } from "../core/redact.js";
+import { describeError } from "../core/errors.js";
 
 export const APP_VERSION =
   "app.minimal.v9-public-session-handoff";
@@ -252,40 +253,6 @@ function isPublicHomeFastPath(
       rawInitialPath
     ) === PUBLIC_HOME_PATH
   );
-}
-
-function safeError(
-  error = null
-) {
-  if (!error) {
-    return null;
-  }
-
-  return {
-    name:
-      cleanText(
-        error?.name,
-        "Error"
-      ),
-
-    message:
-      redactSecrets(cleanText(error?.message || String(error), "")),
-
-    status:
-      error?.status ||
-      error?.statusCode ||
-      error?.response?.status ||
-      null,
-
-    code:
-      cleanText(
-        error?.code ||
-        error?.error ||
-        "",
-        ""
-      ) ||
-      null,
-  };
 }
 
 /* =========================================================
@@ -526,7 +493,7 @@ async function call(
         methodName,
       value: null,
       error:
-        safeError(
+        describeError(
           error
         ),
     };
@@ -770,7 +737,7 @@ function hydratePublicHomeInBackground(
       try {
         console.error(
           "[Onion App] Hidratación pública no crítica:",
-          safeError(error)
+          describeError(error)
         );
       } catch {
         // noop
@@ -929,7 +896,7 @@ function markFailed(
 ) {
   ready = false;
   lastError =
-    safeError(
+    describeError(
       error
     );
 

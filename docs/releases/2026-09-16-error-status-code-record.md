@@ -1,0 +1,27 @@
+# Estado, código y registro estructurado de un error en la misma autoridad · 2026-09-16
+
+## Qué cambia
+
+- `src/core/errors.js` añade a `errorMessage` los otros tres extractores técnicos:
+  - `errorStatus(error, fallback = 0)`: el primer candidato (`status`, `statusCode`, `response.status`, `response.statusCode`, `data.status`, `payload.status`) que es un número finito mayor que cero; `0`, `NaN` y texto no son estado, exactamente lo que los `||` de las copias ya saltaban.
+  - `errorCode(error, fallback = "")`: el primer candidato (`code`, el `error` textual del sobre, `data.code`, `data.error`, `payload.code`, `payload.error`, `response.data.code`, `response.code`) como clave de código canónica (`codeKey`: separadores a `_`, mayúsculas, la forma que `core/http.js` da a todo código); un objeto no es código.
+  - `describeError(error)`: el registro estructurado del kernel (`name`, mensaje a una línea y redactado, estado numérico, código canónico); `null` sin error.
+- Copias retiradas: cuatro funciones de estado (`errorStatus` de la API de Home, `statusOf` de la activación, `getErrorStatus` de la API de Cuenta; `getErrorStatus` de la API de Usuarios queda como composición `clamp(errorStatus(source, fallback), 100, 599)`, política propia de rango), once cadenas inline `status || statusCode || response.status` (login, restablecimiento ×2, soporte público ×2, API de WhatsApp, `auth`, `http` ×4 en los predicados de autenticación y `lastRefreshError`, activación sobre el resultado, API de Clientes), seis funciones de código (`errorCode` de Clientes ×2, Correo y restablecimiento; `codeOf` de la activación; `getErrorCode` del alta de Usuarios, que leía `data.code` primero), las cadenas inline de código de login, `http` ×2 y la activación, y seis lectores de código de sobre (`cleanText(response?.code…)` en Clientes ×3, cursor de Usuarios, incorporación de Home). Los registros del kernel (`safeError` en `app`, `core` y `auth`) pasan a `describeError` (`auth` conserva `type`, `canRefresh` y `shouldClearSession`); `enhancements` lo compone con sus topes de 80/240; los `normalizeError` de las API de Facturas, Home e Incidencias componen `errorMessage` + `errorStatus` + `errorCode` con sus fallbacks y códigos por defecto. `AppCore.utils.safeError` (sin consumidores) desaparece.
+- `tools/error-extraction-contract.mjs` (antes `error-message-policies-contract`, en `check:dist`): además de los órdenes de mensaje, comportamiento de estado (candidatos, texto numérico, `0`/`NaN`/negativos, payload), de código (clave canónica, `error` textual, numérico, objeto, fallback) y del registro; ninguna cadena `status || statusCode` ni `code || error` ni `toUpperCase()` sobre códigos fuera de la autoridad y `main.js`; los tres registros de API cuentan como consumidores de `messageFirst`.
+- Docs: fila de `FRONTEND_SHARED_SYSTEMS.md`.
+
+## Comportamiento
+
+Equivalencia de cada copia retirada contra la autoridad sobre 86 formas construidas con los constructores reales (errores HTTP de `core/http.js` con `fetch` simulado para 8 estados × 8 payloads, error de red, `Error` locales con código/estado/`data`/`response`, `AbortError`, sobres crudos y primitivos), 22 comparaciones, 1.978 comprobaciones. Idéntico en todas las formas que llegan de verdad (errores HTTP y `Error` locales con códigos y estados reales), salvo dos cambios alcanzables y explícitos: en la API de Usuarios un error de red (estado 0) se acotaba a 100 y ahora es el fallback 400 (el 0 se trataba como valor); en el alta de Usuarios, `getErrorCode` leía `data.code` primero, que `http` enmascara como `***`, así que devolvía `***` para todo error HTTP y el mapeo de mensajes por código del formulario (`CREATE_USER_MAIL_FAILED`, `USER_ALREADY_EXISTS`…) nunca actuaba; ahora devuelve el código real. El resto de diferencias, en formas sintéticas o degeneradas:
+
+- Estado: texto numérico (`"409"`) pasa a número; `NaN`/`"abc"` → fallback en lugar de propagar el texto; un estado negativo → siguiente candidato; `data.status`/`payload.status` se leen en el kernel (antes no).
+- Código: minúsculas o guiones → clave canónica (`cliente-not-found` → `CLIENTE_NOT_FOUND`); un `error` objeto → vacío en lugar de `[object Object]`; código numérico → texto (`20` del `AbortError` → `"20"`); las copias que sólo leían `code` leen ahora también el `error` textual del sobre y los códigos del payload (superset).
+- Registros: el kernel gana `data.status`/`payload.status` y los códigos del payload; los registros de API dejan de producir `[object Object]` para un sobre crudo y normalizan el mensaje a una línea.
+
+## Cierres de arranque
+
+Frente a la unidad anterior: app 155420 → 155917 (+497), auth 62317 → 62996 (+679), bootstrapPublicHome 215435 → 215880 (+445). Techos 158000 / 64000 / 218500. `core/errors.js` entra en los cierres al importarlo `http`, `core`, `app`, `auth` y `enhancements`; el empaquetador funde `errors`, `redact` y `config` en un solo chunk compartido (`errors` 9.917 B sustituye a `redact` 8.215 B y parte de `user-identity`), así que el coste neto son las tres funciones menos las copias retiradas (`app` −267, `core` −199, `http` −225, `auth` −190, `routes` −105). Vistas perezosas: activación −342 y el resto entre −20 y −120.
+
+## Métricas
+
+4 + 11 copias de estado, 6 + 3 + 6 de código y 7 registros → 3 funciones más en 1 autoridad; comportamiento modificado: los dos cambios alcanzables descritos (estado 100 → 400 en la API de Usuarios; código real en lugar de `***` en el alta de Usuarios) y formas sintéticas.

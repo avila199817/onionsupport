@@ -31,6 +31,7 @@ import {
 } from "./clientes.model.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { safeObject, firstNonBlank } from "../../core/objects.js";
+import { errorCode, errorStatus } from "../../core/errors.js";
 
 export {
   CLIENTES_MODEL_VERSION,
@@ -213,21 +214,6 @@ function errorMessage(response = {}, fallback = "No se pudieron cargar los clien
   );
 }
 
-function errorCode(error = null) {
-  return cleanText(
-    firstNonBlank(
-      error?.code,
-      error?.data?.code,
-      error?.payload?.code,
-      error?.response?.data?.code,
-      error?.response?.code,
-      error?.error,
-      ""
-    ),
-    ""
-  ).toUpperCase();
-}
-
 function normalizePageError(error = null) {
   if (errorCode(error) !== "CLIENTES_CURSOR_REJECTED") return error;
 
@@ -236,15 +222,7 @@ function normalizePageError(error = null) {
   );
   normalized.name = cleanText(error?.name, "Error");
   normalized.code = "CLIENTES_CURSOR_INVALID";
-  normalized.status = Number(
-    firstNonBlank(
-      error?.status,
-      error?.statusCode,
-      error?.response?.status,
-      error?.response?.data?.status,
-      400
-    )
-  ) || 400;
+  normalized.status = errorStatus(error, 400);
   return normalized;
 }
 
@@ -499,7 +477,7 @@ export function getClienteByIdRequest(id = "", options = {}) {
       if (!isCurrentRead(scope)) throw discardOldRead();
       if (responseLooksFailed(response)) {
         const error = new Error(errorMessage(response, "No se pudo cargar el cliente."));
-        error.code = cleanText(response?.code, "CLIENTE_DETAIL_REJECTED").toUpperCase();
+        error.code = errorCode(response, "CLIENTE_DETAIL_REJECTED");
         throw error;
       }
 
@@ -669,7 +647,7 @@ export function createCliente(payload = {}, options = {}) {
       if (ensureStoreScope() !== epoch) throw discardOldRead();
       if (responseLooksFailed(response)) {
         const error = new Error(errorMessage(response, "El backend rechazó la creación del cliente."));
-        error.code = cleanText(response?.code, "CLIENTE_CREATE_REJECTED").toUpperCase();
+        error.code = errorCode(response, "CLIENTE_CREATE_REJECTED");
         throw error;
       }
 
@@ -768,7 +746,7 @@ export async function fetchClientesStatsRequest(options = {}) {
   });
   if (responseLooksFailed(response)) {
     const error = new Error(errorMessage(response, "No se pudieron cargar las estadísticas de clientes."));
-    error.code = cleanText(response?.code, "CLIENTES_STATS_REJECTED").toUpperCase();
+    error.code = errorCode(response, "CLIENTES_STATS_REJECTED");
     error.status = Number(response?.status || 400) || 400;
     throw error;
   }

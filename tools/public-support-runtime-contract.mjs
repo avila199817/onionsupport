@@ -4,6 +4,7 @@ import vm from "node:vm";
 import { createAsyncScope } from "../src/core/async-scope.js";
 import { cleanText } from "../src/core/presentation-text.js";
 import { safeObject, firstNonBlank } from "../src/core/objects.js";
+import { errorStatus } from "../src/core/errors.js";
 
 // Exercise the actual intake with a small DOM/HTTP boundary; no network, Auth
 // boot or test-only exports in production. Browser coverage checks real events.
@@ -68,6 +69,7 @@ function fixture() {
     cleanText,
     safeObject,
     firstNonBlank,
+    errorStatus,
     createAsyncScope,
     AppCore: { getState: () => ({}) },
     FormData: class { constructor(value) { this.form = value; } get(name) { return this.form.elements.namedItem(name)?.value || ""; } },

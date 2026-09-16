@@ -26,6 +26,7 @@ import AvatarSystem, { resolveAvatarPresentation } from "../avatar-system/index.
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { cleanText, codeKey } from "../../core/presentation-text.js";
 import { safeObject, firstNonBlank } from "../../core/objects.js";
+import { errorStatus } from "../../core/errors.js";
 
 /* Trusted verifier compatibility marker: the legacy tooltip dataset is retired
    at runtime; the identity is now contained entirely by the visible card. */
@@ -711,12 +712,7 @@ function normalizedErrorCode(error) {
 }
 
 function activeTicketConflict(error) {
-  const httpStatus = Number(
-    error?.status ||
-    error?.statusCode ||
-    error?.response?.status ||
-    0
-  );
+  const httpStatus = errorStatus(error, 0);
 
   return (
     (httpStatus === 409 || httpStatus === 423) &&
@@ -1015,7 +1011,7 @@ function successMessage(response) {
 }
 
 function errorMessage(error) {
-  const code = Number(error?.status || error?.statusCode || error?.response?.status || 0);
+  const code = errorStatus(error, 0);
   if (activeTicketConflict(error)) return activeTicketMessage();
   if (code === 429) return "Has realizado varias solicitudes seguidas. Espera un momento y vuelve a intentarlo.";
   if (code === 400 || code === 422) return "Hay algún dato que el servidor no ha podido validar. Revisa el formulario.";

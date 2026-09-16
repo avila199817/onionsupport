@@ -28,7 +28,7 @@ import { fetchUsuariosStatsRequest } from "../usuarios/usuarios.api.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { nowIso, nowMs } from "../../core/clock.js";
-import { redactSecrets } from "../../core/redact.js";
+import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage, errorStatus } from "../../core/errors.js";
 
 export const HOME_API_VERSION =
   "home.api.domain-aggregator.v13-domain-counts";
@@ -101,30 +101,16 @@ function safeId(value = "") {
     .slice(0, 180);
 }
 
-function errorStatus(error = null) {
-  return number(
-    firstNonEmpty(
-      error?.status,
-      error?.statusCode,
-      error?.response?.status,
-      error?.data?.status,
-      error?.payload?.status,
-      null
-    ),
-    0
-  );
-}
-
 function isUnauthorizedError(error = null) {
-  return errorStatus(error) === 401;
+  return errorStatus(error, 0) === 401;
 }
 
 function normalizeError(domain = "home", error = null) {
   return {
     domain: cleanText(domain, "home"),
-    message: redactSecrets(error?.message || "No se pudo cargar el recurso."),
-    status: errorStatus(error) || null,
-    code: cleanText(error?.code, "") || null,
+    message: errorMessage(error, "No se pudo cargar el recurso.", ERROR_MESSAGE_POLICIES.messageFirst),
+    status: errorStatus(error, null),
+    code: errorCode(error) || null,
     at: nowIso(),
   };
 }

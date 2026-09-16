@@ -20,6 +20,7 @@ import createLoginTemplate from "./template.js";
 import { cleanText } from "../../../core/presentation-text.js";
 import { isFunction } from "../../../core/objects.js";
 import { redactSecrets } from "../../../core/redact.js";
+import { errorCode, errorStatus } from "../../../core/errors.js";
 
 export const LOGIN_VIEW_VERSION = "login.view.public.controller.v7-document-handoff";
 
@@ -690,17 +691,9 @@ function applyErrors(refs, errors = {}) {
 }
 
 function authErrorMessage(error = null) {
-  const status = Number(
-    error?.status ||
-      error?.statusCode ||
-      error?.response?.status ||
-      0
-  );
+  const status = errorStatus(error, 0);
 
-  const code = cleanText(
-    error?.code || error?.error || "",
-    ""
-  ).toUpperCase();
+  const code = errorCode(error);
 
   if (status === 423 || code.includes("LOCKED")) {
     const lockUntil = Number(

@@ -40,7 +40,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
-import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage, errorStatus } from "../../core/errors.js";
 
 export const CUENTA_API_VERSION =
   "cuenta.api.backend-contract.v5-canonical-runtime";
@@ -164,17 +164,6 @@ function isActiveLoadToken(token) {
   return token === lastLoadToken;
 }
 
-function getErrorStatus(error = null) {
-  return Number(firstNonEmpty(
-    error?.status,
-    error?.statusCode,
-    error?.response?.status,
-    error?.payload?.status,
-    error?.data?.status,
-    0
-  )) || 0;
-}
-
 function getErrorCode(error = null) {
   return cleanText(firstNonEmpty(
     error?.code,
@@ -193,7 +182,7 @@ function createCuentaError(error = null, fallback = "Error de cuenta.") {
   const normalized = new Error(errorMessage(error, fallback, ERROR_MESSAGE_POLICIES.payloadFirst));
   normalized.name = "CuentaApiError";
   normalized.code = getErrorCode(error) || "CUENTA_API_ERROR";
-  normalized.status = getErrorStatus(error);
+  normalized.status = errorStatus(error, 0);
   normalized.statusCode = normalized.status;
   return normalized;
 }

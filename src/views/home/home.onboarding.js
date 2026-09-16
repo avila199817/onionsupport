@@ -8,6 +8,7 @@
 import Http from "../../core/http.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject } from "../../core/objects.js";
+import { errorCode } from "../../core/errors.js";
 
 export const HOME_ONBOARDING_VERSION = "home.onboarding.v1.persisted-step-state";
 export const HOME_ONBOARDING_ENDPOINT = "/api/users/me/onboarding";
@@ -126,7 +127,7 @@ export async function saveHomeOnboardingChoice({
 
   if (responseFailed(response)) {
     const error = new Error(responseMessage(response));
-    error.code = cleanText(response?.code, "HOME_ONBOARDING_SAVE_FAILED");
+    error.code = errorCode(response, "HOME_ONBOARDING_SAVE_FAILED");
     throw error;
   }
 

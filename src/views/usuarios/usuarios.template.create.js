@@ -50,7 +50,7 @@ import {
 import { isObject, safeObject, isFunction } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
-import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage } from "../../core/errors.js";
 
 /* =========================================================
    META / CONSTANTS
@@ -157,18 +157,6 @@ function attr(value = "") {
   return escapeHtml(
     cleanText(value, "")
   );
-}
-
-function getErrorCode(error = null) {
-  return cleanText(
-    error?.data?.code ||
-      error?.payload?.code ||
-      error?.response?.data?.code ||
-      error?.response?.code ||
-      error?.code ||
-      "",
-    ""
-  ).toUpperCase();
 }
 
 /*
@@ -1448,7 +1436,7 @@ function creationFailureMessage(
   error = null
 ) {
   const code =
-    getErrorCode(error);
+    errorCode(error);
 
   if (
     code ===
@@ -1654,7 +1642,7 @@ export async function submit(
 
     showToast(
       state.error,
-      getErrorCode(error) ===
+      errorCode(error) ===
         "CREATE_USER_MAIL_FAILED"
         ? "warning"
         : "error"

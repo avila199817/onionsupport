@@ -44,7 +44,7 @@ import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { clamp } from "../../core/numbers.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
-import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage, errorStatus } from "../../core/errors.js";
 
 /* =========================================================
    META / CONFIG
@@ -505,19 +505,7 @@ function getErrorStatus(
   source = null,
   fallback = 400
 ) {
-  const status = number(
-    firstNonEmpty(
-      source?.status,
-      source?.statusCode,
-      source?.data?.status,
-      source?.response?.status,
-      source?.response?.statusCode,
-      fallback
-    ),
-    fallback
-  );
-
-  return clamp(number(status, 100), 100, 599);
+  return clamp(errorStatus(source, fallback), 100, 599);
 }
 
 function createContractError(

@@ -18,6 +18,7 @@
 
 import { cleanText } from "../core/presentation-text.js";
 import { redactSecrets } from "../core/redact.js";
+import { describeError } from "../core/errors.js";
 export const APP_ENHANCEMENTS_VERSION =
   "app.enhancements.v20-public-support-extreme";
 
@@ -132,9 +133,10 @@ function isBrowser() {
 }
 
 function safeError(error = null) {
+  const record = describeError(error);
   return Object.freeze({
-    name: cleanText(redactSecrets(error?.name || "Error"), "").slice(0, 80) || "Error",
-    message: cleanText(redactSecrets(error?.message || error || ""), "").slice(0, 240),
+    name: cleanText(redactSecrets(record?.name || "Error"), "").slice(0, 80) || "Error",
+    message: (record?.message || "").slice(0, 240),
   });
 }
 

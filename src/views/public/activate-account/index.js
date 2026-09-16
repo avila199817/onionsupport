@@ -41,6 +41,7 @@ import {
 import createPasswordResetTemplate from "../password-reset/template.js";
 import { cleanText, codeKey } from "../../../core/presentation-text.js";
 import { isObject, isFunction } from "../../../core/objects.js";
+import { errorCode, errorStatus } from "../../../core/errors.js";
 
 export const ACTIVATE_ACCOUNT_VIEW_VERSION =
   "activate-account.view.public.v1-production";
@@ -985,37 +986,9 @@ function resultIsSuccess(result = {}) {
   );
 }
 
-function statusOf(error = null) {
-  const value = Number(
-    error?.status ||
-    error?.statusCode ||
-    error?.response?.status ||
-    error?.data?.status ||
-    error?.payload?.status ||
-    0
-  );
-
-  return Number.isFinite(value)
-    ? value
-    : 0;
-}
-
-function codeOf(error = null) {
-  return codeKey(
-    error?.code ||
-    error?.error ||
-    error?.data?.code ||
-    error?.data?.error ||
-    error?.payload?.code ||
-    error?.payload?.error ||
-    error?.response?.code ||
-    ""
-  );
-}
-
 function activationError(error = null) {
-  const code = codeOf(error);
-  const status = statusOf(error);
+  const code = errorCode(error);
+  const status = errorStatus(error, 0);
 
   if (code === "TOKEN_EXPIRED" || status === 410) {
     return {
@@ -1300,15 +1273,9 @@ export function renderActivateAccountView(
           )
         );
 
-        error.status =
-          result?.status ||
-          result?.statusCode ||
-          400;
+        error.status = errorStatus(result, 400);
 
-        error.code =
-          result?.code ||
-          result?.error ||
-          "ACTIVATION_FAILED";
+        error.code = errorCode(result, "ACTIVATION_FAILED");
 
         error.data = result;
 

@@ -34,7 +34,7 @@ import {
   renderSignatureModal,
 } from "./correo.template.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage } from "../../core/errors.js";
 
 
 export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v6-canonical-user";
@@ -173,10 +173,6 @@ function safeLower(value = "") {
 }
 
 const ERROR_FALLBACK = "No se pudo completar la operación.";
-
-function errorCode(error = null) {
-  return cleanText(error?.code || error?.data?.code || error?.data?.error, "");
-}
 
 function folderRank(folder = {}) {
   const name = safeLower(folder.displayName);

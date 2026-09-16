@@ -24,6 +24,7 @@ import {
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, isFunction, firstNonBlank } from "../../core/objects.js";
 import { redactSecrets } from "../../core/redact.js";
+import { describeError, errorStatus } from "../../core/errors.js";
 
 export const AUTH_VERSION = "auth.minimal.v10-logout-fail-closed";
 const ROOT_PATH = "/";
@@ -46,16 +47,8 @@ const activeFlowControllers = new Set();
 const selectorMetrics = { coreReads: 0, httpTokenFallbacks: 0, contexts: 0 };
 
 function safeError(error = null, type = "auth") {
-  if (!error) return null;
-  return {
-    type,
-    name: cleanText(error?.name, "Error"),
-    message: redactSecrets(cleanText(error?.message || String(error), "")),
-    status: error?.status || error?.statusCode || error?.response?.status || null,
-    code: cleanText(error?.code || error?.error || "", "") || null,
-    canRefresh: isRefreshableAuthError(error),
-    shouldClearSession: shouldClearSessionForAuthError(error),
-  };
+  const record = describeError(error);
+  return record ? { type, ...record, canRefresh: isRefreshableAuthError(error), shouldClearSession: shouldClearSessionForAuthError(error) } : null;
 }
 function safePayload(value, depth = 0) {
   if (depth > 5) return null;
@@ -195,7 +188,7 @@ function isRefreshableAuthError(error = null) { try { return Http.isRefreshableA
 function shouldClearSessionForAuthError(error = null) { try { return Http.shouldClearSessionForAuthError?.(error) === true; } catch { return false; } }
 function isHttpAuthError(error = null) {
   try { return Http.isAuthError?.(error) === true; }
-  catch { const status = Number(error?.status || error?.statusCode || 0); return status === 401 || status === 403; }
+  catch { const status = errorStatus(error, 0); return status === 401 || status === 403; }
 }
 
 function stripBearer(value = "") { return cleanText(value, "").replace(/^Bearer\s+/i, ""); }

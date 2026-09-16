@@ -20,6 +20,7 @@ import {
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { clamp } from "../../core/numbers.js";
+import { errorCode } from "../../core/errors.js";
 
 export const USUARIOS_CURSOR_VERSION =
   "usuarios.cursor.v3.employee-directory-boundary";
@@ -232,7 +233,7 @@ export async function fetchUsuariosCursorPage(options = {}) {
     const error = new Error(
       cleanText(response?.message, "No se pudieron cargar los usuarios.")
     );
-    error.code = cleanText(response?.code || response?.error, "USUARIOS_CURSOR_REJECTED");
+    error.code = errorCode(response, "USUARIOS_CURSOR_REJECTED");
     error.status = Number(response?.status || 0) || 0;
     throw error;
   }

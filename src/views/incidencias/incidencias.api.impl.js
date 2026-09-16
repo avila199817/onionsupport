@@ -31,6 +31,7 @@ import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { nowIso, nowMs } from "../../core/clock.js";
 import { redactSecrets } from "../../core/redact.js";
+import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage, errorStatus } from "../../core/errors.js";
 
 export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v24.cursor-scale-safe";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
@@ -2719,9 +2720,9 @@ export async function loadIncidenciasStats() {
 
 function normalizeError(error = null) {
   return {
-    message: redactSecrets(error?.message || "No se pudo cargar incidencias."),
-    status: error?.status || error?.statusCode || error?.response?.status || null,
-    code: error?.code || error?.response?.code || "INCIDENCIAS_ERROR",
+    message: errorMessage(error, "No se pudo cargar incidencias.", ERROR_MESSAGE_POLICIES.messageFirst),
+    status: errorStatus(error, null),
+    code: errorCode(error, "INCIDENCIAS_ERROR"),
   };
 }
 

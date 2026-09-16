@@ -10,10 +10,8 @@
    - Sin HTTP, storage, auth ni efectos secundarios.
 ========================================================= */
 
-import {
-  SENSITIVE_QUERY_PARAMS,
-} from "./config.js";
 import { cleanText, normalizeKey } from "./presentation-text.js";
+import { SENSITIVE_QUERY_KEYS } from "./redact.js";
 
 export const MEDIA_URL_POLICY_VERSION =
   "core.media.runtime-url.v1";
@@ -23,16 +21,6 @@ const AZURE_BLOB_SUFFIX =
 
 const ONION_API_HOST =
   "api.onionsupport.com";
-
-const SENSITIVE_KEYS = new Set(
-  (
-    Array.isArray(SENSITIVE_QUERY_PARAMS)
-      ? SENSITIVE_QUERY_PARAMS
-      : []
-  )
-    .map(normalizeKey)
-    .filter(Boolean)
-);
 
 const AZURE_SAS_ALLOWED_SENSITIVE_KEYS =
   new Set([
@@ -103,7 +91,7 @@ function hasDisallowedCredential(
       normalizeKey(key);
 
     if (
-      !SENSITIVE_KEYS.has(
+      !SENSITIVE_QUERY_KEYS.has(
         normalized
       )
     ) {

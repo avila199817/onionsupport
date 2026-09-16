@@ -30,6 +30,7 @@ import {
 } from "../avatar-system/index.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { safeObject, firstNonEmpty } from "../../core/objects.js";
+import { redactSecrets } from "../../core/redact.js";
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
   "incidencias-technician-profile.v9-public-metrics-rating-ready";
@@ -160,15 +161,14 @@ function safeAvatarUrl(value = "") {
 }
 
 function safeError(error = null) {
-  return cleanText(
+  return redactSecrets(cleanText(
     firstNonEmpty(
       error?.message,
       error?.data?.message,
       error?.payload?.message
     ),
     "No se pudo cargar el perfil del técnico."
-  )
-    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1***")
+  ))
     .slice(0, 240);
 }
 

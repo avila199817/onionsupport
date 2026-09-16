@@ -25,7 +25,6 @@
 import {
   config,
   AUTH_ENDPOINTS as CONFIG_AUTH_ENDPOINTS,
-  SENSITIVE_QUERY_PARAMS,
   getApiBase,
   endpointPathFromUrlLike,
   normalizeEndpointPath,
@@ -35,6 +34,7 @@ import {
 import { cleanText, normalizeKey, codeKey } from "./presentation-text.js";
 import { isObject, isFunction, firstNonBlank } from "./objects.js";
 import { nowIso } from "./clock.js";
+import { SENSITIVE_QUERY_KEYS, redactUrl } from "./redact.js";
 
 export const HTTP_VERSION =
   "core.http.refresh.blob.v9-runtime-state-port";
@@ -75,9 +75,6 @@ const BINARY_RESPONSE_TYPES =
     "arraybuffer",
     "array-buffer",
   ]);
-
-const LEGACY_RESET_TOKEN_PATH =
-  /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
 
 /* =========================================================
    BASICS
@@ -121,96 +118,6 @@ function isBlob(value) {
    SECURITY / REDACTION
 ========================================================= */
 
-const SENSITIVE_KEYS =
-  new Set(
-    (
-      Array.isArray(
-        SENSITIVE_QUERY_PARAMS
-      )
-        ? SENSITIVE_QUERY_PARAMS
-        : []
-    )
-      .map(normalizeKey)
-      .filter(Boolean)
-  );
-
-function redact(
-  value = ""
-) {
-  let text =
-    cleanText(
-      value,
-      ""
-    );
-
-  if (!text) {
-    return "";
-  }
-
-  text =
-    text.replace(
-      LEGACY_RESET_TOKEN_PATH,
-      "$1***"
-    );
-
-  try {
-    const url =
-      new URL(
-        text,
-        "https://onionsupport.local"
-      );
-
-    for (
-      const key
-      of [
-        ...url
-          .searchParams
-          .keys(),
-      ]
-    ) {
-      if (
-        SENSITIVE_KEYS.has(
-          normalizeKey(
-            key
-          )
-        )
-      ) {
-        url.searchParams.set(
-          key,
-          "***"
-        );
-      }
-    }
-
-    text =
-      /^https?:\/\//i.test(
-        text
-      )
-        ? url.toString()
-        : `${url.pathname}${url.search}${url.hash}`;
-  } catch {
-    text =
-      text.replace(
-        /([?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken|sas)=)([^&#\s]+)/gi,
-        "$1***"
-      );
-  }
-
-  return text
-    .replace(
-      LEGACY_RESET_TOKEN_PATH,
-      "$1***"
-    )
-    .replace(
-      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-      "$1***"
-    )
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
-}
-
 function sanitizeData(
   value,
   depth = 0
@@ -239,9 +146,7 @@ function sanitizeData(
   if (
     type === "string"
   ) {
-    return redact(
-      value
-    ).slice(
+    return redactUrl(value).slice(
       0,
       1200
     );
@@ -318,7 +223,7 @@ function sanitizeData(
     )
   ) {
     if (
-      SENSITIVE_KEYS.has(
+      SENSITIVE_QUERY_KEYS.has(
         normalizeKey(
           key
         )
@@ -350,14 +255,6 @@ function sanitizeData(
   }
 
   return output;
-}
-
-export function redactHttpText(
-  value = ""
-) {
-  return redact(
-    value
-  );
 }
 
 /* =========================================================
@@ -462,7 +359,7 @@ function appendQuery(
       )
     ) {
       if (
-        SENSITIVE_KEYS.has(
+        SENSITIVE_QUERY_KEYS.has(
           normalizeKey(
             key
           )
@@ -521,7 +418,7 @@ function appendQuery(
     ]
   ) {
     if (
-      SENSITIVE_KEYS.has(
+      SENSITIVE_QUERY_KEYS.has(
         normalizeKey(
           key
         )
@@ -1845,14 +1742,10 @@ function createHttpError({
     error.status;
 
   error.endpoint =
-    redact(
-      endpoint
-    );
+    redactUrl(endpoint);
 
   error.url =
-    redact(
-      url
-    );
+    redactUrl(url);
 
   error.method =
     cleanText(
@@ -2463,14 +2356,10 @@ function setLastErrorStat(
       normalized.status,
 
     message:
-      redact(
-        normalized.message
-      ),
+      redactUrl(normalized.message),
 
     endpoint:
-      redact(
-        endpoint
-      ),
+      redactUrl(endpoint),
 
     binary:
       isBinaryResponse(
@@ -2560,9 +2449,7 @@ async function fetchParsed(
   stats.lastMethod =
     method;
   stats.lastUrl =
-    redact(
-      url
-    );
+    redactUrl(url);
   stats.lastStatus =
     null;
   stats.lastError =
@@ -2799,10 +2686,7 @@ async function runRefresh(
             null,
 
           message:
-            redact(
-              error?.message ||
-              "No se pudo renovar la sesión."
-            ),
+            redactUrl(error?.message || "No se pudo renovar la sesión."),
 
           at:
             nowIso(),
@@ -3422,9 +3306,7 @@ export function getSnapshot() {
           stats.lastMethod,
 
         lastUrl:
-          redact(
-            stats.lastUrl
-          ),
+          redactUrl(stats.lastUrl),
 
         lastStatus:
           stats.lastStatus,
@@ -3539,8 +3421,6 @@ export const Http = {
   isAuthError,
   isRefreshableAuthError,
   shouldClearSessionForAuthError,
-
-  redactHttpText,
 
   getSnapshot,
   getDebugSnapshot,

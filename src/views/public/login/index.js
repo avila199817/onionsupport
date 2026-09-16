@@ -19,6 +19,7 @@ import { Auth as DefaultAuth } from "../../../features/auth/index.js";
 import createLoginTemplate from "./template.js";
 import { cleanText } from "../../../core/presentation-text.js";
 import { isFunction } from "../../../core/objects.js";
+import { redactSecrets } from "../../../core/redact.js";
 
 export const LOGIN_VIEW_VERSION = "login.view.public.controller.v7-document-handoff";
 
@@ -33,19 +34,6 @@ let lastInstance = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
 }
 
 function clearNode(node = null) {
@@ -963,11 +951,7 @@ export function renderLoginView(container, context = {}) {
         authenticated,
         passwordControls: passwordControls.getSnapshot(),
         target: authenticated
-          ? redact(
-              activeAuth?.getPostLoginTarget?.() ||
-                activeAuth?.getDefaultHome?.() ||
-                "/"
-            )
+          ? redactSecrets(cleanText(activeAuth?.getPostLoginTarget?.() || activeAuth?.getDefaultHome?.() || "/", ""))
           : null,
       };
     },

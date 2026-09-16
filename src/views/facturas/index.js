@@ -69,6 +69,7 @@ import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { clamp } from "../../core/numbers.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
+import { redactSecrets } from "../../core/redact.js";
 
 export const FACTURAS_INDEX_VERSION =
   "facturas.index.productivo.v22.stable-create-client-relations";
@@ -150,19 +151,6 @@ function number(value = 0, fallback = 0) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
 }
 
 function safeError(
@@ -6229,7 +6217,7 @@ function createFacturasController(host = null, context = {}) {
         sendingFacturaId: sendingFacturaId ? "***" : "",
         markingPaidFacturaId: markingPaidFacturaId ? "***" : "",
 
-        error: redact(error),
+        error: redactSecrets(cleanText(error, "")),
 
         policy: {
           noStore: true,

@@ -14,7 +14,6 @@ import {
   config,
   USER_HOME_PREFIX as CONFIG_USER_HOME_PREFIX,
   ALLOWED_ROLES,
-  SENSITIVE_QUERY_PARAMS,
   buildUserHomeRoute as configBuildUserHomeRoute,
   getUserScopedRouteInfo as configGetUserScopedRouteInfo,
   normalizeRoutePath as configNormalizeRoutePath,
@@ -25,13 +24,13 @@ import Http from "./http.js";
 import { userNameFromIdentity } from "./user-identity.js";
 import { cleanText, normalizeKey } from "./presentation-text.js";
 import { isObject, isFunction, firstNonBlank } from "./objects.js";
+import { SENSITIVE_QUERY_KEYS, redactTokenPaths, redactUrl } from "./redact.js";
 
 export const CORE_VERSION = "core.minimal.v9-specialized-snapshot";
 const RUNTIME_STATE_VERSION = "core.runtime-state.v2-dirty-guard";
 const APP_NAME = config?.appName || config?.name || "Onion Support";
 const ROOT_PATH = "/";
 const USER_HOME_PREFIX = CONFIG_USER_HOME_PREFIX || "/@";
-const LEGACY_RESET_TOKEN_PATH = /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
 const VALID_ROLES = new Set((Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.length ? ALLOWED_ROLES : ["admin", "user"]).map((role) => String(role).toLowerCase()));
 const DISABLED_STATUSES = new Set(["disabled", "desactivado", "inactive", "inactivo", "deleted", "eliminado", "archived", "archivado", "revoked", "revocado", "blocked", "bloqueado", "banned", "suspended", "suspendido"]);
 
@@ -56,12 +55,6 @@ const SENSITIVE_STATE_KEYS = new Set([
   "_rid", "_self", "_etag", "_attachments", "_ts", "_lsn", "_metadata",
 ].map(normalizeKey).filter(Boolean));
 const SENSITIVE_OBJECT_KEYS = new Set([...SENSITIVE_STATE_KEYS, "token", "accessToken", "access_token", "sessionId", "session_id", "cookie", "setCookie", "set_cookie", "code", "sig", "signature"].map(normalizeKey).filter(Boolean));
-const SENSITIVE_QUERY_KEYS = new Set((Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length ? SENSITIVE_QUERY_PARAMS : [
-  "token", "access_token", "accessToken", "refresh_token", "refreshToken", "id_token", "idToken", "code", "secret", "session",
-  "sessionId", "session_id", "password", "pwd", "key", "sig", "signature", "jwt", "authorization", "reset_token", "resetToken",
-  "activation_token", "activationToken",
-]).map(normalizeKey).filter(Boolean));
-
 const state = {
   initialized: false, ready: false, booting: false, loading: false, error: null,
   token: null, accessToken: null, access_token: null, hasToken: false,
@@ -133,23 +126,10 @@ function mutate(mutator = null, options = {}) {
   return changed;
 }
 
-function redact(value = "") {
-  let output = cleanText(value, "");
-  if (!output) return "";
-  output = output.replace(LEGACY_RESET_TOKEN_PATH, "$1***");
-  try {
-    const fakeUrl = new URL(output, "https://onionsupport.local");
-    for (const key of [...fakeUrl.searchParams.keys()]) if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) fakeUrl.searchParams.set(key, "***");
-    output = /^https?:\/\//i.test(output) ? fakeUrl.toString() : `${fakeUrl.pathname}${fakeUrl.search}${fakeUrl.hash}`;
-  } catch {
-    output = output.replace(/([?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=)([^&#\s]+)/gi, "$1***");
-  }
-  return output.replace(LEGACY_RESET_TOKEN_PATH, "$1***").replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***").replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-}
 function safeError(error = null) {
   if (!error) return null;
   return {
-    name: cleanText(error?.name, "Error"), message: redact(error?.message || String(error)),
+    name: cleanText(error?.name, "Error"), message: redactUrl(error?.message || String(error)),
     status: error?.status || error?.statusCode || error?.response?.status || null,
     code: cleanText(error?.code || error?.error || "", "") || null,
   };
@@ -157,7 +137,7 @@ function safeError(error = null) {
 function sanitizeObject(value, depth = 0) {
   if (depth > 6) return null;
   if (value === null || value === undefined) return value;
-  if (typeof value === "string") return redact(value);
+  if (typeof value === "string") return redactUrl(value);
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (["function", "symbol", "bigint"].includes(typeof value)) return undefined;
   if (Array.isArray(value)) return value.slice(0, 250).map((item) => sanitizeObject(item, depth + 1));
@@ -306,7 +286,7 @@ function normalizePathname(value = ROOT_PATH) {
   if (path.length > 1) path = path.replace(/\/+$/g, "") || ROOT_PATH;
   return path || ROOT_PATH;
 }
-function sanitizeLegacyTokenPath(value = ROOT_PATH) { return cleanText(value, ROOT_PATH).replace(LEGACY_RESET_TOKEN_PATH, "$1***"); }
+function sanitizeLegacyTokenPath(value = ROOT_PATH) { return redactTokenPaths(cleanText(value, ROOT_PATH)); }
 function safeSearch(value = "") {
   const raw = cleanText(value, "");
   if (!raw || raw === "?") return "";
@@ -320,7 +300,7 @@ function safeSearch(value = "") {
 function safeHash(value = "") {
   const hash = cleanText(value, "");
   if (!hash || hash === "#" || /[\r\n\t\\]/.test(hash)) return "";
-  return redact(hash.startsWith("#") ? hash : `#${hash.replace(/^#+/, "")}`);
+  return redactUrl(hash.startsWith("#") ? hash : `#${hash.replace(/^#+/, "")}`);
 }
 function pathFromInput(value = ROOT_PATH) {
   const raw = cleanText(value, ROOT_PATH);
@@ -623,7 +603,7 @@ function getSnapshot() {
     booting: snapshot.booting === true, loading: snapshot.loading === true, authenticated: snapshot.authenticated === true,
     hasToken: snapshot.hasToken === true, hasUser: snapshot.hasUser === true, user: snapshotUser(snapshot.user), role: snapshot.role,
     roles: Array.isArray(snapshot.roles) ? [...snapshot.roles] : [], userSlug: snapshot.userSlug, homePath: snapshot.homePath || ROOT_PATH,
-    route: redact(snapshot.route || ROOT_PATH), canonicalPath: redact(snapshot.canonicalPath || ROOT_PATH), publicPath: redact(snapshot.publicPath || ROOT_PATH),
+    route: redactUrl(snapshot.route || ROOT_PATH), canonicalPath: redactUrl(snapshot.canonicalPath || ROOT_PATH), publicPath: redactUrl(snapshot.publicPath || ROOT_PATH),
     lang: snapshot.lang, locale: snapshot.locale, theme: snapshot.theme, hasHttp: Boolean(httpClient), hasRuntimeStatePort: true,
     runtimeState: Object.freeze({ version: RUNTIME_STATE_VERSION, ...runtimeMetrics }),
     modules: Object.freeze(listModules()),
@@ -642,7 +622,7 @@ export const AppCore = {
   installHttpBridge, setHttpClient, getHttpClient, getActiveRequest, getActiveApiClient, request,
   normalizeRole, normalizeUser, normalizeSlug, extractUserSlug, buildUserHomePath, publicUser, isUsableUser,
   normalizeSessionContext, normalizePublicPath, normalizeCanonicalPath, getUserScopedRouteInfo, safeInternalPath,
-  utils: { cleanText, text: cleanText, clone, redact, safeError, isObject, isFunction },
+  utils: { cleanText, text: cleanText, clone, safeError, isObject, isFunction },
   getSnapshot, getDebugSnapshot: getSnapshot, snapshot: getSnapshot,
 };
 

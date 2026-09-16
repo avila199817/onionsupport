@@ -30,6 +30,7 @@ import {
 } from "./loader.js";
 import { cleanText } from "../core/presentation-text.js";
 import { isObject, isFunction } from "../core/objects.js";
+import { redactSecrets } from "../core/redact.js";
 
 export const APP_VERSION =
   "app.minimal.v9-public-session-handoff";
@@ -67,9 +68,6 @@ const BOOT_PHASES =
     READY: "ready",
     FAILED: "failed",
   });
-
-const LEGACY_RESET_TOKEN_PATH =
-  /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
 
 /* =========================================================
    INTERNAL STATE
@@ -178,29 +176,6 @@ function withRuntimeModules(payload = {}) {
    SENSITIVE PATH / ERROR SAFETY
 ========================================================= */
 
-function redact(value = "") {
-  return cleanText(
-    value,
-    ""
-  )
-    .replace(
-      LEGACY_RESET_TOKEN_PATH,
-      "$1***"
-    )
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(
-      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-      "$1***"
-    )
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
-}
-
 function currentPath() {
   if (!isBrowser()) {
     return "/";
@@ -294,10 +269,7 @@ function safeError(
       ),
 
     message:
-      redact(
-        error?.message ||
-        String(error)
-      ),
+      redactSecrets(cleanText(error?.message || String(error), "")),
 
     status:
       error?.status ||
@@ -455,9 +427,7 @@ function createBootPayload(
       APP_VERSION,
 
     initialPath:
-      redact(
-        safeInitialPath
-      ) ||
+      redactSecrets(cleanText(safeInitialPath, "")) ||
       "/",
 
     AppCore,
@@ -1000,9 +970,7 @@ async function runBoot(
     );
 
   const safeInitialPath =
-    redact(
-      rawInitialPath
-    ) ||
+    redactSecrets(cleanText(rawInitialPath, "")) ||
     "/";
 
   const payload =
@@ -1152,9 +1120,7 @@ export function getAppSnapshot() {
       bootPhase,
 
     path:
-      redact(
-        currentPath()
-      ) ||
+      redactSecrets(cleanText(currentPath(), "")) ||
       "/",
 
     boot:

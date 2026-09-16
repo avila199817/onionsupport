@@ -18,6 +18,7 @@ import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, currencyFormatter, dateFormatter, formatDecimal } from "../../core/format.js";
+import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
 export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v35-visible-date-minute-precision-linked-invoice-row-total";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
@@ -58,26 +59,6 @@ export const INCIDENCIAS_TABLE_COLUMNS = Object.freeze([
 /* =========================================================
    HELPERS
 ========================================================= */
-
-function num(v = 0, fb = 0) {
-  if (v === null || v === undefined || v === "") return fb;
-  if (typeof v === "number") return Number.isFinite(v) ? v : fb;
-  if (typeof v === "string") {
-    let clean = v.trim().replace(/[€$£¥%]/g, "").replace(/[^\d.,+\-\s]/g, "").replace(/\s+/g, "");
-    if (!clean || clean === "-" || clean === "+") return fb;
-    const hasComma = clean.includes(",");
-    const hasDot = clean.includes(".");
-    if (hasComma && hasDot) {
-      const lastComma = clean.lastIndexOf(",");
-      const lastDot = clean.lastIndexOf(".");
-      clean = lastComma > lastDot ? clean.replace(/\./g, "").replace(/,/g, ".") : clean.replace(/,/g, "");
-    } else if (hasComma) clean = clean.replace(/,/g, ".");
-    const parsed = Number(clean);
-    return Number.isFinite(parsed) ? parsed : fb;
-  }
-  const parsed = Number(v);
-  return Number.isFinite(parsed) ? parsed : fb;
-}
 
 const at = (v = "") => escapeHtml(cleanText(v, ""));
 const cls = (...v) => v.flat(Infinity).map((x) => cleanText(x, "")).filter(Boolean).join(" ");
@@ -158,11 +139,11 @@ function icon(name = "") { return ICONS[name] || ICONS.ticket; }
 
 const DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const TIME_FORMATTER = new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-function formatNumber(v = 0) { return formatDecimal(num(v, 0)); }
+function formatNumber(v = 0) { return formatDecimal(parseAmount(v, 0, AMOUNT_POLICIES.coerced)); }
 function formatMoney(v = 0, currency = DEFAULT_CURRENCY) {
   const formatter = currencyFormatter(currencyCode(currency, DEFAULT_CURRENCY), CURRENCY_POLICIES.grouped);
-  if (formatter) return formatter.format(num(v, 0));
-  const amount = num(v, 0).toFixed(2).replace(".", ",");
+  if (formatter) return formatter.format(parseAmount(v, 0, AMOUNT_POLICIES.coerced));
+  const amount = parseAmount(v, 0, AMOUNT_POLICIES.coerced).toFixed(2).replace(".", ",");
   const [integer, decimals = "00"] = amount.split(",");
   return `${integer.replace(/\B(?=(\d{3})+(?!\d))/g, ".")},${decimals} €`;
 }
@@ -286,7 +267,7 @@ function getUpdated(it = {}) {
 function getAttachmentsCount(it = {}) {
   const r = unwrap(it);
   const files = arrayFrom(firstNonEmpty(r.attachments, r.files, r.adjuntos, []));
-  return Math.max(files.length, num(r.attachmentsCount, 0), num(r.attachmentCount, 0), num(r.filesCount, 0), num(r.adjuntosCount, 0), num(r.meta?.attachmentsCount, 0), num(r.meta?.filesCount, 0));
+  return Math.max(files.length, parseAmount(r.attachmentsCount, 0, AMOUNT_POLICIES.coerced), parseAmount(r.attachmentCount, 0, AMOUNT_POLICIES.coerced), parseAmount(r.filesCount, 0, AMOUNT_POLICIES.coerced), parseAmount(r.adjuntosCount, 0, AMOUNT_POLICIES.coerced), parseAmount(r.meta?.attachmentsCount, 0, AMOUNT_POLICIES.coerced), parseAmount(r.meta?.filesCount, 0, AMOUNT_POLICIES.coerced));
 }
 
 /*
@@ -297,7 +278,7 @@ function getAttachmentsCount(it = {}) {
 */
 function getInvoiceTotal(it = {}) {
   const r = unwrap(it);
-  return num(firstNonEmpty(
+  return parseAmount(firstNonEmpty(
     r.invoiceDisplay?.linkedTotal,
     r.linkedInvoices?.linkedTotal,
     r.billing?.linkedTotal,
@@ -317,7 +298,8 @@ function getInvoiceTotal(it = {}) {
     r.linkedInvoices?.amount,
     r.meta?.invoiceTotal,
     0
-  ), 0);
+  ), 0,
+AMOUNT_POLICIES.coerced);
 }
 
 /*
@@ -327,7 +309,7 @@ function getInvoiceTotal(it = {}) {
 */
 function getInvoiceContributionTotal(it = {}) {
   const r = unwrap(it);
-  return num(firstNonEmpty(
+  return parseAmount(firstNonEmpty(
     r.invoiceDisplay?.displayTotal,
     r.invoiceDisplay?.total,
     r.meta?.invoiceListDisplayTotal,
@@ -349,7 +331,8 @@ function getInvoiceContributionTotal(it = {}) {
     r.linkedInvoices?.amount,
     r.meta?.invoiceTotal,
     0
-  ), 0);
+  ), 0,
+AMOUNT_POLICIES.coerced);
 }
 
 function getCurrency(it = {}) {
@@ -508,13 +491,13 @@ function mergeStats(items = [], provided = {}) {
   const s = safeObject(provided);
   if (local.total > 0) return local;
   return {
-    total: num(firstNonEmpty(s.total, local.total), local.total),
-    open: num(firstNonEmpty(s.open, local.open), local.open),
-    closed: num(firstNonEmpty(s.closed, local.closed), local.closed),
-    urgent: num(firstNonEmpty(s.urgent, local.urgent), local.urgent),
-    attachments: num(firstNonEmpty(s.attachments, local.attachments), local.attachments),
-    invoiceTotal: num(firstNonEmpty(s.invoiceTotal, local.invoiceTotal), local.invoiceTotal),
-    lastUpdateTs: num(firstNonEmpty(s.lastUpdateTs, local.lastUpdateTs), local.lastUpdateTs),
+    total: parseAmount(firstNonEmpty(s.total, local.total), local.total, AMOUNT_POLICIES.coerced),
+    open: parseAmount(firstNonEmpty(s.open, local.open), local.open, AMOUNT_POLICIES.coerced),
+    closed: parseAmount(firstNonEmpty(s.closed, local.closed), local.closed, AMOUNT_POLICIES.coerced),
+    urgent: parseAmount(firstNonEmpty(s.urgent, local.urgent), local.urgent, AMOUNT_POLICIES.coerced),
+    attachments: parseAmount(firstNonEmpty(s.attachments, local.attachments), local.attachments, AMOUNT_POLICIES.coerced),
+    invoiceTotal: parseAmount(firstNonEmpty(s.invoiceTotal, local.invoiceTotal), local.invoiceTotal, AMOUNT_POLICIES.coerced),
+    lastUpdateTs: parseAmount(firstNonEmpty(s.lastUpdateTs, local.lastUpdateTs), local.lastUpdateTs, AMOUNT_POLICIES.coerced),
   };
 }
 
@@ -533,10 +516,10 @@ function mergeFilterCounts(items = [], provided = null) {
   const local = filterCounts(items);
   const counts = safeObject(provided);
   return {
-    all: Math.max(0, num(firstNonEmpty(counts.all, local.all), local.all)),
-    open: Math.max(0, num(firstNonEmpty(counts.open, local.open), local.open)),
-    closed: Math.max(0, num(firstNonEmpty(counts.closed, local.closed), local.closed)),
-    urgent: Math.max(0, num(firstNonEmpty(counts.urgent, local.urgent), local.urgent)),
+    all: Math.max(0, parseAmount(firstNonEmpty(counts.all, local.all), local.all, AMOUNT_POLICIES.coerced)),
+    open: Math.max(0, parseAmount(firstNonEmpty(counts.open, local.open), local.open, AMOUNT_POLICIES.coerced)),
+    closed: Math.max(0, parseAmount(firstNonEmpty(counts.closed, local.closed), local.closed, AMOUNT_POLICIES.coerced)),
+    urgent: Math.max(0, parseAmount(firstNonEmpty(counts.urgent, local.urgent), local.urgent, AMOUNT_POLICIES.coerced)),
   };
 }
 
@@ -576,7 +559,7 @@ function normalizeItems(input = {}) {
 
 function remoteTotal(input = {}, fb = 0) {
   const d = safeObject(input), data = safeObject(d.data), payload = safeObject(d.payload), result = safeObject(d.result), response = safeObject(d.response);
-  return Math.max(fb, num(firstNonEmpty(d.total, d.count, d.totalCount, d.remoteCount, d.meta?.total, d.meta?.count, d.pagination?.total, d.pagination?.totalCount, data.total, data.count, data.totalCount, data.meta?.total, payload.total, payload.count, result.total, result.count, response.total, response.count, fb), fb));
+  return Math.max(fb, parseAmount(firstNonEmpty(d.total, d.count, d.totalCount, d.remoteCount, d.meta?.total, d.meta?.count, d.pagination?.total, d.pagination?.totalCount, data.total, data.count, data.totalCount, data.meta?.total, payload.total, payload.count, result.total, result.count, response.total, response.count, fb), fb, AMOUNT_POLICIES.coerced));
 }
 
 function buildVm(input = {}) {
@@ -598,7 +581,7 @@ function buildVm(input = {}) {
           : filter;
   const visibleLimit = Math.max(
     1,
-    num(d.visibleLimit ?? DEFAULT_VISIBLE_ROWS, DEFAULT_VISIBLE_ROWS)
+    parseAmount(d.visibleLimit ?? DEFAULT_VISIBLE_ROWS, DEFAULT_VISIBLE_ROWS, AMOUNT_POLICIES.coerced)
   );
   const serverFilterApplied = d.serverFilterApplied === true;
   const filterOwnedItems = serverFilterApplied
@@ -907,7 +890,7 @@ function renderThead() {
 }
 
 function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
-  const count = Math.max(4, num(rows, DEFAULT_VISIBLE_ROWS));
+  const count = Math.max(4, parseAmount(rows, DEFAULT_VISIBLE_ROWS, AMOUNT_POLICIES.coerced));
   return `
     <div class="incidencias-table-wrap is-loading" data-incidencias-table-wrap="true" data-incidencias-focus-fallback="true" tabindex="-1">
       <span class="incidencias-visually-hidden" role="status" aria-live="polite" aria-atomic="true">Cargando incidencias...</span>

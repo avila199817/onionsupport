@@ -43,6 +43,7 @@ import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { labelKey } from "../../core/slug-key.js";
 import { TIMESTAMP_POLICIES, toDate } from "../../core/dates.js";
 import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, dateFormatter, formatCurrency } from "../../core/format.js";
+import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
   "facturas.template.modal.productivo.v4.admin-payment";
@@ -91,85 +92,6 @@ function cleanMultiline(
    NO aplanar arrays.
    lineas/impuestos/relations son valores completos.
 */
-function number(
-  value = 0,
-  fallback = 0
-) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return fallback;
-  }
-
-  if (typeof value === "number") {
-    return Number.isFinite(value)
-      ? value
-      : fallback;
-  }
-
-  if (typeof value === "boolean") {
-    return value
-      ? 1
-      : 0;
-  }
-
-  if (typeof value === "object") {
-    return fallback;
-  }
-
-  if (typeof value === "string") {
-    let clean =
-      value
-        .trim()
-        .replace(/[€$£¥%]/g, "")
-        .replace(/[^\d.,+\-\s]/g, "")
-        .replace(/\s+/g, "");
-
-    if (
-      !clean ||
-      clean === "-" ||
-      clean === "+"
-    ) {
-      return fallback;
-    }
-
-    const hasComma =
-      clean.includes(",");
-
-    const hasDot =
-      clean.includes(".");
-
-    if (hasComma && hasDot) {
-      clean =
-        clean.lastIndexOf(",") >
-        clean.lastIndexOf(".")
-          ? clean
-              .replace(/\./g, "")
-              .replace(/,/g, ".")
-          : clean.replace(/,/g, "");
-    } else if (hasComma) {
-      clean =
-        clean.replace(/,/g, ".");
-    }
-
-    const parsed =
-      Number(clean);
-
-    return Number.isFinite(parsed)
-      ? parsed
-      : fallback;
-  }
-
-  const parsed =
-    Number(value);
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : fallback;
-}
-
 function attr(
   value = ""
 ) {
@@ -471,7 +393,7 @@ function firstUrl(
 ========================================================= */
 
 function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
-  return formatCurrency(number(value, 0), currencyCode(currency, DEFAULT_CURRENCY), CURRENCY_POLICIES.standard);
+  return formatCurrency(parseAmount(value, 0, AMOUNT_POLICIES.booleanDigit), currencyCode(currency, DEFAULT_CURRENCY), CURRENCY_POLICIES.standard);
 }
 
 function formatPercent(
@@ -479,7 +401,7 @@ function formatPercent(
 ) {
   const parsed =
     Math.abs(
-      number(value, 0)
+      parseAmount(value, 0, AMOUNT_POLICIES.booleanDigit)
     );
 
   if (!parsed) {
@@ -1195,7 +1117,7 @@ function firstNumericFromSources(
   }
 
   const parsed =
-    number(raw, NaN);
+    parseAmount(raw, NaN, AMOUNT_POLICIES.booleanDigit);
 
   return Number.isFinite(parsed)
     ? parsed
@@ -2045,21 +1967,22 @@ function getLineaDescripcion(
 function getLineaCantidad(
   linea = {}
 ) {
-  return number(
+  return parseAmount(
     firstNonEmpty(
       linea?.cantidad,
       linea?.qty,
       linea?.quantity,
       1
     ),
-    1
+    1,
+    AMOUNT_POLICIES.booleanDigit
   );
 }
 
 function getLineaUnitario(
   linea = {}
 ) {
-  return number(
+  return parseAmount(
     firstNonEmpty(
       linea?.precioUnitario,
       linea?.importeUnitario,
@@ -2067,7 +1990,8 @@ function getLineaUnitario(
       linea?.precio,
       linea?.price
     ),
-    0
+    0,
+    AMOUNT_POLICIES.booleanDigit
   );
 }
 
@@ -2088,9 +2012,10 @@ function getLineaSubtotal(
     explicit !== undefined &&
     explicit !== ""
   ) {
-    return number(
+    return parseAmount(
       explicit,
-      0
+      0,
+      AMOUNT_POLICIES.booleanDigit
     );
   }
 
@@ -2103,28 +2028,30 @@ function getLineaSubtotal(
 function getLineaIvaPct(
   linea = {}
 ) {
-  return number(
+  return parseAmount(
     firstNonEmpty(
       linea?.ivaPorcentaje,
       linea?.porcentajeIva,
       linea?.ivaRate,
       linea?.taxRate
     ),
-    0
+    0,
+    AMOUNT_POLICIES.booleanDigit
   );
 }
 
 function getLineaIrpfPct(
   linea = {}
 ) {
-  return number(
+  return parseAmount(
     firstNonEmpty(
       linea?.irpfPorcentaje,
       linea?.porcentajeIrpf,
       linea?.irpfRate,
       linea?.withholdingRate
     ),
-    0
+    0,
+    AMOUNT_POLICIES.booleanDigit
   );
 }
 
@@ -2178,35 +2105,38 @@ function normalizeTaxLine(
       labelKey(tipo),
 
     porcentaje:
-      number(
+      parseAmount(
         firstNonEmpty(
           impuesto.porcentaje,
           impuesto.percent,
           impuesto.rate,
           impuesto.tipoPorcentaje
         ),
-        0
+        0,
+        AMOUNT_POLICIES.booleanDigit
       ),
 
     base:
-      number(
+      parseAmount(
         firstNonEmpty(
           impuesto.base,
           impuesto.taxBase,
           impuesto.baseAmount
         ),
-        0
+        0,
+        AMOUNT_POLICIES.booleanDigit
       ),
 
     importe:
-      number(
+      parseAmount(
         firstNonEmpty(
           impuesto.importe,
           impuesto.amount,
           impuesto.total,
           impuesto.value
         ),
-        0
+        0,
+        AMOUNT_POLICIES.booleanDigit
       ),
 
     sign:
@@ -2255,35 +2185,38 @@ function getObjectTax(
   }
 
   const importe =
-    number(
+    parseAmount(
       firstNonEmpty(
         obj.importe,
         obj.amount,
         obj.total,
         obj.value
       ),
-      0
+      0,
+      AMOUNT_POLICIES.booleanDigit
     );
 
   const porcentaje =
-    number(
+    parseAmount(
       firstNonEmpty(
         obj.porcentaje,
         obj.percent,
         obj.rate,
         obj.tipoPorcentaje
       ),
-      0
+      0,
+      AMOUNT_POLICIES.booleanDigit
     );
 
   const base =
-    number(
+    parseAmount(
       firstNonEmpty(
         obj.base,
         obj.taxBase,
         obj.baseAmount
       ),
-      0
+      0,
+      AMOUNT_POLICIES.booleanDigit
     );
 
   const enabled =
@@ -2347,7 +2280,7 @@ function getExplicitTax(
 
   if (type === "iva") {
     const importe =
-      number(
+      parseAmount(
         firstFromSources(
           sources,
           [
@@ -2362,11 +2295,12 @@ function getExplicitTax(
             "meta.displayIva",
           ]
         ),
-        0
+        0,
+        AMOUNT_POLICIES.booleanDigit
       );
 
     const porcentaje =
-      number(
+      parseAmount(
         firstFromSources(
           sources,
           [
@@ -2376,11 +2310,12 @@ function getExplicitTax(
             "taxRate",
           ]
         ),
-        0
+        0,
+        AMOUNT_POLICIES.booleanDigit
       );
 
     const base =
-      number(
+      parseAmount(
         firstFromSources(
           sources,
           [
@@ -2390,7 +2325,8 @@ function getExplicitTax(
             "totales.baseImponible",
           ]
         ),
-        0
+        0,
+        AMOUNT_POLICIES.booleanDigit
       );
 
     if (
@@ -2413,7 +2349,7 @@ function getExplicitTax(
   }
 
   const importe =
-    number(
+    parseAmount(
       firstFromSources(
         sources,
         [
@@ -2432,11 +2368,12 @@ function getExplicitTax(
           "meta.displayIrpf",
         ]
       ),
-      0
+      0,
+      AMOUNT_POLICIES.booleanDigit
     );
 
   const porcentaje =
-    number(
+    parseAmount(
       firstFromSources(
         sources,
         [
@@ -2447,11 +2384,12 @@ function getExplicitTax(
           "withholdingRate",
         ]
       ),
-      0
+      0,
+      AMOUNT_POLICIES.booleanDigit
     );
 
   const base =
-    number(
+    parseAmount(
       firstFromSources(
         sources,
         [
@@ -2462,7 +2400,8 @@ function getExplicitTax(
           "totales.baseImponible",
         ]
       ),
-      0
+      0,
+      AMOUNT_POLICIES.booleanDigit
     );
 
   if (
@@ -2643,18 +2582,20 @@ function getFacturaImpuestos(
 
   if (breakdown.iva) {
     total +=
-      number(
+      parseAmount(
         breakdown.iva.importe,
-        0
+        0,
+        AMOUNT_POLICIES.booleanDigit
       );
   }
 
   if (breakdown.irpf) {
     const amount =
       Math.abs(
-        number(
+        parseAmount(
           breakdown.irpf.importe,
-          0
+          0,
+          AMOUNT_POLICIES.booleanDigit
         )
       );
 
@@ -2666,9 +2607,10 @@ function getFacturaImpuestos(
     of breakdown.otros
   ) {
     const amount =
-      number(
+      parseAmount(
         item.importe,
-        0
+        0,
+        AMOUNT_POLICIES.booleanDigit
       );
 
     const negative =
@@ -2886,15 +2828,17 @@ function renderTaxCard(
     );
 
   const base =
-    number(
+    parseAmount(
       item.base,
-      0
+      0,
+      AMOUNT_POLICIES.booleanDigit
     );
 
   const importeRaw =
-    number(
+    parseAmount(
       item.importe,
-      0
+      0,
+      AMOUNT_POLICIES.booleanDigit
     );
 
   const displayAmount =

@@ -30,6 +30,7 @@ import { safeArray } from "../../core/arrays.js";
 import { nowIso, nowMs } from "../../core/clock.js";
 import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage, errorStatus } from "../../core/errors.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
+import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
 
 export const HOME_API_VERSION =
   "home.api.domain-aggregator.v13-domain-counts";
@@ -61,39 +62,6 @@ const cacheState = {
 /* =========================================================
    BASICS
 ========================================================= */
-
-function number(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-  if (typeof value === "boolean" || typeof value === "object") return fallback;
-
-  if (typeof value === "string") {
-    let text = value
-      .trim()
-      .replace(/[€$£¥%]/g, "")
-      .replace(/[^\d.,+\-\s]/g, "")
-      .replace(/\s+/g, "");
-
-    if (!text || text === "+" || text === "-") return fallback;
-
-    const hasComma = text.includes(",");
-    const hasDot = text.includes(".");
-
-    if (hasComma && hasDot) {
-      text = text.lastIndexOf(",") > text.lastIndexOf(".")
-        ? text.replace(/\./g, "").replace(/,/g, ".")
-        : text.replace(/,/g, "");
-    } else if (hasComma) {
-      text = text.replace(/,/g, ".");
-    }
-
-    const parsed = Number(text);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 function safeId(value = "") {
   return cleanText(value, "")
@@ -203,9 +171,10 @@ function isCacheFresh(options = {}) {
   if (!defaultDashboardScope(options)) return false;
   if (!cacheMatches()) return false;
 
-  const ttlMs = number(
-    options.ttlMs ?? options.cacheTtlMs,
-    HOME_CACHE_TTL_MS
+  const ttlMs = parseAmount(
+    options.ttlMs ?? options.cacheTtlMs ?? null,
+    HOME_CACHE_TTL_MS,
+    AMOUNT_POLICIES.textOnly
   );
 
   return ttlMs > 0 && cacheAgeMs() <= ttlMs;

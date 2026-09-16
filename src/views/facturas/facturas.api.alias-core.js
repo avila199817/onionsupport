@@ -16,6 +16,7 @@ import * as Boundary from "./facturas.api.boundary.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { recordKey } from "../../core/slug-key.js";
+import { AMOUNT_POLICIES, parseAmount, round2 } from "../../core/amounts.js";
 
 export * from "./facturas.api.boundary.js";
 
@@ -25,38 +26,6 @@ export const FACTURA_CANONICAL_ALIAS_VERSION =
 const TECHNICAL_PREFIX = "FACTURA_CREATE_IDEMP_";
 const aliasRegistry = new Map();
 const MAX_ALIAS_REGISTRY = 256;
-
-function numberOrNull(value) {
-  if (value === undefined || value === null || value === "") return null;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "boolean" || typeof value === "object") return null;
-
-  let normalized = String(value)
-    .trim()
-    .replace(/[€$£¥%]/g, "")
-    .replace(/[^\d.,+\-\s]/g, "")
-    .replace(/\s+/g, "");
-
-  if (!normalized || normalized === "+" || normalized === "-") return null;
-
-  const hasComma = normalized.includes(",");
-  const hasDot = normalized.includes(".");
-
-  if (hasComma && hasDot) {
-    normalized = normalized.lastIndexOf(",") > normalized.lastIndexOf(".")
-      ? normalized.replace(/\./g, "").replace(/,/g, ".")
-      : normalized.replace(/,/g, "");
-  } else if (hasComma) {
-    normalized = normalized.replace(/,/g, ".");
-  }
-
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function round2(value) {
-  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
-}
 
 function isTechnicalIdentifier(value = "") {
   return cleanText(value, "").startsWith(TECHNICAL_PREFIX);
@@ -236,12 +205,13 @@ function taxesFromLines(value = {}) {
     const item = safeObject(raw, null);
     if (!item) continue;
 
-    const amount = numberOrNull(firstNonEmpty(
+    const amount = parseAmount(firstNonEmpty(
       item.importe,
       item.amount,
       item.total,
       item.value
-    ));
+    ),
+null, AMOUNT_POLICIES.textOnly);
     if (amount === null) continue;
 
     found = true;
@@ -261,7 +231,7 @@ function taxesFromLines(value = {}) {
 function normalizeFinancialAliases(value = {}) {
   const result = { ...safeObject(value, {}) };
 
-  let base = numberOrNull(firstNonEmpty(
+  let base = parseAmount(firstNonEmpty(
     result.baseImponible,
     result.taxableBase,
     result.subtotal,
@@ -273,9 +243,10 @@ function normalizeFinancialAliases(value = {}) {
     result.totals?.subtotal,
     result.resumen?.baseImponible,
     result.summary?.base
-  ));
+  ),
+null, AMOUNT_POLICIES.textOnly);
 
-  let taxes = numberOrNull(firstNonEmpty(
+  let taxes = parseAmount(firstNonEmpty(
     result.impuestosTotal,
     result.taxAmount,
     result.taxesAmount,
@@ -286,19 +257,21 @@ function normalizeFinancialAliases(value = {}) {
     result.totals?.taxes,
     result.resumen?.iva,
     result.summary?.taxes
-  ));
+  ),
+null, AMOUNT_POLICIES.textOnly);
 
   if (taxes === null) taxes = taxesFromLines(result);
 
   if (taxes === null) {
-    const iva = numberOrNull(firstNonEmpty(
+    const iva = parseAmount(firstNonEmpty(
       result.ivaImporte,
       result.importeIva,
       result.totalIva,
       result.ivaTotal,
       isObject(result.iva) ? firstNonEmpty(result.iva.importe, result.iva.amount) : result.iva
-    ));
-    const retention = numberOrNull(firstNonEmpty(
+    ),
+null, AMOUNT_POLICIES.textOnly);
+    const retention = parseAmount(firstNonEmpty(
       result.irpfImporte,
       result.importeIrpf,
       result.totalIrpf,
@@ -306,23 +279,25 @@ function normalizeFinancialAliases(value = {}) {
       result.retencionesTotal,
       result.withholdingAmount,
       isObject(result.irpf) ? firstNonEmpty(result.irpf.importe, result.irpf.amount) : result.irpf
-    ));
+    ),
+null, AMOUNT_POLICIES.textOnly);
 
     if (iva !== null || retention !== null) {
       taxes = round2((iva || 0) - Math.abs(retention || 0));
     }
   }
 
-  const paid = numberOrNull(firstNonEmpty(
+  const paid = parseAmount(firstNonEmpty(
     result.paidAmount,
     result.totalPagado,
     result.pagado,
     result.payment?.paidAmount,
     result.totales?.pagado,
     result.totals?.paid
-  )) ?? 0;
+  ),
+null, AMOUNT_POLICIES.textOnly) ?? 0;
 
-  const pending = numberOrNull(firstNonEmpty(
+  const pending = parseAmount(firstNonEmpty(
     result.pendingAmount,
     result.totalPendiente,
     result.pendiente,
@@ -331,9 +306,10 @@ function normalizeFinancialAliases(value = {}) {
     result.payment?.pendingAmount,
     result.totales?.pendiente,
     result.totals?.pending
-  ));
+  ),
+null, AMOUNT_POLICIES.textOnly);
 
-  let total = numberOrNull(firstNonEmpty(
+  let total = parseAmount(firstNonEmpty(
     result.total,
     result.totalFactura,
     result.importeTotal,
@@ -345,7 +321,8 @@ function normalizeFinancialAliases(value = {}) {
     result.totals?.total,
     result.resumen?.total,
     result.summary?.total
-  ));
+  ),
+null, AMOUNT_POLICIES.textOnly);
 
   if ((total === null || total === 0) && pending !== null && pending + paid !== 0) {
     total = round2(pending + paid);

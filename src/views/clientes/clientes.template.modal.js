@@ -9,6 +9,7 @@ import { slugKey } from "../../core/slug-key.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, currencyFormatter, dateFormatter } from "../../core/format.js";
+import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
 /* =========================================================
    Onion Support - Clientes Detail Template
    Archivo: /src/views/clientes/clientes.template.modal.js
@@ -106,84 +107,6 @@ function isBrowser() {
   No aplanar arrays:
   permissions/audit son colecciones reales.
 */
-function number(
-  value = 0,
-  fallback = 0
-) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return fallback;
-  }
-
-  if (
-    typeof value === "number"
-  ) {
-    return Number.isFinite(value)
-      ? value
-      : fallback;
-  }
-
-  if (
-    typeof value === "string"
-  ) {
-    let normalized =
-      value
-        .trim()
-        .replace(/[€$£¥%]/g, "")
-        .replace(/[^\d.,+\-\s]/g, "")
-        .replace(/\s+/g, "");
-
-    if (
-      !normalized ||
-      normalized === "+" ||
-      normalized === "-"
-    ) {
-      return fallback;
-    }
-
-    const comma =
-      normalized.lastIndexOf(",");
-
-    const dot =
-      normalized.lastIndexOf(".");
-
-    if (
-      comma >= 0 &&
-      dot >= 0
-    ) {
-      normalized =
-        comma > dot
-          ? normalized
-              .replace(/\./g, "")
-              .replace(/,/g, ".")
-          : normalized
-              .replace(/,/g, "");
-    } else if (
-      comma >= 0
-    ) {
-      normalized =
-        normalized.replace(/,/g, ".");
-    }
-
-    const parsed =
-      Number(normalized);
-
-    return Number.isFinite(parsed)
-      ? parsed
-      : fallback;
-  }
-
-  const parsed =
-    Number(value);
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : fallback;
-}
-
 function optionalNumber(
   ...values
 ) {
@@ -197,9 +120,10 @@ function optionalNumber(
     }
 
     const parsed =
-      number(
+      parseAmount(
         value,
-        Number.NaN
+        Number.NaN,
+        AMOUNT_POLICIES.coerced
       );
 
     if (
@@ -657,7 +581,7 @@ function icon(
 
 function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
   const formatter = currencyFormatter(currencyCode(currency, DEFAULT_CURRENCY), CURRENCY_POLICIES.currencyDigits);
-  return formatter ? formatter.format(number(value, 0)) : `${number(value, 0).toFixed(2).replace(".", ",")} €`;
+  return formatter ? formatter.format(parseAmount(value, 0, AMOUNT_POLICIES.coerced)) : `${parseAmount(value, 0, AMOUNT_POLICIES.coerced).toFixed(2).replace(".", ",")} €`;
 }
 
 function formatDate(
@@ -791,9 +715,10 @@ function formatPercent(
 ) {
   return (
     `${String(
-      number(
+      parseAmount(
         value,
-        0
+        0,
+        AMOUNT_POLICIES.coerced
       )
     ).replace(".", ",")}%`
   );
@@ -1873,7 +1798,7 @@ function getTicketsCount(
 
   return Math.max(
     0,
-    number(
+    parseAmount(
       firstNonEmpty(
         detail.ticketsCount,
         detail.incidenciasCount,
@@ -1888,7 +1813,8 @@ function getTicketsCount(
 
         0
       ),
-      0
+      0,
+      AMOUNT_POLICIES.coerced
     )
   );
 }
@@ -1901,7 +1827,7 @@ function getInvoicesCount(
 
   return Math.max(
     0,
-    number(
+    parseAmount(
       firstNonEmpty(
         detail.invoicesCount,
         detail.facturasCount,
@@ -1916,7 +1842,8 @@ function getInvoicesCount(
 
         0
       ),
-      0
+      0,
+      AMOUNT_POLICIES.coerced
     )
   );
 }
@@ -1927,7 +1854,7 @@ function getTotalAmount(
   const raw =
     getRaw(detail);
 
-  return number(
+  return parseAmount(
     firstNonEmpty(
       detail.totalAmount,
       detail.totalImporte,
@@ -1942,7 +1869,8 @@ function getTotalAmount(
 
       0
     ),
-    0
+    0,
+    AMOUNT_POLICIES.coerced
   );
 }
 

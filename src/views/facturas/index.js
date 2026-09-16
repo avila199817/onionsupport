@@ -72,6 +72,7 @@ import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { redactSecrets } from "../../core/redact.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 import { CURRENCY_POLICIES, formatCurrency } from "../../core/format.js";
+import { round2 } from "../../core/amounts.js";
 
 export const FACTURAS_INDEX_VERSION =
   "facturas.index.productivo.v22.stable-create-client-relations";
@@ -4729,13 +4730,9 @@ function createFacturasController(host = null, context = {}) {
 
       lineas: arrayFrom(breakdown.lineas).map((linea, index) => {
         const baseLinea = finiteNumber(linea.base, 0);
-        const ivaImporte = Math.round(
-          (baseLinea * (breakdown.ivaRate / 100) + Number.EPSILON) * 100
-        ) / 100;
+        const ivaImporte = round2(baseLinea * (breakdown.ivaRate / 100));
         const irpfImporte = breakdown.aplicaIrpf
-          ? -Math.round(
-              (baseLinea * (breakdown.irpfRate / 100) + Number.EPSILON) * 100
-            ) / 100
+          ? -round2(baseLinea * (breakdown.irpfRate / 100))
           : 0;
 
         return {

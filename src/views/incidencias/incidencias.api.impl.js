@@ -32,6 +32,7 @@ import { slugKey } from "../../core/slug-key.js";
 import { nowIso, nowMs } from "../../core/clock.js";
 import { redactSecrets } from "../../core/redact.js";
 import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage, errorStatus } from "../../core/errors.js";
+import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
 
 export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v24.cursor-scale-safe";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
@@ -118,40 +119,6 @@ function isFileLike(value = null) {
   un first(...values.flat(Infinity)) local: cuando el backend devolvía items: [..],
   first(items, ...) devolvía el primer ticket, y arrayFrom(ticket) => [].
 */
-function number(value = 0, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-
-  if (typeof value === "string") {
-    let clean = value
-      .trim()
-      .replace(/[€$£¥%]/g, "")
-      .replace(/[^\d.,+\-\s]/g, "")
-      .replace(/\s+/g, "");
-
-    if (!clean || clean === "-" || clean === "+") return fallback;
-
-    const hasComma = clean.includes(",");
-    const hasDot = clean.includes(".");
-
-    if (hasComma && hasDot) {
-      const lastComma = clean.lastIndexOf(",");
-      const lastDot = clean.lastIndexOf(".");
-      clean = lastComma > lastDot
-        ? clean.replace(/\./g, "").replace(/,/g, ".")
-        : clean.replace(/,/g, "");
-    } else if (hasComma) {
-      clean = clean.replace(/,/g, ".");
-    }
-
-    const parsed = Number(clean);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
 function normalizeSearch(value = "") {
   return cleanText(value, "")
     .toLowerCase()
@@ -389,7 +356,7 @@ function triggerAttachmentDownload(url = "", filename = "") {
 }
 
 function countFrom(...values) {
-  return Math.max(0, ...values.map((value) => number(value, 0)));
+  return Math.max(0, ...values.map((value) => parseAmount(value, 0, AMOUNT_POLICIES.coerced)));
 }
 
 function encodeSegment(value = "") {
@@ -508,9 +475,10 @@ function isCacheFresh(options = {}) {
   const key = listCacheKey(options);
   if (lastCacheKey && key && lastCacheKey !== key) return false;
 
-  const ttl = number(
+  const ttl = parseAmount(
     options.ttlMs ?? options.cacheTtlMs ?? INCIDENCIAS_CACHE_TTL_MS,
-    INCIDENCIAS_CACHE_TTL_MS
+    INCIDENCIAS_CACHE_TTL_MS,
+    AMOUNT_POLICIES.coerced
   );
   if (ttl <= 0) return false;
 
@@ -519,7 +487,7 @@ function isCacheFresh(options = {}) {
 
 function cachedListResponse({ cached = true, stale = false, error = null, options = {} } = {}) {
   const items = arrayFrom(lastList.items);
-  const total = Math.max(number(lastList.total, items.length), items.length);
+  const total = Math.max(parseAmount(lastList.total, items.length, AMOUNT_POLICIES.coerced), items.length);
   const response = safeObject(lastList.response, {});
   const responseTotal = Object.prototype.hasOwnProperty.call(response, "total")
     ? response.total
@@ -545,9 +513,10 @@ function cachedListResponse({ cached = true, stale = false, error = null, option
       hydrated: Boolean(lastLoadedAt),
       key: lastCacheKey,
       ageMs: cacheAgeMs(),
-      ttlMs: number(
+      ttlMs: parseAmount(
         options.ttlMs ?? options.cacheTtlMs ?? INCIDENCIAS_CACHE_TTL_MS,
-        INCIDENCIAS_CACHE_TTL_MS
+        INCIDENCIAS_CACHE_TTL_MS,
+        AMOUNT_POLICIES.coerced
       ),
       fresh: !stale && !error && isCacheFresh(options),
     },
@@ -560,7 +529,7 @@ function setListCache({ items = [], total = 0, key = "", response = {} } = {}) {
 
   lastList = {
     items: normalizedItems,
-    total: Math.max(number(total, normalizedItems.length), normalizedItems.length),
+    total: Math.max(parseAmount(total, normalizedItems.length, AMOUNT_POLICIES.coerced), normalizedItems.length),
     response: responseMetadata,
   };
 
@@ -573,7 +542,7 @@ function setListCache({ items = [], total = 0, key = "", response = {} } = {}) {
 export function hydrateIncidenciasFromCache() {
   const items = arrayFrom(lastList.items);
   const response = safeObject(lastList.response, {});
-  const total = Math.max(number(lastList.total, items.length), items.length);
+  const total = Math.max(parseAmount(lastList.total, items.length, AMOUNT_POLICIES.coerced), items.length);
 
   return {
     ...response,
@@ -700,7 +669,7 @@ function firstOwnValue(
 
 function normalizeEnvelopeCount(value, fallback = 0) {
   if (value === undefined || value === null || value === "") return fallback;
-  const parsed = number(value, Number.NaN);
+  const parsed = parseAmount(value, Number.NaN, AMOUNT_POLICIES.coerced);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
@@ -946,7 +915,7 @@ function usersListFromPayload(payload = null) {
 function totalFromPayload(payload = null, fallback = 0) {
   const queue = [payload];
   const seen = new WeakSet();
-  let best = number(fallback, 0);
+  let best = parseAmount(fallback, 0, AMOUNT_POLICIES.coerced);
 
   while (queue.length) {
     const current = queue.shift();
@@ -958,16 +927,16 @@ function totalFromPayload(payload = null, fallback = 0) {
 
     best = Math.max(
       best,
-      number(object.total, 0),
-      number(object.count, 0),
-      number(object.totalCount, 0),
-      number(object.remoteCount, 0),
-      number(object.meta?.total, 0),
-      number(object.meta?.count, 0),
-      number(object.meta?.totalCount, 0),
-      number(object.pagination?.total, 0),
-      number(object.pagination?.totalCount, 0),
-      number(object.page?.total, 0)
+      parseAmount(object.total, 0, AMOUNT_POLICIES.coerced),
+      parseAmount(object.count, 0, AMOUNT_POLICIES.coerced),
+      parseAmount(object.totalCount, 0, AMOUNT_POLICIES.coerced),
+      parseAmount(object.remoteCount, 0, AMOUNT_POLICIES.coerced),
+      parseAmount(object.meta?.total, 0, AMOUNT_POLICIES.coerced),
+      parseAmount(object.meta?.count, 0, AMOUNT_POLICIES.coerced),
+      parseAmount(object.meta?.totalCount, 0, AMOUNT_POLICIES.coerced),
+      parseAmount(object.pagination?.total, 0, AMOUNT_POLICIES.coerced),
+      parseAmount(object.pagination?.totalCount, 0, AMOUNT_POLICIES.coerced),
+      parseAmount(object.page?.total, 0, AMOUNT_POLICIES.coerced)
     );
 
     for (const key of ["data", "payload", "result", "response", "body"]) {
@@ -1113,7 +1082,7 @@ function buildUsersSearchQuery(query = "", limit = USERS_SEARCH_LIMIT) {
 
 export async function searchIncidenciaUsers(query = "", options = {}) {
   const q = cleanText(query, "");
-  const limit = Math.max(1, Math.min(number(options.limit, USERS_SEARCH_LIMIT), 20));
+  const limit = Math.max(1, Math.min(parseAmount(options.limit, USERS_SEARCH_LIMIT, AMOUNT_POLICIES.coerced), 20));
 
   if (q.length < USERS_SEARCH_MIN_LENGTH) {
     usersSearchController?.abort?.();
@@ -1392,8 +1361,8 @@ function normalizeAttachment(file = {}, index = 0) {
     filename: name,
     fileName: name,
     originalName: safePublicText(firstNonEmpty(raw.originalName, name), name),
-    size: number(firstNonEmpty(raw.size, raw.sizeBytes), 0),
-    sizeBytes: number(firstNonEmpty(raw.sizeBytes, raw.size), 0),
+    size: parseAmount(firstNonEmpty(raw.size, raw.sizeBytes), 0, AMOUNT_POLICIES.coerced),
+    sizeBytes: parseAmount(firstNonEmpty(raw.sizeBytes, raw.size), 0, AMOUNT_POLICIES.coerced),
     contentType,
     mimeType: contentType,
     mimetype: contentType,
@@ -1465,7 +1434,7 @@ function incidenciaSortTime(item = {}) {
   const ms = Date.parse(firstNonEmpty(raw.lastActivityAt, raw.updatedAt, raw.modifiedAt, raw.closedAt, raw.createdAt, raw.lifecycle?.lastActivityAt, raw.lifecycle?.updatedAt, raw.lifecycle?.closedAt, raw.lifecycle?.createdAt, 0));
   if (Number.isFinite(ms)) return ms;
 
-  const ts = number(raw._ts, 0);
+  const ts = parseAmount(raw._ts, 0, AMOUNT_POLICIES.coerced);
   return ts > 0 ? ts * 1000 : 0;
 }
 
@@ -1508,7 +1477,7 @@ export function normalizeIncidencia(item = {}) {
 
   const invoices = arrayFrom(firstNonEmpty(raw.invoices, raw.facturas, raw.linkedInvoices?.items, []));
   const invoicesCount = countFrom(raw.facturasCount, raw.invoicesCount, raw.linkedInvoicesCount, raw.linkedInvoices?.count, invoices.length);
-  const invoiceTotal = number(firstNonEmpty(raw.facturasTotal, raw.invoicesTotal, raw.importeFacturas, raw.invoiceTotal, raw.facturaTotal, raw.facturaImporte, raw.importeFactura, raw.totalFactura, raw.invoiceAmount, raw.linkedInvoicesTotal, raw.linkedInvoicesAmount, raw.linkedInvoicesImporte, raw.linkedInvoices?.total, raw.linkedInvoices?.amount, raw.meta?.invoicesTotal, raw.meta?.invoiceTotal, 0), 0);
+  const invoiceTotal = parseAmount(firstNonEmpty(raw.facturasTotal, raw.invoicesTotal, raw.importeFacturas, raw.invoiceTotal, raw.facturaTotal, raw.facturaImporte, raw.importeFactura, raw.totalFactura, raw.invoiceAmount, raw.linkedInvoicesTotal, raw.linkedInvoicesAmount, raw.linkedInvoicesImporte, raw.linkedInvoices?.total, raw.linkedInvoices?.amount, raw.meta?.invoicesTotal, raw.meta?.invoiceTotal, 0), 0, AMOUNT_POLICIES.coerced);
   const currency = cleanText(firstNonEmpty(raw.currency, raw.moneda, raw.facturaCurrency, raw.facturaMoneda, raw.linkedInvoicesCurrency, raw.linkedInvoicesMoneda, raw.linkedInvoices?.currency, raw.linkedInvoices?.moneda, raw.meta?.invoiceCurrency, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
 
   const createdAt = firstNonEmpty(raw.createdAt, raw.fechaCreacion, raw.created_at, raw.lifecycle?.createdAt, null);
@@ -1578,7 +1547,7 @@ export function normalizeIncidencia(item = {}) {
 
     entityType: cleanText(firstNonEmpty(raw.entityType, "ticket"), "ticket"),
     tipoDocumento: cleanText(firstNonEmpty(raw.tipoDocumento, "ticket"), "ticket"),
-    schemaVersion: number(raw.schemaVersion, number(raw.meta?.schemaVersion, 1)),
+    schemaVersion: parseAmount(raw.schemaVersion, parseAmount(raw.meta?.schemaVersion, 1, AMOUNT_POLICIES.coerced), AMOUNT_POLICIES.coerced),
 
     subject,
     asunto: subject,
@@ -1764,7 +1733,7 @@ export function normalizeIncidencia(item = {}) {
 
     meta: {
       ...safeObject(raw.meta),
-      schemaVersion: number(raw.meta?.schemaVersion, number(raw.schemaVersion, 1)),
+      schemaVersion: parseAmount(raw.meta?.schemaVersion, parseAmount(raw.schemaVersion, 1, AMOUNT_POLICIES.coerced), AMOUNT_POLICIES.coerced),
       frontendReady: true,
       hasAttachments: attachmentsCount > 0,
       hasComments: commentsCount > 0,
@@ -1839,7 +1808,7 @@ function upsertCachedIncidencia(item = null) {
   lastList = {
     ...lastList,
     items: next,
-    total: Math.max(number(lastList.total, next.length), next.length),
+    total: Math.max(parseAmount(lastList.total, next.length, AMOUNT_POLICIES.coerced), next.length),
     // El cursor/resumen remoto deja de ser autoritativo tras una mutación local.
     // Las filas optimistas se conservan con el shape cacheado histórico hasta
     // que una nueva lectura repueble metadata v2 coherente.
@@ -2212,9 +2181,10 @@ export async function listIncidencias(options = {}) {
           hydrated: epoch === cacheEpoch,
           key: lastCacheKey,
           ageMs: 0,
-          ttlMs: number(
+          ttlMs: parseAmount(
             options.ttlMs ?? options.cacheTtlMs ?? INCIDENCIAS_CACHE_TTL_MS,
-            INCIDENCIAS_CACHE_TTL_MS
+            INCIDENCIAS_CACHE_TTL_MS,
+            AMOUNT_POLICIES.coerced
           ),
           fresh: epoch === cacheEpoch,
         },
@@ -2262,7 +2232,7 @@ export async function getIncidenciaByIdRequest(id = "", options = {}) {
 
   const force = options.force === true || options.forceRefresh === true;
   const useCache = options.cache !== false && options.noCache !== true;
-  const ttl = Math.max(0, number(options.ttlMs ?? options.cacheTtlMs, INCIDENCIAS_DETAIL_CACHE_TTL_MS));
+  const ttl = Math.max(0, parseAmount(options.ttlMs ?? options.cacheTtlMs, INCIDENCIAS_DETAIL_CACHE_TTL_MS, AMOUNT_POLICIES.coerced));
   const cached = detailCache.get(key);
 
   if (!force && useCache && cached && nowMs() - cached.at <= ttl) return cached.item;
@@ -2701,8 +2671,8 @@ export function computeIncidenciasStats(items = lastList.items) {
       if (isClosedStatus(item.status || item.estado)) acc.closed += 1;
       if (isUrgentPriority(item.priority || item.prioridad)) acc.urgent += 1;
 
-      acc.attachments += number(item.attachmentsCount, arrayFrom(item.attachments).length);
-      acc.invoiceTotal += number(firstNonEmpty(item.invoiceTotal, item.invoicesTotal, item.facturasTotal), 0);
+      acc.attachments += parseAmount(item.attachmentsCount, arrayFrom(item.attachments).length, AMOUNT_POLICIES.coerced);
+      acc.invoiceTotal += parseAmount(firstNonEmpty(item.invoiceTotal, item.invoicesTotal, item.facturasTotal), 0, AMOUNT_POLICIES.coerced);
 
       return acc;
     },
@@ -2735,7 +2705,7 @@ export function getIncidenciasApiSnapshot() {
     usersEndpoint: USERS_SEARCH_ENDPOINT,
     loading,
     cached: Boolean(lastLoadedAt),
-    total: Math.max(number(lastList.total, items.length), items.length),
+    total: Math.max(parseAmount(lastList.total, items.length, AMOUNT_POLICIES.coerced), items.length),
     count: items.length,
     items: items.length,
     lastLoadedAt,

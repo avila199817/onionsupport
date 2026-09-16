@@ -25,6 +25,7 @@ import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { CURRENCY_POLICIES, formatCurrency } from "../../core/format.js";
+import { AMOUNT_POLICIES, parseAmount, round2 } from "../../core/amounts.js";
 export const FACTURAS_CREATE_TEMPLATE_VERSION =
   "facturas.template.create.v7.multi-line-billing";
 
@@ -127,38 +128,8 @@ const DEFAULT_FORM = Object.freeze({
    BASICS
 ========================================================= */
 
-function number(value = 0, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-  if (typeof value === "boolean") return value ? 1 : 0;
-  if (typeof value === "object") return fallback;
-
-  let raw = String(value)
-    .trim()
-    .replace(/[€$£¥%]/g, "")
-    .replace(/[^\d.,+\-\s]/g, "")
-    .replace(/\s+/g, "");
-
-  if (!raw || raw === "+" || raw === "-") return fallback;
-
-  const comma = raw.lastIndexOf(",");
-  const dot = raw.lastIndexOf(".");
-
-  if (comma >= 0 && dot >= 0) {
-    raw = comma > dot
-      ? raw.replace(/\./g, "").replace(/,/g, ".")
-      : raw.replace(/,/g, "");
-  } else if (comma >= 0) {
-    raw = raw.replace(/,/g, ".");
-  }
-
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function round2(value = 0) {
-  const parsed = number(value, 0);
-  return Math.round((parsed + Number.EPSILON) * 100) / 100;
+function roundAmount(value) {
+  return round2(parseAmount(value, 0, AMOUNT_POLICIES.booleanDigit));
 }
 
 function parseOptionalBoolean(value) {
@@ -199,7 +170,7 @@ function safeImageSrc(value = "") {
 }
 
 function formatMoney(value = 0) {
-  return formatCurrency(number(value, 0), "EUR", CURRENCY_POLICIES.standard);
+  return formatCurrency(parseAmount(value, 0, AMOUNT_POLICIES.booleanDigit), "EUR", CURRENCY_POLICIES.standard);
 }
 
 function icon(name = "") {
@@ -515,8 +486,8 @@ function enrichFormWithPrimaryClient(form = {}, selectedClientes = []) {
 function normalizeLineItem(linea = {}, index = 0) {
   const raw = safeObject(linea);
   const defaultConcept = index === 0 ? DEFAULT_FORM.concepto : "";
-  const cantidad = Math.max(0, number(firstNonEmpty(raw.cantidad, raw.horas, raw.qty, raw.quantity), index === 0 ? DEFAULT_FORM.cantidad : 1));
-  const precioUnitario = Math.max(0, number(firstNonEmpty(raw.precioUnitario, raw.precio, raw.rate, raw.unitPrice), index === 0 ? DEFAULT_FORM.precioUnitario : 0));
+  const cantidad = Math.max(0, parseAmount(firstNonEmpty(raw.cantidad, raw.horas, raw.qty, raw.quantity), index === 0 ? DEFAULT_FORM.cantidad : 1, AMOUNT_POLICIES.booleanDigit));
+  const precioUnitario = Math.max(0, parseAmount(firstNonEmpty(raw.precioUnitario, raw.precio, raw.rate, raw.unitPrice), index === 0 ? DEFAULT_FORM.precioUnitario : 0, AMOUNT_POLICIES.booleanDigit));
 
   return {
     id: cleanText(firstNonEmpty(raw.id, raw.lineaId), `linea-${index + 1}`),
@@ -599,17 +570,17 @@ function getInvoiceBreakdown(form = {}) {
   const taxProfile = getFacturaCreateTaxProfile(current);
   const lineas = current.lineas.map((linea) => ({
     ...linea,
-    base: round2(Math.max(0, number(linea.cantidad, 0)) * Math.max(0, number(linea.precioUnitario, 0))),
+    base: roundAmount(Math.max(0, parseAmount(linea.cantidad, 0, AMOUNT_POLICIES.booleanDigit)) * Math.max(0, parseAmount(linea.precioUnitario, 0, AMOUNT_POLICIES.booleanDigit))),
   }));
-  const base = round2(lineas.reduce((sum, linea) => sum + linea.base, 0));
+  const base = roundAmount(lineas.reduce((sum, linea) => sum + linea.base, 0));
 
   const ivaRate = DEFAULT_IVA_RATE;
   const irpfRate = taxProfile.aplicaIrpf ? DEFAULT_IRPF_RATE : 0;
-  const ivaTotal = round2(base * (ivaRate / 100));
+  const ivaTotal = roundAmount(base * (ivaRate / 100));
   const irpfTotal = taxProfile.aplicaIrpf
-    ? round2(-(base * (irpfRate / 100)))
+    ? roundAmount(-(base * (irpfRate / 100)))
     : 0;
-  const totalFactura = round2(base + ivaTotal + irpfTotal);
+  const totalFactura = roundAmount(base + ivaTotal + irpfTotal);
 
   return {
     lineas,
@@ -933,7 +904,7 @@ function renderLineItems(vm = {}, disabled = false) {
   return `
     <div class="fac-create-line-items" data-line-items="true">
       ${lines.map((linea, index) => {
-        const base = round2(number(linea.cantidad, 0) * number(linea.precioUnitario, 0));
+        const base = roundAmount(parseAmount(linea.cantidad, 0, AMOUNT_POLICIES.booleanDigit) * parseAmount(linea.precioUnitario, 0, AMOUNT_POLICIES.booleanDigit));
         return `
           <article data-render-key="line:${attr(linea.id)}" class="fac-create-line-item" data-line-item="true" data-line-index="${index}">
             <header class="fac-create-line-head">
@@ -1289,8 +1260,8 @@ export function validateFacturaCreateForm({
 
   current.lineas.forEach((linea, index) => {
     if (!linea.concepto || linea.concepto.length < 2) errors[`lineas.${index}.concepto`] = "Indica un concepto válido.";
-    if (!(number(linea.cantidad, 0) > 0)) errors[`lineas.${index}.cantidad`] = "La cantidad debe ser mayor que cero.";
-    if (!(number(linea.precioUnitario, 0) > 0)) errors[`lineas.${index}.precioUnitario`] = "El precio debe ser mayor que cero.";
+    if (!(parseAmount(linea.cantidad, 0, AMOUNT_POLICIES.booleanDigit) > 0)) errors[`lineas.${index}.cantidad`] = "La cantidad debe ser mayor que cero.";
+    if (!(parseAmount(linea.precioUnitario, 0, AMOUNT_POLICIES.booleanDigit) > 0)) errors[`lineas.${index}.precioUnitario`] = "El precio debe ser mayor que cero.";
   });
 
   if (!current.fechaServicio) errors.fechaServicio = "Indica la fecha de servicio.";

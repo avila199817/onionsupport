@@ -21,6 +21,7 @@ import { clamp } from "../../core/numbers.js";
 import { labelKey } from "../../core/slug-key.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, dateFormatter, formatCurrency } from "../../core/format.js";
+import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
 
 export const FACTURAS_TEMPLATE_VERSION =
   "facturas.template.private.v7.admin-visual-parity";
@@ -68,39 +69,6 @@ const SORT_OPTIONS = Object.freeze([
 /* =========================================================
    BASICS
 ========================================================= */
-
-function number(value = 0, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-  if (typeof value === "boolean" || typeof value === "object") return fallback;
-
-  if (typeof value === "string") {
-    let clean = value
-      .trim()
-      .replace(/[€$£¥%]/g, "")
-      .replace(/[^\d.,+\-\s]/g, "")
-      .replace(/\s+/g, "");
-
-    if (!clean || clean === "-" || clean === "+") return fallback;
-
-    const hasComma = clean.includes(",");
-    const hasDot = clean.includes(".");
-
-    if (hasComma && hasDot) {
-      clean = clean.lastIndexOf(",") > clean.lastIndexOf(".")
-        ? clean.replace(/\./g, "").replace(/,/g, ".")
-        : clean.replace(/,/g, "");
-    } else if (hasComma) {
-      clean = clean.replace(/,/g, ".");
-    }
-
-    const parsed = Number(clean);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 const attr = (value = "") => escapeHtml(cleanText(value, ""));
 
@@ -245,7 +213,7 @@ function isAdmin(input = {}) {
 ========================================================= */
 
 function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
-  const amount = number(value, NaN);
+  const amount = parseAmount(value, NaN, AMOUNT_POLICIES.textOnly);
   if (!Number.isFinite(amount)) return "—";
   return formatCurrency(amount, currencyCode(currency, DEFAULT_CURRENCY), CURRENCY_POLICIES.standard);
 }
@@ -494,8 +462,8 @@ function getSentAt(item = {}) {
 
 function getSortTimestamp(item = {}) {
   const raw = getRaw(item);
-  return number(item?.meta?.updatedAtMs, 0) || number(item?.meta?.timestampMs, 0) ||
-    number(raw?.meta?.updatedAtMs, 0) || number(raw?.meta?.timestampMs, 0) ||
+  return parseAmount(item?.meta?.updatedAtMs, 0, AMOUNT_POLICIES.textOnly) || parseAmount(item?.meta?.timestampMs, 0, AMOUNT_POLICIES.textOnly) ||
+    parseAmount(raw?.meta?.updatedAtMs, 0, AMOUNT_POLICIES.textOnly) || parseAmount(raw?.meta?.timestampMs, 0, AMOUNT_POLICIES.textOnly) ||
     toTimestamp(getUpdatedAt(item), TIMESTAMP_POLICIES.invoiceText) || toTimestamp(getCreatedAt(item), TIMESTAMP_POLICIES.invoiceText) || toTimestamp(raw?._ts, TIMESTAMP_POLICIES.invoiceText) || 0;
 }
 
@@ -623,7 +591,7 @@ const isFilterActive = (input = {}) => getActiveFilter(input) !== "all" || Boole
 
 function computeStats(items = []) {
   return safeArray(items).reduce((acc, item) => {
-    const total = number(getTotalRaw(item), 0);
+    const total = parseAmount(getTotalRaw(item), 0, AMOUNT_POLICIES.textOnly);
     const payment = getEstadoPagoKey(getPaymentRaw(item));
     acc.total += 1;
     acc.totalImporte += total;
@@ -663,17 +631,18 @@ function resolveHeaderStats(input = {}, rows = []) {
 function getRemoteTotal(input = {}, fallback = 0) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
-  return Math.max(number(firstNonEmpty(
+  return Math.max(parseAmount(firstNonEmpty(
     data.totalCount, data.remoteCount, data.totalMatched, data.total,
     runtime.totalCount, runtime.remoteCount, runtime.totalMatched, runtime.total,
     fallback
-  ), fallback), fallback);
+  ), fallback,
+AMOUNT_POLICIES.textOnly), fallback);
 }
 
 function getBatchSize(input = {}) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
-  return clamp(number(firstNonEmpty(data.batchSize, data.limit, data.pageSize, runtime.batchSize, runtime.limit, runtime.pageSize, DEFAULT_BATCH_SIZE), DEFAULT_BATCH_SIZE), 1, 200);
+  return clamp(parseAmount(firstNonEmpty(data.batchSize, data.limit, data.pageSize, runtime.batchSize, runtime.limit, runtime.pageSize, DEFAULT_BATCH_SIZE), DEFAULT_BATCH_SIZE, AMOUNT_POLICIES.textOnly), 1, 200);
 }
 
 function getListState(items = [], input = {}) {
@@ -686,8 +655,8 @@ function getListState(items = [], input = {}) {
   const remoteTotal = getRemoteTotal(data, loadedCount);
   const batchSize = getBatchSize(data);
   const filtering = isFilterActive(data);
-  const currentPage = Math.max(1, number(firstNonEmpty(data.page, runtime.page, runtime.currentPage, runtime.facturasPage, 1), 1));
-  const nextPage = Math.max(1, number(firstNonEmpty(data.nextPage, runtime.nextPage, currentPage + 1), currentPage + 1));
+  const currentPage = Math.max(1, parseAmount(firstNonEmpty(data.page, runtime.page, runtime.currentPage, runtime.facturasPage, 1), 1, AMOUNT_POLICIES.textOnly));
+  const nextPage = Math.max(1, parseAmount(firstNonEmpty(data.nextPage, runtime.nextPage, currentPage + 1), currentPage + 1, AMOUNT_POLICIES.textOnly));
   const explicitHasMore = firstNonEmpty(data.hasMore, data.more, data.canLoadMore, runtime.hasMore, runtime.more, runtime.canLoadMore, null);
   const hasMore = explicitHasMore === null ? loadedCount < remoteTotal : bool(explicitHasMore, false);
   const loadingMore = Boolean(firstNonEmpty(data.loadingMore, data.loadingNextPage, runtime.loadingMore, runtime.loadingNextPage, false));
@@ -910,7 +879,7 @@ function renderInfiniteScrollFooter(listState = {}, state = {}) {
   const loadingMore = Boolean(firstNonEmpty(listState.loadingMore, runtime.loadingMore, runtime.loadingNextPage));
   const refreshing = Boolean(runtime.refreshing);
   const hasMore = Boolean(listState.hasMore);
-  const hasRows = number(listState.visibleCount, 0) > 0;
+  const hasRows = parseAmount(listState.visibleCount, 0, AMOUNT_POLICIES.textOnly) > 0;
   const listError = cleanText(runtime.error, "");
   const loadMoreError = cleanText(firstNonEmpty(listState.loadMoreError, runtime.loadMoreError, ""), "");
   if (listError) {

@@ -40,7 +40,7 @@
 
 import Http from "../../core/http.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, isFunction } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 
@@ -129,10 +129,6 @@ const serverState = {
 /* =========================================================
    BASICS
 ========================================================= */
-
-function isFunction(value) {
-  return typeof value === "function";
-}
 
 
 

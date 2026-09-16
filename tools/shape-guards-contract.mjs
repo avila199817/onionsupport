@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isObject, safeObject } from "../src/core/objects.js";
+import { isObject, safeObject, isFunction } from "../src/core/objects.js";
 import { safeArray, arrayFrom } from "../src/core/arrays.js";
 
-// One authority per shape policy: plain-object guards in core/objects.js and
+// One authority per shape policy: plain-object and function guards in core/objects.js and
 // array coercion in core/arrays.js, split so the auth closure loads the
 // object guards alone. Every module imports them instead of carrying a copy
-// under any name. src/main.js keeps its own isObject on purpose: the entry
+// under any name. src/main.js keeps its own isObject and isFunction on purpose: the entry
 // module must not import shared helpers, or rolldown folds them into the
 // entry chunk and every closure pulls it; analytics/google-tag.js is the
 // same kind of leaf. Two array helpers keep a different policy and stay
@@ -21,8 +21,8 @@ const ENTRY_AND_LEAF = Object.freeze(["src/main.js", "src/analytics/google-tag.j
 const SHARED_HELPER_MODULES = Object.freeze(["core/objects.js", "core/arrays.js", "core/presentation-text.js", "core/escape-html.js"]);
 const OBJECT_FINGERPRINT = 'typeof value === "object" && !Array.isArray(value)';
 const OBJECT_FINGERPRINT_EXEMPT = Object.freeze(["src/main.js"]);
-const NAMES = Object.freeze({ isObject: OBJECTS_AUTHORITY, safeObject: OBJECTS_AUTHORITY, safeArray: ARRAYS_AUTHORITY, arrayFrom: ARRAYS_AUTHORITY });
-const DEFINER_EXEMPT = Object.freeze({ isObject: ["src/main.js"] });
+const NAMES = Object.freeze({ isObject: OBJECTS_AUTHORITY, safeObject: OBJECTS_AUTHORITY, isFunction: OBJECTS_AUTHORITY, safeArray: ARRAYS_AUTHORITY, arrayFrom: ARRAYS_AUTHORITY });
+const DEFINER_EXEMPT = Object.freeze({ isObject: ["src/main.js"], isFunction: ["src/main.js"] });
 
 // Behaviour: the guards accept exactly what the retired copies accepted.
 const nodeListLike = { length: 2, 0: "x", 1: "y" };
@@ -45,6 +45,12 @@ assert.deepEqual(arrayFrom(nodeListLike), ["x", "y"]);
 assert.deepEqual(arrayFrom("abc"), []);
 assert.deepEqual(arrayFrom(new Set([1])), []);
 assert.deepEqual(arrayFrom(null), []);
+assert.equal(isFunction(() => 1), true);
+assert.equal(isFunction(async function named() {}), true);
+assert.equal(isFunction(class Box {}), true);
+assert.equal(isFunction(plain), false);
+assert.equal(isFunction(null), false);
+assert.equal(isFunction("fn"), false);
 
 // Source: one definer per name, callers bind via import, no idiom copies,
 // and the entry/leaf modules stay free of shared helper imports.
@@ -83,4 +89,4 @@ assert.deepEqual(idiomCopies, [], "no module carries the plain-object idiom outs
 assert.deepEqual(callersWithoutBinding, [], "every isObject/safeObject/safeArray/arrayFrom caller binds its authority");
 assert.deepEqual(entryImports, [], "main.js and analytics/google-tag.js never import the shared helper modules");
 
-console.log("Shape guards contract: PASS · isObject/safeObject in core/objects.js · safeArray/arrayFrom in core/arrays.js · behaviour of the retired copies · one definer per name (main.js keeps isObject) · no idiom copies · entry and analytics leaf import no shared helpers");
+console.log("Shape guards contract: PASS · isObject/safeObject/isFunction in core/objects.js · safeArray/arrayFrom in core/arrays.js · behaviour of the retired copies · one definer per name (main.js keeps isObject and isFunction) · no idiom copies · entry and analytics leaf import no shared helpers");

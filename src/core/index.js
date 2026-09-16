@@ -24,7 +24,7 @@ import {
 import Http from "./http.js";
 import { userNameFromIdentity } from "./user-identity.js";
 import { cleanText, normalizeKey } from "./presentation-text.js";
-import { isObject } from "./objects.js";
+import { isObject, isFunction } from "./objects.js";
 
 export const CORE_VERSION = "core.minimal.v9-specialized-snapshot";
 const RUNTIME_STATE_VERSION = "core.runtime-state.v2-dirty-guard";
@@ -36,7 +36,6 @@ const VALID_ROLES = new Set((Array.isArray(ALLOWED_ROLES) && ALLOWED_ROLES.lengt
 const DISABLED_STATUSES = new Set(["disabled", "desactivado", "inactive", "inactivo", "deleted", "eliminado", "archived", "archivado", "revoked", "revocado", "blocked", "bloqueado", "banned", "suspended", "suspendido"]);
 
 function isBrowser() { return typeof window !== "undefined" && typeof document !== "undefined"; }
-function isFunction(value) { return typeof value === "function"; }
 function normalizeUserEmail(value = "") {
   const email = cleanText(value, "").toLowerCase().replace(/\s+/g, "");
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";

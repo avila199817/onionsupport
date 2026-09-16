@@ -47,7 +47,7 @@ import {
   USUARIOS_CREATE_ENDPOINT as API_CREATE_ENDPOINT,
   USUARIOS_API_VERSION,
 } from "./usuarios.api.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, isFunction } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 
 /* =========================================================
@@ -135,10 +135,6 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 

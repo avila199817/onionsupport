@@ -40,7 +40,7 @@ import {
 
 import createPasswordResetTemplate from "./template.js";
 import { cleanText } from "../../../core/presentation-text.js";
-import { isObject } from "../../../core/objects.js";
+import { isObject, isFunction } from "../../../core/objects.js";
 
 export const PASSWORD_RESET_VIEW_VERSION =
   "password-reset.view.public.controller.v3-production";
@@ -92,10 +92,6 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function clearNode(node = null) {

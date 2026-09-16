@@ -1,5 +1,6 @@
-// Plain-object guards only: is it a non-array object, and coerce with a
-// caller-chosen fallback. Array coercion lives in ./arrays.js so the startup
+// Value shape guards: is it a non-array object (and coerce it with a
+// caller-chosen fallback), is it a function. Array coercion lives in
+// ./arrays.js so the startup
 // closures (auth, app, public Home) load the object guards alone; the same
 // split keeps text normalization in ./presentation-text.js and HTML escaping
 // in ./escape-html.js. main.js and analytics/google-tag.js never import
@@ -11,4 +12,8 @@ export function isObject(value) {
 
 export function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
+}
+
+export function isFunction(value) {
+  return typeof value === "function";
 }

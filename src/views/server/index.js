@@ -53,7 +53,7 @@ import renderServerTemplate, {
   renderAccessDeniedState,
 } from "./server.template.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, isFunction } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 
 
@@ -115,10 +115,6 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function isNode(value) {

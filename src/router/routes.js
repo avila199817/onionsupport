@@ -42,7 +42,7 @@ import {
   getUserScopedRouteInfo as configGetUserScopedRouteInfo,
 } from "../core/config.js";
 import { cleanText } from "../core/presentation-text.js";
-import { isObject } from "../core/objects.js";
+import { isObject, isFunction } from "../core/objects.js";
 
 export const ROUTES_VERSION =
   "routes.minimal.v8.4-canonical-visibility";
@@ -177,10 +177,6 @@ export const ROUTE_ALIASES = Object.freeze({
 /* =========================================================
    BASICS
 ========================================================= */
-
-function isFunction(value) {
-  return typeof value === "function";
-}
 
 function normalizePath(path = "/") {
   try {

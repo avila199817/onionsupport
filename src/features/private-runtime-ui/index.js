@@ -15,6 +15,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { isFunction } from "../../core/objects.js";
 
 export const PRIVATE_RUNTIME_UI_VERSION =
   "private-runtime-ui.v8-global-avatar-authority";
@@ -35,10 +36,6 @@ let stylesheetPromise = null;
 let stylesheetReady = false;
 let ensurePromise = null;
 let active = false;
-
-function isFunction(value) {
-  return typeof value === "function";
-}
 
 function isBrowser() {
   return (

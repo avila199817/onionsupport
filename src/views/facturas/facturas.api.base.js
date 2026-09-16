@@ -19,7 +19,7 @@ import Http from "../../core/http.js";
 import { AppCore } from "../../core/index.js";
 import { notifyDomainChanged, onDomainChanged } from "../../core/domain-events.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, isFunction } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 
@@ -82,10 +82,6 @@ const inflight = new Map();
 /* =========================================================
    BASICS
 ========================================================= */
-
-function isFunction(value) {
-  return typeof value === "function";
-}
 
 function isBlob(value) {
   return typeof Blob !== "undefined" && value instanceof Blob;

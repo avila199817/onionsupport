@@ -64,7 +64,7 @@ import {
   FACTURA_MODAL_ACTIONS,
   renderFacturasDetailModal,
 } from "./facturas.template.modal.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, isFunction } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 
@@ -126,10 +126,6 @@ const TICKET_SEARCH_ENDPOINTS = Object.freeze([
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function isDomNode(value = null) {

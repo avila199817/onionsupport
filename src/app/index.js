@@ -29,7 +29,7 @@ import {
   hideLoader,
 } from "./loader.js";
 import { cleanText } from "../core/presentation-text.js";
-import { isObject } from "../core/objects.js";
+import { isObject, isFunction } from "../core/objects.js";
 
 export const APP_VERSION =
   "app.minimal.v9-public-session-handoff";
@@ -108,12 +108,6 @@ function isBrowser() {
   return (
     typeof window !== "undefined" &&
     typeof document !== "undefined"
-  );
-}
-
-function isFunction(value) {
-  return (
-    typeof value === "function"
   );
 }
 

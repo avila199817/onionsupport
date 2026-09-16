@@ -40,7 +40,7 @@ import {
 
 import createPasswordResetTemplate from "../password-reset/template.js";
 import { cleanText } from "../../../core/presentation-text.js";
-import { isObject } from "../../../core/objects.js";
+import { isObject, isFunction } from "../../../core/objects.js";
 
 export const ACTIVATE_ACCOUNT_VIEW_VERSION =
   "activate-account.view.public.v1-production";
@@ -85,10 +85,6 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function normalizeCode(value = "") {

@@ -11,11 +11,11 @@
 //   optional fields whose "nothing" must stay the fallback, often null
 //   (Server, Home, the technician profile, the canonical invoice).
 //
-// Three modules still carry finiteNumber's body under value = 0 (the Server
-// view and base API, the Usuarios API): there undefined is 0 while null and
-// "" are the fallback. They stay listed in the contract until the reachable
-// differences (live cadence, request timeouts) are decided
-// (docs/FRONTEND_SHARED_SYSTEMS.md).
+// Every module reads these two policies now: the last copies with value = 0
+// (the Server view and base API, the Usuarios API) moved to finiteNumber, so
+// an omitted option lands on the value its call declares (the Server live
+// cadence and the Server and Usuarios request timeouts) instead of 0.
+// tools/declared-timings-contract.mjs pins those effective values.
 // Amount parsers (currency symbols, decimal comma, cents) live in
 // core/amounts.js with their own policies; integer policies stay with
 // their domains.

@@ -51,7 +51,7 @@ import renderServerTemplate, {
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
-import { clamp } from "../../core/numbers.js";
+import { clamp, finiteNumber } from "../../core/numbers.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 
@@ -115,26 +115,6 @@ function isNode(value) {
 }
 
 
-
-function number(
-  value = 0,
-  fallback = 0
-) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return fallback;
-  }
-
-  const parsed =
-    Number(value);
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : fallback;
-}
 
 function cloneValue(
   value,
@@ -783,7 +763,7 @@ function createController(
         ),
 
       lastSyncAt:
-        number(
+        finiteNumber(
           apiState.lastSyncAt,
           0
         ),
@@ -1289,7 +1269,7 @@ function createController(
 
     const intervalMs =
       clamp(
-        number(
+        finiteNumber(
           options.intervalMs,
           SERVER_REFRESH_INTERVAL_MS
         ),

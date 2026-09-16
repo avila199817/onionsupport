@@ -6,7 +6,8 @@ import { cleanText, normalizeKey, codeKey } from "../src/core/presentation-text.
 import { slugKey, recordKey, labelKey } from "../src/core/slug-key.js";
 import { escapeHtml } from "../src/core/escape-html.js";
 import { cleanText as homeText, escapeHtml as homeEscape, attr } from "../src/views/home/home.template.foundation.js";
-import { cleanText as overlayText, renderDetailPending, safeError } from "../src/features/entity-overlay/pending-view.js";
+import * as pendingView from "../src/features/entity-overlay/pending-view.js";
+const { cleanText: overlayText, renderDetailPending } = pendingView;
 import { escapeHtml as correoEscape, renderComposeModal, renderMessageRows } from "../src/views/correo/correo.template.js";
 import { renderErrorState as renderServerError } from "../src/views/server/server.template.js";
 import { renderFacturasErrorState } from "../src/views/facturas/facturas.template.js";
@@ -79,9 +80,20 @@ assert.ok(error.includes('aria-label="No se pudo abrir &lt;cliente&gt;"'));
 assert.ok(error.includes('role="alert"'), "A failed session is announced assertively");
 assert.ok(error.includes(">&quot;&lt;img src=x&gt; &amp;<"), "The error text is one escaped text node");
 assert.equal(error.includes("<img src=x>"), false);
-assert.equal(safeError({ message: "Error /x?token=synthetic-secret&ok=yes Bearer synthetic-key" }), "Error /x?token=***&ok=yes Bearer ***");
-assert.equal(safeError({ message: "x".repeat(510) }).length, 500);
-assert.equal(safeError(null), "No se pudo cargar el detalle.");
+// The pending session's error text: redacted, 500 characters at most, the
+// detail fallback when there is no error. Until the error message authority
+// the pending view exported safeError; after it the overlay index composes
+// core/errors.js errorMessage(...).slice(0, 500) and the pending view only
+// renders (the authority's contract covers the behaviour).
+if (typeof pendingView.safeError === "function") {
+  assert.equal(pendingView.safeError({ message: "Error /x?token=synthetic-secret&ok=yes Bearer synthetic-key" }), "Error /x?token=***&ok=yes Bearer ***");
+  assert.equal(pendingView.safeError({ message: "x".repeat(510) }).length, 500);
+  assert.equal(pendingView.safeError(null), "No se pudo cargar el detalle.");
+} else {
+  const overlayIndex = readFileSync(new URL("../src/features/entity-overlay/index.js", import.meta.url), "utf8");
+  assert.match(overlayIndex, /errorMessage\(error, "No se pudo cargar el detalle\.", ERROR_MESSAGE_POLICIES\.messageFirst\)\.slice\(0, 500\)/u, "the overlay index composes the error message authority for the pending session text");
+  assert.equal(/safeError/u.test(readFileSync(new URL("../src/features/entity-overlay/pending-view.js", import.meta.url), "utf8")), false, "the pending view no longer carries a message extractor");
+}
 
 // Exercise real consumers at the text/attribute boundary. A shared normalizer
 // must not collapse the compose body or introduce markup through remote text.

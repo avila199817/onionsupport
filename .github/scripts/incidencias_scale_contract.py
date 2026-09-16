@@ -168,8 +168,9 @@ require(
     "an advancing cursor without new stable IDs must stop automatic pagination",
 )
 require(
-    "incrementalError = safeError(" in controller
-    and "error = safeError(pageError" not in controller,
+    ("incrementalError = safeError(" in controller or "incrementalError = errorMessage(pageError" in controller)
+    and "error = safeError(pageError" not in controller
+    and "error = errorMessage(pageError" not in controller,
     "next-page failure must stay separate from the general first-page error",
 )
 require(

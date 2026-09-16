@@ -14,14 +14,8 @@
 
 import { escapeHtml } from "../../core/escape-html.js";
 
-export const AGENDA_VIEW_VERSION =
+const AGENDA_VIEW_VERSION =
   "agenda.view.v2-correo-parity";
-
-export const AGENDA_VIEW_NAME =
-  "AgendaView";
-
-export const AGENDA_CANONICAL_PATH =
-  "/agenda";
 
 const WEEK_DAYS = Object.freeze([
   "Lun",

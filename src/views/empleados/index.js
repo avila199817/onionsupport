@@ -18,9 +18,8 @@ import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
-export const EMPLEADOS_VIEW_VERSION = "empleados.view.v5.usuarios-parity-current-employee";
-export const EMPLEADOS_VIEW_NAME = "EmpleadosView";
-export const EMPLEADOS_CANONICAL_PATH = "/empleados";
+const EMPLEADOS_VIEW_VERSION = "empleados.view.v5.usuarios-parity-current-employee";
+const EMPLEADOS_CANONICAL_PATH = "/empleados";
 
 const ACTIONS = USUARIOS_ACTIONS;
 const SEARCH_DEBOUNCE_MS = 160;

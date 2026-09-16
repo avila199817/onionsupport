@@ -377,10 +377,10 @@ export function renderHeader(input = {}) {
     <div class="usuarios-hero-meta"><span class="usuarios-meta-pill">${icon("users")}<span>${escapeHtml(countText)}</span></span><span class="usuarios-meta-pill">${icon("refresh")}<span>${updatedAt ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span></span><span class="usuarios-meta-pill">${icon("activity")}<span>${escapeHtml(`${formatNumber(stats.withAccess)} con inicio de sesión cargado`)}</span></span></div>
     <div class="usuarios-stats" role="group" aria-label="Resumen de filas cargadas">
       ${[
-        ["all", "accent", "users", "Cargados", stats.total],
-        ["active", "success", "check", "Activos cargados", stats.active],
-        ["pending", "warning", "clock", "Pendientes cargados", stats.pending],
-        ["blocked", "danger", "lock", "Bloqueados cargados", stats.blocked],
+        ["all", "accent", "users", "Usuarios", stats.total],
+        ["active", "success", "check", "Activos", stats.active],
+        ["pending", "warning", "clock", "Pendientes", stats.pending],
+        ["blocked", "danger", "lock", "Bloqueados", stats.blocked],
       ].map(([key, tone, iconName, label, value]) => `<button type="button" class="usuarios-stat-card usuarios-stat-card--${tone}${filter === key ? " is-active" : ""}" data-usuarios-action="${USUARIOS_ACTIONS.FILTER}" data-action="filter" data-filter="${key}" aria-pressed="${filter === key ? "true" : "false"}"><span class="usuarios-stat-topline"><span class="usuarios-stat-label">${escapeHtml(label)}</span><span class="usuarios-stat-icon" aria-hidden="true">${icon(iconName)}</span></span><span class="usuarios-stat-value">${escapeHtml(formatNumber(value))}</span><span class="usuarios-stat-text">Consulta actual · filas ya cargadas.</span></button>`).join("")}
     </div>
   </section>`;

@@ -4,8 +4,8 @@
 ========================================================= */
 
 import { userNameFromIdentity } from "../../core/user-identity.js";
-import { DEFAULT_ROUTES, cleanText, initialsFrom, isObject, homeLabelKey, optionalNumber, safeArray, safeImageSrc } from "./home.template.foundation.js";
-import { clamp } from "../../core/numbers.js";
+import { DEFAULT_ROUTES, cleanText, initialsFrom, isObject, homeLabelKey, safeArray, safeImageSrc } from "./home.template.foundation.js";
+import { clamp, finiteNumber } from "../../core/numbers.js";
 import { firstNonEmpty } from "../../core/objects.js";
 
 export function buildVm(input = {}) {
@@ -39,38 +39,41 @@ export function buildVm(input = {}) {
   function summaryCount(...keys) {
     for (const key of keys) {
       if (Object.prototype.hasOwnProperty.call(summary, key)) {
-        return optionalNumber(summary[key]);
+        return finiteNumber(summary[key], null);
       }
     }
     return null;
   }
 
-  const totalInvoiced = optionalNumber(
+  const totalInvoiced = finiteNumber(
     firstNonEmpty(
       summary.totalInvoiced,
       summary.totalAmount,
       summary.grossAmount,
       summary.totalFacturado,
       null
-    )
+    ),
+    null
   );
 
-  let paidTotal = optionalNumber(
+  let paidTotal = finiteNumber(
     firstNonEmpty(
       summary.paidTotal,
       summary.paidAmount,
       summary.totalPagado,
       null
-    )
+    ),
+    null
   );
 
-  let outstandingAmount = optionalNumber(
+  let outstandingAmount = finiteNumber(
     firstNonEmpty(
       summary.outstandingAmount,
       summary.pendingAmount,
       summary.totalPendiente,
       null
-    )
+    ),
+    null
   );
 
   if (totalInvoiced !== null) {

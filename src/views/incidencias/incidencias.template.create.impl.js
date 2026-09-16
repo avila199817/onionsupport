@@ -26,6 +26,7 @@ import {
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { coercedNumber } from "../../core/numbers.js";
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
   "incidencias.template.create.extreme.v26.canonical-user-contact-summary";
@@ -91,11 +92,6 @@ function cleanMultiline(value = "", fallback = "") {
     .trim();
 
   return text || fallback;
-}
-
-function number(value = 0, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 const attr = (value = "") => escapeHtml(cleanText(value, ""));
@@ -174,7 +170,7 @@ function firstImageSrc(...values) {
 }
 
 function formatBytes(bytes = 0) {
-  const size = number(bytes, 0);
+  const size = coercedNumber(bytes, 0);
   if (size <= 0) return "0 B";
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
@@ -685,7 +681,7 @@ function renderAdminClassification(vm = {}) {
 ========================================================= */
 
 const fileName = (file = {}, index = 0) => cleanText(file.name || file.filename || file.fileName, `Adjunto ${index + 1}`);
-const fileSize = (file = {}) => number(file.size || file.sizeBytes, 0);
+const fileSize = (file = {}) => coercedNumber(file.size || file.sizeBytes, 0);
 const fileType = (file = {}) => cleanText(file.type || file.contentType || file.mimetype || file.mimeType, "");
 
 const IMAGE_PREVIEW_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"]);
@@ -1060,7 +1056,7 @@ export function validateCreateForm(form = {}) {
       break;
     }
 
-    if (number(file.size, 0) > MAX_FILE_SIZE) {
+    if (coercedNumber(file.size, 0) > MAX_FILE_SIZE) {
       errors.attachments = `El archivo ${cleanText(file.name, "archivo")} supera el máximo de ${formatBytes(MAX_FILE_SIZE)}.`;
       break;
     }

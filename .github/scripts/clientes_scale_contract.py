@@ -241,8 +241,9 @@ require(
     "incremental renders must restore scroll, exact filter, search and retry focus",
 )
 require(
-    "function number(value = 0, fallback = 0)" in controller,
-    "focus and scroll restoration must use a locally defined numeric normalizer",
+    "function number(value = 0, fallback = 0)" in controller
+    or ("coercedNumber" in controller and 'from "../../core/numbers.js"' in controller),
+    "focus and scroll restoration must use the numeric normalizer (the local copy or core/numbers.js coercedNumber)",
 )
 require(
     "visibleLimit" not in controller,

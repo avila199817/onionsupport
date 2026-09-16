@@ -16,6 +16,7 @@ import { exactCount, exactTotal } from "../../core/statistics.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { coercedNumber } from "../../core/numbers.js";
 
 export const INCIDENCIAS_FILTER_FACETS_VERSION =
   "incidencias.filter-facets.v2-priority-truth";
@@ -26,11 +27,6 @@ export const INCIDENCIAS_FILTER_FACET_KEYS = Object.freeze([
   "closed",
   "urgent",
 ]);
-
-function number(value = 0, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 export function normalizeIncidenciasFilterFacet(value = "all") {
   const key = cleanText(value).toLowerCase();
@@ -63,7 +59,7 @@ export function getIncidenciasFacetRequestQuery(
 ) {
   const query = {
     pageMode: "cursor",
-    limit: Math.max(1, Math.trunc(number(limit, 1))),
+    limit: Math.max(1, Math.trunc(coercedNumber(limit, 1))),
     /*
        P0 PERF + TRUTH:
        Las facetas sólo llegan aquí por HTTP cuando NO existe un universo
@@ -93,10 +89,10 @@ export function mergeIncidenciasFacetStats(
 
   return Object.freeze({
     ...stats,
-    total: Math.max(0, number(facets.all, stats.total || 0)),
-    open: Math.max(0, number(facets.open, stats.open || 0)),
-    closed: Math.max(0, number(facets.closed, stats.closed || 0)),
-    urgent: Math.max(0, number(facets.urgent, stats.urgent || 0)),
+    total: Math.max(0, coercedNumber(facets.all, stats.total || 0)),
+    open: Math.max(0, coercedNumber(facets.open, stats.open || 0)),
+    closed: Math.max(0, coercedNumber(facets.closed, stats.closed || 0)),
+    urgent: Math.max(0, coercedNumber(facets.urgent, stats.urgent || 0)),
   });
 }
 
@@ -113,7 +109,7 @@ export function buildIncidenciasFilterFacetPresentation(
   const allItems = safeArray(allResponse.items);
   const loaded = universeLoaded === null
     ? allItems.length
-    : Math.max(0, Math.trunc(number(universeLoaded, allItems.length)));
+    : Math.max(0, Math.trunc(coercedNumber(universeLoaded, allItems.length)));
 
   const loadedCounts = Object.freeze({ all: loaded, open: exactCount(fallback.open) ?? 0, closed: exactCount(fallback.closed) ?? 0, urgent: exactCount(fallback.urgent) ?? 0 });
   const exact = INCIDENCIAS_FILTER_FACET_KEYS.every((key) => exactTotal(source[key]) !== null);

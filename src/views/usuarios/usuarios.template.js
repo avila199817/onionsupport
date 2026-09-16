@@ -29,6 +29,7 @@ import { escapeHtml } from "../../core/escape-html.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { coercedNumber } from "../../core/numbers.js";
 
 
 export const USUARIOS_TEMPLATE_VERSION =
@@ -71,11 +72,6 @@ const FILTERS = Object.freeze([
 ]);
 
 const TABLE_SCALE = "110";
-
-function number(value = 0, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
@@ -135,9 +131,9 @@ function sessionSortLabel(order = USUARIOS_DEFAULT_SORT_ORDER) {
 }
 function formatNumber(value = 0) {
   try {
-    return new Intl.NumberFormat("es-ES").format(number(value, 0));
+    return new Intl.NumberFormat("es-ES").format(coercedNumber(value, 0));
   } catch {
-    return String(number(value, 0));
+    return String(coercedNumber(value, 0));
   }
 }
 function formatDateTime(value = null) {
@@ -331,7 +327,7 @@ function totalInfo(input = {}, items = []) {
   const state = stateFrom(data);
   const totalKnown = Boolean(firstNonEmpty(state.totalKnown, data.totalKnown, false));
   const totalCount = totalKnown
-    ? Math.max(items.length, number(firstNonEmpty(state.totalCount, state.remoteCount, data.totalCount, data.remoteCount, items.length), items.length))
+    ? Math.max(items.length, coercedNumber(firstNonEmpty(state.totalCount, state.remoteCount, data.totalCount, data.remoteCount, items.length), items.length))
     : null;
   return { totalKnown, totalCount };
 }
@@ -359,7 +355,7 @@ export function renderHeader(input = {}) {
   const exporting = Boolean(firstNonEmpty(state.exporting, data.exporting, false));
   const admin = data.admin !== false && !isRestricted(data);
   const countText = totalKnown ? `${formatNumber(totalCount)} usuarios` : `${formatNumber(items.length)}${state.hasMore ? "+" : ""} cargados`;
-  const updatedAt = number(firstNonEmpty(state.lastSyncAt, data.lastSyncAt, 0), 0);
+  const updatedAt = coercedNumber(firstNonEmpty(state.lastSyncAt, data.lastSyncAt, 0), 0);
 
   return `<section class="usuarios-hero" data-usuarios-hero="true">
     <div class="usuarios-hero-top"><div class="usuarios-hero-copy"><h1 class="usuarios-page-title">Usuarios</h1><p class="usuarios-page-subtitle">Gestiona usuarios con paginación remota y búsqueda global.</p></div>
@@ -395,7 +391,7 @@ function renderEmptyContent({ error = "", filtering = false, restricted = false,
 
 function getFinalUsersMessage(totalKnown = false, totalCount = 0) {
   if (!totalKnown) return "Has visto todos los usuarios de la consulta.";
-  const count = Math.max(0, number(totalCount, 0));
+  const count = Math.max(0, coercedNumber(totalCount, 0));
   return count === 1
     ? "Has visto el único usuario de la consulta."
     : `Has visto los ${formatNumber(count)} usuarios de la consulta.`;
@@ -507,7 +503,7 @@ export function getUsuariosTableTemplateSnapshot(input = {}) {
     tableScale: TABLE_SCALE,
     loaded: items.length,
     totalKnown: Boolean(state.totalKnown),
-    totalCount: state.totalKnown ? number(state.totalCount, items.length) : null,
+    totalCount: state.totalKnown ? coercedNumber(state.totalCount, items.length) : null,
     hasMore: Boolean(state.hasMore),
     filter: filterValue(input),
     sortField: "lastLoginAt",

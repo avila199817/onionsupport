@@ -15,6 +15,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { finiteNumber } from "../../core/numbers.js";
 
 export const SERVER_API_VERSION =
   "server.api.backend-contract.v3.health-plus-costs";
@@ -44,12 +45,6 @@ const costState = {
   lastSyncAt: 0,
   inflight: null,
 };
-
-function safeNumber(value = null, fallback = null) {
-  if (value === null || value === undefined || value === "") return fallback;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
 
 function unwrapResponse(payload) {
   let current = payload;
@@ -117,9 +112,9 @@ function createEmptyCostSnapshot() {
 function normalizeDay(item = {}) {
   return {
     date: cleanText(item.date, ""),
-    day: safeNumber(item.day, null),
-    cost: safeNumber(item.cost, 0),
-    cumulative: safeNumber(item.cumulative, 0),
+    day: finiteNumber(item.day, null),
+    cost: finiteNumber(item.cost, 0),
+    cumulative: finiteNumber(item.cumulative, 0),
     partial: item.partial === true,
   };
 }
@@ -127,8 +122,8 @@ function normalizeDay(item = {}) {
 function normalizeBreakdownItem(item = {}, type = "service") {
   const base = {
     name: cleanText(item.name, type === "service" ? "Sin servicio" : "Sin recurso"),
-    total: safeNumber(item.total, 0),
-    sharePct: safeNumber(item.sharePct, 0),
+    total: finiteNumber(item.total, 0),
+    sharePct: finiteNumber(item.sharePct, 0),
   };
 
   if (type === "resource") {
@@ -165,28 +160,28 @@ function normalizeCostSnapshot(payload = {}) {
       ? {
           key: cleanText(current.key, ""),
           label: cleanText(current.label, ""),
-          total: safeNumber(current.total, 0),
-          completedTotal: safeNumber(current.completedTotal, 0),
-          averageDaily: safeNumber(current.averageDaily, 0),
-          projected: safeNumber(current.projected, 0),
-          completedDays: safeNumber(current.completedDays, 0),
-          daysInMonth: safeNumber(current.daysInMonth, 0),
+          total: finiteNumber(current.total, 0),
+          completedTotal: finiteNumber(current.completedTotal, 0),
+          averageDaily: finiteNumber(current.averageDaily, 0),
+          projected: finiteNumber(current.projected, 0),
+          completedDays: finiteNumber(current.completedDays, 0),
+          daysInMonth: finiteNumber(current.daysInMonth, 0),
           latestCompleteDay: isObject(current.latestCompleteDay)
             ? {
                 date: cleanText(current.latestCompleteDay.date, ""),
-                cost: safeNumber(current.latestCompleteDay.cost, 0),
+                cost: finiteNumber(current.latestCompleteDay.cost, 0),
               }
             : null,
           previousCompleteDay: isObject(current.previousCompleteDay)
             ? {
                 date: cleanText(current.previousCompleteDay.date, ""),
-                cost: safeNumber(current.previousCompleteDay.cost, 0),
+                cost: finiteNumber(current.previousCompleteDay.cost, 0),
               }
             : null,
           peakDay: isObject(current.peakDay)
             ? {
                 date: cleanText(current.peakDay.date, ""),
-                cost: safeNumber(current.peakDay.cost, 0),
+                cost: finiteNumber(current.peakDay.cost, 0),
               }
             : null,
         }
@@ -195,10 +190,10 @@ function normalizeCostSnapshot(payload = {}) {
       ? {
           previousMonthKey: cleanText(comparison.previousMonthKey, ""),
           previousMonthLabel: cleanText(comparison.previousMonthLabel, ""),
-          previousMonthTotal: safeNumber(comparison.previousMonthTotal, 0),
-          previousComparableTotal: safeNumber(comparison.previousComparableTotal, 0),
-          deltaComparable: safeNumber(comparison.deltaComparable, 0),
-          deltaComparablePct: safeNumber(comparison.deltaComparablePct, null),
+          previousMonthTotal: finiteNumber(comparison.previousMonthTotal, 0),
+          previousComparableTotal: finiteNumber(comparison.previousComparableTotal, 0),
+          deltaComparable: finiteNumber(comparison.deltaComparable, 0),
+          deltaComparablePct: finiteNumber(comparison.deltaComparablePct, null),
         }
       : null,
     daily: safeArray(source.daily)
@@ -218,8 +213,8 @@ function normalizeCostSnapshot(payload = {}) {
     cache: {
       stale: cache.stale === true,
       hit: cache.hit === true,
-      ttlMs: safeNumber(cache.ttlMs, 0),
-      ageMs: safeNumber(cache.ageMs, null),
+      ttlMs: finiteNumber(cache.ttlMs, 0),
+      ageMs: finiteNumber(cache.ageMs, null),
     },
     warning: isObject(source.warning)
       ? {
@@ -247,7 +242,7 @@ export async function fetchServerCostsRequest(options = {}) {
 
   if (typeof Http?.get === "function") {
     response = await Http.get(SERVER_ENDPOINTS.costs, {
-      timeout: safeNumber(options.timeout, SERVER_REQUEST_TIMEOUT_MS),
+      timeout: finiteNumber(options.timeout, SERVER_REQUEST_TIMEOUT_MS),
       query: safeObject(options.query),
       headers: safeObject(options.headers),
       source: cleanText(options.source, "views.server.api.costs"),
@@ -256,7 +251,7 @@ export async function fetchServerCostsRequest(options = {}) {
   } else if (typeof Http?.request === "function") {
     response = await Http.request(SERVER_ENDPOINTS.costs, {
       method: "GET",
-      timeout: safeNumber(options.timeout, SERVER_REQUEST_TIMEOUT_MS),
+      timeout: finiteNumber(options.timeout, SERVER_REQUEST_TIMEOUT_MS),
       query: safeObject(options.query),
       headers: safeObject(options.headers),
       source: cleanText(options.source, "views.server.api.costs"),

@@ -13,6 +13,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { finiteNumber } from "../../core/numbers.js";
 
 
 export const SERVER_TEMPLATE_VERSION =
@@ -25,20 +26,12 @@ export const SERVER_STATUS = Base.SERVER_STATUS;
 
 
 
-function safeNumber(value = null, fallback = null) {
-  if (value === null || value === undefined || value === "") return fallback;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
-
-
-
 function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
 }
 
 function formatMoney(value, currency = "EUR", options = {}) {
-  const number = safeNumber(value, null);
+  const number = finiteNumber(value, null);
   if (number === null) return "—";
 
   const code = /^[A-Z]{3}$/.test(cleanText(currency, "").toUpperCase())
@@ -58,7 +51,7 @@ function formatMoney(value, currency = "EUR", options = {}) {
 }
 
 function formatPercent(value) {
-  const number = safeNumber(value, null);
+  const number = finiteNumber(value, null);
   if (number === null) return "—";
   const sign = number > 0 ? "+" : "";
   return `${sign}${number.toFixed(Math.abs(number) >= 10 ? 0 : 1)}%`;
@@ -160,7 +153,7 @@ function renderCostKpi({ label, value, detail, tone = "neutral", iconName = "eur
 }
 
 function axisMoney(value, currency) {
-  const number = safeNumber(value, 0);
+  const number = finiteNumber(value, 0);
   const code = cleanText(currency, "EUR").toUpperCase();
 
   try {
@@ -201,7 +194,7 @@ function renderCostChart(costs = {}) {
 
   const maxCost = Math.max(
     0.01,
-    ...daily.map((item) => safeNumber(item?.cost, 0))
+    ...daily.map((item) => finiteNumber(item?.cost, 0))
   );
 
   const step = plotWidth / Math.max(daily.length, 1);
@@ -232,11 +225,11 @@ function renderCostChart(costs = {}) {
 
   const bars = daily
     .map((item, index) => {
-      const cost = Math.max(0, safeNumber(item?.cost, 0));
+      const cost = Math.max(0, finiteNumber(item?.cost, 0));
       const h = Math.max(cost > 0 ? 2 : 0, (cost / maxCost) * plotHeight);
       const x = left + index * step + (step - barWidth) / 2;
       const y = top + plotHeight - h;
-      const day = safeNumber(item?.day, index + 1);
+      const day = finiteNumber(item?.day, index + 1);
       const showLabel =
         index === 0 ||
         index === daily.length - 1 ||
@@ -300,7 +293,7 @@ function renderBreakdownList(items = [], currency = "EUR", type = "service") {
         ? [cleanText(item.resourceGroup, ""), cleanText(item.serviceName, "")]
             .filter(Boolean)
             .join(" · ")
-        : `${safeNumber(item.sharePct, 0).toFixed(1)}% del mes`;
+        : `${finiteNumber(item.sharePct, 0).toFixed(1)}% del mes`;
 
       return `
         <article class="server-cost-breakdown-item">
@@ -323,7 +316,7 @@ function renderBreakdownList(items = [], currency = "EUR", type = "service") {
             class="server-cost-share-meter"
             min="0"
             max="100"
-            value="${attr(Math.max(0, Math.min(100, safeNumber(item.sharePct, 0))))}"
+            value="${attr(Math.max(0, Math.min(100, finiteNumber(item.sharePct, 0))))}"
             aria-label="${attr(`Peso de ${cleanText(item.name, "elemento")} en el coste del mes`)}"
           ></meter>
         </article>
@@ -390,7 +383,7 @@ export function renderCostObservability(input = {}) {
   const trendClass = costTrendClass(trend.level);
 
   const latest = safeObject(month.latestCompleteDay, {});
-  const comparablePct = safeNumber(comparison.deltaComparablePct, null);
+  const comparablePct = finiteNumber(comparison.deltaComparablePct, null);
   const comparisonTone = comparablePct === null
     ? "neutral"
     : comparablePct > 20
@@ -432,7 +425,7 @@ export function renderCostObservability(input = {}) {
         ${renderCostKpi({
           label: "Mes actual",
           value: formatMoney(month.total, currency),
-          detail: `${safeNumber(month.completedDays, 0)} días completos · PreTaxCost`,
+          detail: `${finiteNumber(month.completedDays, 0)} días completos · PreTaxCost`,
           tone: "primary",
           iconName: "euro",
         })}
@@ -525,7 +518,7 @@ export function renderCostObservability(input = {}) {
 
       <footer class="server-cost-footer">
         <span>
-          Azure Cost Management · caché backend ${Math.max(1, Math.round(safeNumber(costs.cache?.ttlMs, 900000) / 60000))} min
+          Azure Cost Management · caché backend ${Math.max(1, Math.round(finiteNumber(costs.cache?.ttlMs, 900000) / 60000))} min
         </span>
 
         <span>
@@ -606,7 +599,7 @@ export function getServerTemplateSnapshot(input = {}) {
     costs: {
       available: costs.available === true,
       status: cleanText(costs.status, "pending"),
-      currentMonthTotal: safeNumber(costs.currentMonth?.total, null),
+      currentMonthTotal: finiteNumber(costs.currentMonth?.total, null),
       currency: cleanText(costs.currency, ""),
       trend: cleanText(costs.trend?.level, "unknown"),
       dailyPoints: safeArray(costs.daily).length,

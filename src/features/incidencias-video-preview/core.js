@@ -489,11 +489,32 @@ function finalizeReturnToTicket(
   return true;
 }
 
+/* The viewer keeps focus inside its own layer with the shared helper; it never installs a
+   focus manager of its own. */
+function focusViewerElement(target = null) {
+  if (!target?.isConnected) return false;
+
+  try {
+    if (!target.hasAttribute("tabindex") && !modalFocusableElements(target.parentElement || target).includes(target)) {
+      target.setAttribute("tabindex", "-1");
+    }
+    target.focus({ preventScroll: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function setPanelInert(root = null, inert = true) {
   const panel = root?.querySelector?.(PANEL);
   if (!panel) return false;
 
   if (inert) {
+    /* Already held. Changing file must not re-assert the isolation: re-writing the same
+       attributes is a mutation the rest of the app can observe, and asking for isolation we
+       already have is how a content change starts looking like a reopen. */
+    if (panel.dataset.mediaViewerBackground === "true") return true;
+
     if (!panel.dataset.viewerPreviousAriaHidden) {
       panel.dataset.viewerPreviousAriaHidden =
         panel.getAttribute("aria-hidden") ?? "__missing__";
@@ -780,6 +801,25 @@ function adoptPreview(root = null, preview = null) {
 
   preview.classList.add("incidencias-modal-preview--viewer");
   preview.dataset.viewerOwned = "true";
+
+  /* Changing file is a content change of THIS layer, not a close and reopen. The element
+     holding focus usually lives inside the preview about to be removed, and removing a
+     focused node drops focus to the body -- the owner underneath becomes the focused
+     context for a frame. So focus is handed, before the swap, to a control of the viewer
+     that survives it: the navigation control the reader is operating when it is still
+     usable, otherwise the panel itself. Nothing is focused after the swap, so a reader
+     using the arrows is never interrupted. */
+  const holder = stage.ownerDocument?.activeElement || null;
+
+  if (holder && stage.contains(holder)) {
+    const survivor =
+      panel.querySelector(
+        "[data-media-gallery-action]:not([disabled])"
+      ) || panel;
+
+    focusViewerElement(survivor);
+  }
+
   stage.replaceChildren(preview);
 
   activeViewer = { root, layer, panel, stage, preview, opener };

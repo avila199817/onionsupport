@@ -11,6 +11,32 @@ export const MODAL_FOCUSABLE_SELECTOR = [
 
 const documents = new WeakMap();
 
+/* Attributes the MODAL STACK owns on a panel, not the template that renders it.
+ *
+ * While a panel is covered by a higher layer -- the attachment viewer over an incidencia,
+ * a confirmation over a detail -- the stack marks it inert and aria-hidden so the layer
+ * underneath cannot be reached by pointer, keyboard or assistive technology.
+ *
+ * A template render knows nothing about that: it emits the panel as it would look with no
+ * layer above it. So a plain attribute sync, which removes whatever the incoming markup
+ * lacks, TEARS THE ISOLATION OFF an owner that is still covered -- and the feature then puts
+ * it back a frame later. In between, the covered modal is live again and the focus falls
+ * through to the body.
+ *
+ * Both the shared host and the domain patchers skip these, so a re-render can never release
+ * a panel the stack is still holding. Only the stack adds and removes them.
+ */
+export const MODAL_STACK_OWNED_ATTRIBUTES = Object.freeze([
+  "inert",
+  "aria-hidden",
+  "data-media-viewer-background",
+  "data-viewer-previous-aria-hidden",
+]);
+
+export function modalStackOwnsAttribute(name = "") {
+  return MODAL_STACK_OWNED_ATTRIBUTES.includes(String(name));
+}
+
 export function modalFocusableElements(panel) {
   if (!panel) return [];
   return [...panel.querySelectorAll(MODAL_FOCUSABLE_SELECTOR)].filter((node) =>

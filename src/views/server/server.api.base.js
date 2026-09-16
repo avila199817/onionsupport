@@ -43,7 +43,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
-import { clamp } from "../../core/numbers.js";
+import { clamp, finiteNumber } from "../../core/numbers.js";
 import { nowIso } from "../../core/clock.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
@@ -134,26 +134,6 @@ const serverState = {
 ========================================================= */
 
 
-
-function number(
-  value = 0,
-  fallback = 0
-) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return fallback;
-  }
-
-  const parsed =
-    Number(value);
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : fallback;
-}
 
 function performanceNow() {
   try {
@@ -354,7 +334,7 @@ function formatPercent(
   }
 
   const numeric =
-    number(
+    finiteNumber(
       value,
       NaN
     );
@@ -389,7 +369,7 @@ function formatMs(
   value = null
 ) {
   const numeric =
-    number(
+    finiteNumber(
       value,
       NaN
     );
@@ -414,7 +394,7 @@ function formatDuration(
   const value =
     Math.max(
       0,
-      number(
+      finiteNumber(
         seconds,
         0
       )
@@ -456,7 +436,7 @@ function mbToBytes(
   mb = null
 ) {
   const numeric =
-    number(
+    finiteNumber(
       mb,
       NaN
     );
@@ -480,7 +460,7 @@ function gbToBytes(
   gb = null
 ) {
   const numeric =
-    number(
+    finiteNumber(
       gb,
       NaN
     );
@@ -505,7 +485,7 @@ function formatBytes(
   bytes = null
 ) {
   const numeric =
-    number(
+    finiteNumber(
       bytes,
       NaN
     );
@@ -659,7 +639,7 @@ function statusFromUsage({
   }
 
   const numeric =
-    number(
+    finiteNumber(
       value,
       NaN
     );
@@ -730,7 +710,7 @@ export function normalizeService({
       latencyMs === null ||
       latencyMs === undefined
         ? null
-        : number(
+        : finiteNumber(
             latencyMs,
             null
           ),
@@ -814,7 +794,7 @@ async function httpGet(
         path,
         {
           timeout:
-            number(
+            finiteNumber(
               options.timeout,
               SERVER_REQUEST_TIMEOUT_MS
             ),
@@ -852,7 +832,7 @@ async function httpGet(
           method: "GET",
 
           timeout:
-            number(
+            finiteNumber(
               options.timeout,
               SERVER_REQUEST_TIMEOUT_MS
             ),
@@ -1414,13 +1394,13 @@ function buildServices({
           value: cpuUsage,
 
           warning:
-            number(
+            finiteNumber(
               thresholds.cpuWarnPercent,
               85
             ),
 
           critical:
-            number(
+            finiteNumber(
               thresholds.cpuCriticalPercent,
               95
             ),
@@ -1435,7 +1415,7 @@ function buildServices({
 
       detail:
         cpu.cores
-          ? `${number(cpu.cores, 0)} núcleo${number(cpu.cores, 0) === 1 ? "" : "s"} · carga 1m ${number(cpu.load1, 0)}`
+          ? `${finiteNumber(cpu.cores, 0)} núcleo${finiteNumber(cpu.cores, 0) === 1 ? "" : "s"} · carga 1m ${finiteNumber(cpu.load1, 0)}`
           : "Uso de CPU del host.",
 
       raw: cpu,
@@ -1450,13 +1430,13 @@ function buildServices({
           value: ramUsage,
 
           warning:
-            number(
+            finiteNumber(
               thresholds.ramWarnPercent,
               85
             ),
 
           critical:
-            number(
+            finiteNumber(
               thresholds.ramCriticalPercent,
               94
             ),
@@ -1471,7 +1451,7 @@ function buildServices({
 
       detail:
         ram.totalGB
-          ? `${number(ram.usedGB, 0)} GB / ${number(ram.totalGB, 0)} GB`
+          ? `${finiteNumber(ram.usedGB, 0)} GB / ${finiteNumber(ram.totalGB, 0)} GB`
           : "Uso de memoria del host.",
 
       raw: ram,
@@ -1489,13 +1469,13 @@ function buildServices({
                 diskUsage,
 
               warning:
-                number(
+                finiteNumber(
                   thresholds.diskWarnPercent,
                   90
                 ),
 
               critical:
-                number(
+                finiteNumber(
                   thresholds.diskCriticalPercent,
                   97
                 ),
@@ -1514,7 +1494,7 @@ function buildServices({
         disk.available === false
           ? "Métrica de disco no disponible en este runtime."
           : disk.totalGB
-            ? `${number(disk.usedGB, 0)} GB / ${number(disk.totalGB, 0)} GB`
+            ? `${finiteNumber(disk.usedGB, 0)} GB / ${finiteNumber(disk.totalGB, 0)} GB`
             : "Uso de disco del host.",
 
       raw: disk,
@@ -1532,13 +1512,13 @@ function buildServices({
                 eventLoopLag,
 
               warning:
-                number(
+                finiteNumber(
                   thresholds.eventLoopLagWarnMs,
                   120
                 ),
 
               critical:
-                number(
+                finiteNumber(
                   thresholds.eventLoopLagCriticalMs,
                   350
                 ),
@@ -1547,7 +1527,7 @@ function buildServices({
       latencyMs:
         eventLoopLag === null
           ? null
-          : number(
+          : finiteNumber(
               eventLoopLag,
               null
             ),
@@ -1758,7 +1738,7 @@ export function normalizeServerSnapshot(
     );
 
   const uptimeSeconds =
-    number(
+    finiteNumber(
       firstNonEmpty(
         source.uptimeSeconds,
         runtime.process
@@ -1952,7 +1932,7 @@ export function normalizeServerSnapshot(
     latencyMs:
       apiLatencyMs === null
         ? null
-        : number(
+        : finiteNumber(
             apiLatencyMs,
             null
           ),
@@ -1971,7 +1951,7 @@ export function normalizeServerSnapshot(
     dbLatencyMs:
       dbLatencyMs === null
         ? null
-        : number(
+        : finiteNumber(
             dbLatencyMs,
             null
           ),
@@ -2497,7 +2477,7 @@ export async function fetchServerReadinessRequest(
       ),
 
     uptimeSec:
-      number(
+      finiteNumber(
         source.uptimeSec,
         0
       ),
@@ -2556,7 +2536,7 @@ export async function fetchServerLivenessRequest(
       ),
 
     uptimeSec:
-      number(
+      finiteNumber(
         firstNonEmpty(
           source.uptimeSec,
           source.uptimeSeconds,
@@ -2750,7 +2730,7 @@ export function setServerAutoRefresh(
 
   const intervalMs =
     clamp(
-      number(
+      finiteNumber(
         options?.intervalMs,
         SERVER_AUTO_REFRESH_DEFAULT_MS
       ),

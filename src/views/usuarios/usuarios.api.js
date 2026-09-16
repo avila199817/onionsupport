@@ -42,7 +42,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
-import { clamp } from "../../core/numbers.js";
+import { clamp, finiteNumber } from "../../core/numbers.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage, errorStatus } from "../../core/errors.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
@@ -234,22 +234,6 @@ function isBrowser() {
   varios campos del dominio (roles, permissions, etc.)
   necesitan conservar su identidad como colección.
 */
-function number(value = 0, fallback = 0) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return fallback;
-  }
-
-  const parsed = Number(value);
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : fallback;
-}
-
 function hasOwn(source = {}, key = "") {
   return (
     isObject(source) &&
@@ -292,7 +276,7 @@ function uniqueStrings(
       0,
       Math.max(
         1,
-        number(maxLength, 120)
+        finiteNumber(maxLength, 120)
       )
     );
 
@@ -313,7 +297,7 @@ function uniqueStrings(
     0,
     Math.max(
       1,
-      number(maxItems, 100)
+      finiteNumber(maxItems, 100)
     )
   );
 }
@@ -2225,7 +2209,7 @@ export function buildUsuariosListQuery({
 } = {}) {
   const query = {
     limit:
-      clamp(number(limit, 1), 1, USUARIOS_MAX_LIMIT),
+      clamp(finiteNumber(limit, 1), 1, USUARIOS_MAX_LIMIT),
 
     includeTotal:
       Boolean(
@@ -2517,7 +2501,7 @@ async function httpRequest(
 
   const timeout =
     clamp(
-      number(
+      finiteNumber(
         options.timeout,
         USUARIOS_TIMEOUT
       ),
@@ -2769,7 +2753,7 @@ function pickTotal(
 
   return Math.max(
     0,
-    number(
+    finiteNumber(
       fallback,
       0
     )
@@ -3367,7 +3351,7 @@ function hydrateStateFromCache({
   }
 
   if (
-    number(
+    finiteNumber(
       payload.schemaVersion,
       0
     ) !==
@@ -3379,7 +3363,7 @@ function hydrateStateFromCache({
   }
 
   const cachedAt =
-    number(
+    finiteNumber(
       firstNonEmpty(
         payload.cachedAt,
         payload.lastSyncAt,
@@ -3415,7 +3399,7 @@ function hydrateStateFromCache({
   const remoteCount =
     Math.max(
       0,
-      number(
+      finiteNumber(
         payload.remoteCount,
         items.length
       )
@@ -3441,7 +3425,7 @@ function hydrateStateFromCache({
     );
 
   usuariosState.lastSyncAt =
-    number(
+    finiteNumber(
       payload.lastSyncAt,
       cachedAt ||
       Date.now()
@@ -3531,7 +3515,7 @@ function setItems(
     usuariosState.remoteCount =
       Math.max(
         list.length,
-        number(
+        finiteNumber(
           remoteCount,
           list.length
         )
@@ -3548,7 +3532,7 @@ function setRemoteCount(
     Math.max(
       usuariosState
         .items.length,
-      number(
+      finiteNumber(
         value,
         usuariosState
           .items.length
@@ -3563,7 +3547,7 @@ function setLastSyncAt(
   value = Date.now()
 ) {
   usuariosState.lastSyncAt =
-    number(
+    finiteNumber(
       value,
       Date.now()
     );
@@ -4302,7 +4286,7 @@ async function fetchUsuariosPageRequest(
     null,
     {
       timeout:
-        number(
+        finiteNumber(
           options.timeout,
           USUARIOS_LIST_TIMEOUT
         ),
@@ -4419,7 +4403,7 @@ export async function fetchUsuariosRequest(
   let page = 0;
 
   const maxPages =
-    clamp(number(options.maxPages || USUARIOS_MAX_PAGES, 1), 1, USUARIOS_MAX_PAGES);
+    clamp(finiteNumber(options.maxPages || USUARIOS_MAX_PAGES, 1), 1, USUARIOS_MAX_PAGES);
 
   do {
     if (continuationToken) {
@@ -4534,7 +4518,7 @@ export async function getUsuarioByIdRequest(
           null,
           {
             timeout:
-              number(
+              finiteNumber(
                 options.timeout,
                 USUARIOS_DETAIL_TIMEOUT
               ),
@@ -4625,7 +4609,7 @@ export async function createUsuarioRequest(
       body,
       {
         timeout:
-          number(
+          finiteNumber(
             options.timeout,
             USUARIOS_CREATE_TIMEOUT
           ),
@@ -4730,7 +4714,7 @@ export async function updateUsuarioRequest(
         body,
         {
           timeout:
-            number(
+            finiteNumber(
               options.timeout,
               USUARIOS_UPDATE_TIMEOUT
             ),
@@ -4967,7 +4951,7 @@ export async function loadUsuarios({
               items.length,
 
             pages:
-              number(
+              finiteNumber(
                 response
                   ?.pagination
                   ?.pages,
@@ -5150,7 +5134,7 @@ export async function fetchUsuariosStatsRequest(
       null,
       {
         timeout:
-          number(
+          finiteNumber(
             options.timeout,
             USUARIOS_TIMEOUT
           ),
@@ -5297,7 +5281,7 @@ export function paginateUsuarios(
     arrayFrom(items);
 
   const size =
-    clamp(number(pageSize, 1), 1, 500);
+    clamp(finiteNumber(pageSize, 1), 1, 500);
 
   const totalPages =
     Math.max(
@@ -5309,7 +5293,7 @@ export function paginateUsuarios(
     );
 
   const currentPage =
-    clamp(number(page, 1), 1, totalPages);
+    clamp(finiteNumber(page, 1), 1, totalPages);
 
   const start =
     (currentPage - 1) *

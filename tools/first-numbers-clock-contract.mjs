@@ -20,9 +20,8 @@ import { nowIso, nowMs } from "../src/core/clock.js";
 //   carried it as number/finiteNumber with value = 0. finiteNumber: a blank
 //   is the fallback; the copies with value = null or without a value default
 //   (safeNumber, number, optionalNumber, the canonical finiteNumber) carried
-//   it. Three modules still declare finiteNumber's body with value = 0, where
-//   undefined is 0 instead of the fallback: they are the pending upper bound
-//   below until that difference is decided. clamp(value, min, max) has no
+//   it. No module declares that body with value = 0 any more. clamp(value,
+//   min, max) has no
 //   numeric policy of its own: callers parse first. correo.api keeps
 //   clamp(value, fallback, min, max), an integer parse with fallback.
 //   Amount parsers (currency symbols, decimal comma, round2) live in
@@ -47,7 +46,10 @@ const COERCED_BODY = /^(?:export )?function \w+\(\s*value = 0,\s*fallback = 0\s*
 const FINITE_BODY = /^(?:export )?function \w+\(\s*value(?: = null)?,\s*fallback = (?:0|null)\s*\)\s*\{\s*if \(\s*value === null \|\|\s*value === undefined \|\|\s*value === ""\s*\)\s*(?:\{\s*)?return fallback;(?:\s*\})?\s*const \w+ =\s*Number\(\s*value\s*\);/mu;
 const FINITE_BODY_VALUE_ZERO = /^(?:export )?function \w+\(\s*value = 0,\s*fallback = 0\s*\)\s*\{\s*if \(\s*value === null \|\|\s*value === undefined \|\|\s*value === ""\s*\)\s*(?:\{\s*)?return fallback;(?:\s*\})?\s*const \w+ =\s*Number\(\s*value\s*\);/mu;
 // Upper bound of modules that still carry finiteNumber's body with value = 0 (undefined is 0 there, not the fallback).
-const FINITE_VALUE_ZERO_PENDING = Object.freeze(["src/views/server/index.js", "src/views/server/server.api.base.js", "src/views/usuarios/usuarios.api.js"]);
+// No module carries finiteNumber's body with value = 0 any more: the last three
+// (the Server view and base API, the Usuarios API) moved to the authority with
+// their declared timings (docs/releases/2026-09-16-declared-timings.md).
+const FINITE_VALUE_ZERO_PENDING = Object.freeze([]);
 const RETIRED_LOCAL = Object.freeze([
   ["first(...values)", /^(?:export )?(?:function first\s*\(\s*\.\.\.values\s*\)|const first = \(\.\.\.values\) =>)/mu],
   ["coercedNumber body (Number(value) finite or fallback, value = 0)", COERCED_BODY],
@@ -171,9 +173,9 @@ for (const [name, authority] of Object.entries(NAMES)) {
   assert.deepEqual(outside.filter((path) => !pending.includes(path)), [], `${name} is defined only in ${authority}${pending.length ? ` (pending: ${pending.join(", ")})` : ""}`);
 }
 assert.deepEqual(retired, [], "no module defines a local first(...values), now(), nowIso(), coercedNumber body, finiteNumber body or optionalNumber again");
-assert.deepEqual(finiteValueZero.filter((path) => !FINITE_VALUE_ZERO_PENDING.includes(path)), [], `finiteNumber's body with value = 0 stays within the pending upper bound (${FINITE_VALUE_ZERO_PENDING.join(", ")})`);
+assert.deepEqual(finiteValueZero.filter((path) => !FINITE_VALUE_ZERO_PENDING.includes(path)), [], "no module declares finiteNumber's body with value = 0 any more");
 assert.deepEqual(callersWithoutBinding, [], "every firstNonBlank/firstNonEmpty/clamp/coercedNumber/finiteNumber/nowIso/nowMs caller imports its authority");
 assert.deepEqual(aliasImports, [], "the authorities are imported by their own names");
 assert.deepEqual(entryImports, [], "main.js and analytics/google-tag.js never import core/objects, core/numbers or core/clock");
 
-console.log(`First/numbers/clock contract: PASS · firstNonBlank/firstNonEmpty in core/objects.js · clamp, coercedNumber and finiteNumber in core/numbers.js (correo.api clamp pending; finiteNumber body with value = 0 in ${finiteValueZero.length} pending modules) · nowIso/nowMs in core/clock.js · behaviour of the retired copies · one definer per name · no local first/now/nowIso/numeric copy · callers bind by name · entry and analytics leaf import none`);
+console.log(`First/numbers/clock contract: PASS · firstNonBlank/firstNonEmpty in core/objects.js · clamp, coercedNumber and finiteNumber in core/numbers.js (correo.api clamp pending; no finiteNumber body with value = 0 left) · nowIso/nowMs in core/clock.js · behaviour of the retired copies · one definer per name · no local first/now/nowIso/numeric copy · callers bind by name · entry and analytics leaf import none`);

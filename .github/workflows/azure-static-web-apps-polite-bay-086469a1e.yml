@@ -335,7 +335,10 @@ jobs:
             candidate/production-artifact/build-metadata
           if-no-files-found: error
           include-hidden-files: false
-          retention-days: 1
+          # The uploaded envelope is the only immutable record of what was shipped, and the
+          # verification gate binds its rebuild to it. At one day it evaporated before it
+          # could be used as evidence.
+          retention-days: 30
 
   deploy_production:
     name: Deploy production

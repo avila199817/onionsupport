@@ -155,9 +155,137 @@ assert.doesNotMatch(
   "The external compiled verifier must never treat the source checkout as an artifact envelope."
 );
 
+/* =========================================================
+   Production verification must reason about immutable identities, never about a moving
+   main. The gate used to expect production to serve `github.event.pull_request.base.sha`
+   -- the tip of main when the PR event was minted -- which is not a revision production
+   was necessarily ever asked to serve: the deploy declares paths-ignore for .github/** and
+   docs/**, so a tip can be skipped entirely, and a deploy that will happen has not happened
+   yet. That produced false reds attributed to unrelated pull requests.
+========================================================= */
+
+for (const token of [
+  "Capture deployed production baseline",
+  "actions: read",
+  "status=success&per_page=1",
+  "Classify production verification outcome",
+  "production-baseline-policy.mjs",
+  "superseded-by-newer-verified-main",
+  "Bind reproducible rebuild to the deployed artifact",
+  "EXPECTED_MANIFEST_DIGEST: ${{ steps.digest.outputs.digest }}",
+  "run-id: ${{ github.event.workflow_run.id }}",
+]) {
+  assert.ok(
+    verificationWorkflow.includes(token),
+    `Immutable-identity production gate missing: ${token}`
+  );
+}
+
+assert.doesNotMatch(
+  verificationWorkflow,
+  /pull_request\.base\.sha/,
+  "The production gate must never expect production to serve a pull request's base tip."
+);
+
+assert.doesNotMatch(
+  verificationWorkflow,
+  /TRUSTED_SHA:[^\n]*github\.sha/,
+  "The production gate must never expect production to serve the current branch tip."
+);
+
+{
+  const order = [
+    "Capture deployed production baseline",
+    "Resolve trusted verification revision",
+    "Verify canonical compiled bytes exactly",
+    "Classify production verification outcome",
+  ].map((name) => verificationWorkflow.indexOf(name));
+
+  for (let i = 1; i < order.length; i += 1) {
+    assert.ok(
+      order[i - 1] >= 0 && order[i] > order[i - 1],
+      "The baseline is captured before it is trusted, compared and classified."
+    );
+  }
+
+  const classify = verificationWorkflow
+    .split("- name: Classify production verification outcome", 2)[1]
+    .split("\n      - name:", 1)[0];
+  assert.doesNotMatch(
+    classify,
+    /continue-on-error/u,
+    "The classification is the verdict: it may never be allowed to fail silently."
+  );
+  assert.ok(
+    classify.includes("exit 1"),
+    "A production that matches neither the baseline nor a newer deploy must fail the run."
+  );
+}
+
+/* =========================================================
+   THE CLASSIFIER IS WORKFLOW BOOKKEEPING, NOT VERIFICATION CODE
+
+   Two checkouts, two jobs. `verification-tooling/` is pinned to the trusted, already
+   deployed revision because it holds the code that INSPECTS production; pointing it at the
+   candidate would let a pull request grade itself. `workflow-tooling/` is the workflow's own
+   revision and holds only the code that INTERPRETS this run's bookkeeping -- two run ids and
+   one boolean -- never touching production.
+
+   The classifier is the second kind, and importing it from the first is a bootstrapping
+   error, not a policy choice: the trusted revision is by construction the one already
+   deployed, so it predates every module this run introduces, and the step dies with
+   ERR_MODULE_NOT_FOUND. That is exactly how it failed once.
+========================================================= */
+
+{
+  const CLASSIFIER = "tools/production-baseline-policy.mjs";
+  assert.ok(
+    verificationWorkflow.includes(`./workflow-tooling/${CLASSIFIER}`),
+    "The skew classifier must be imported from the workflow's own checkout."
+  );
+  assert.ok(
+    !verificationWorkflow.includes(`verification-tooling/${CLASSIFIER}`),
+    "The skew classifier must never be imported from the trusted revision: that revision is " +
+      "the one already deployed, so it predates the module and the step cannot resolve it."
+  );
+
+  const stepBlock = (name) =>
+    verificationWorkflow.split(`- name: ${name}`, 2)[1].split("\n      - name:", 1)[0];
+
+  const workflowTooling = stepBlock("Checkout workflow-owned policy");
+  assert.ok(
+    workflowTooling.includes("path: workflow-tooling"),
+    "The workflow-owned policy checkout must land in workflow-tooling/."
+  );
+  assert.doesNotMatch(
+    workflowTooling,
+    /^\s+ref:/mu,
+    "The workflow-owned policy checkout carries no ref: it is this workflow's own revision."
+  );
+
+  const verifierTooling = stepBlock("Checkout verifier tooling");
+  assert.ok(
+    verifierTooling.includes("ref: ${{ steps.trust.outputs.sha }}"),
+    "The verifier tooling stays pinned to the trusted revision: it inspects production."
+  );
+
+  // Whatever leg classifies must also have checked the policy out, or the import cannot resolve.
+  const GUARD = "github.event_name != 'workflow_run'";
+  assert.ok(
+    workflowTooling.includes(`if: ${GUARD}`),
+    "The workflow-owned policy checkout is gated on the leg that classifies."
+  );
+  assert.ok(
+    stepBlock("Classify production verification outcome").includes(GUARD),
+    "The classification runs only on the leg that checked the policy out."
+  );
+}
+
 console.log("Production dist workflow regression: PASS");
 console.log("- build and browser validation run in the no-secret job");
 console.log("- a fresh runner validates the exact artifact before token access");
 console.log("- exact Azure-origin canonicalization and canonical bytes block production success");
 console.log("- external verification supports legacy base PRs and compiled main");
 console.log("- manual rollback is pinned to the verified legacy SHA");
+console.log("- the production gate expects a deployed revision, never a moving branch tip");
+console.log("- the skew classifier resolves from the workflow's own checkout, not the trusted one");

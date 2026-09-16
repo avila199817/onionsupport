@@ -80,6 +80,7 @@ import {
   normalizeIncidenciaPriority,
   normalizeIncidenciaCategory,
 } from "./incidencias.options.js";
+import { canUpdateDetail, describePendingParts, resolveDetailPending } from "./incidencias.detail-pending.js";
 
 import {
   buildIncidenciasFilterFacetPresentation,
@@ -1871,6 +1872,25 @@ export function createIncidenciasController(
     }
   }
 
+  /* Parents inside the shell are identified by their structural marker, never by a class
+     list that presentation may change. */
+  function partParentSelector(
+    node = null
+  ) {
+    for (const name of [
+      "data-modal-panel",
+      "data-modal-body",
+      "data-modal-composer",
+      "data-modal-footer",
+    ]) {
+      if (node?.hasAttribute?.(name)) {
+        return `[${name}="${node.getAttribute(name)}"]`;
+      }
+    }
+
+    return "";
+  }
+
   function replacePart(
     currentRoot = null,
     nextRoot = null,
@@ -1902,11 +1922,43 @@ export function createIncidenciasController(
       return true;
     }
 
+    /* A part can appear for the first time -- the panel mounts in its loading skeleton,
+       which has no footer, and the ready render adds one. Returning false here meant the
+       caller silently dropped it and the part never reached the DOM. Insert it where the
+       next tree puts it: same parent, same index. */
     if (
       !current &&
       next
     ) {
-      return false;
+      const nextParent =
+        next.parentElement;
+
+      if (!nextParent) return false;
+
+      const currentParent =
+        nextParent === nextRoot
+          ? currentRoot
+          : currentRoot.querySelector(
+              partParentSelector(nextParent)
+            );
+
+      if (!currentParent) return false;
+
+      const index =
+        Array.prototype.indexOf.call(
+          nextParent.children,
+          next
+        );
+
+      const reference =
+        currentParent.children[index] || null;
+
+      currentParent.insertBefore(
+        next.cloneNode(true),
+        reference
+      );
+
+      return true;
     }
 
     const active =
@@ -2871,6 +2923,10 @@ export function createIncidenciasController(
         syncAttributes(currentHeader, nextHeader);
         currentHeader.replaceChildren(...Array.from(nextHeader.childNodes).map((node) => node.cloneNode(true)));
         currentBody.replaceChildren(...Array.from(nextBody.childNodes).map((node) => node.cloneNode(true)));
+        /* The panel mounts in its loading skeleton, which has no footer, and the ready
+           render adds one. This branch reconciled only header and body, so the shell's
+           footer slot never reached the DOM and the global action vanished with it. */
+        replacePart(currentRoot, nextRoot, "[data-modal-footer='true']", { preserveFocus: false });
         lastDetailTemplateRoot = nextRoot;
         if (options.focusSelector) focusAfterRender(options.focusSelector, currentRoot);
         return true;
@@ -4723,6 +4779,62 @@ async function load(options = {}) {
     return requestDetail(id, { local: detailModal.detail, force, silent });
   }
 
+  function syncDetailFooterState(
+    root = null
+  ) {
+    if (!root) return false;
+
+    const editor =
+      root.querySelector?.(
+        "[data-admin-ticket-editor='true']"
+      ) || null;
+
+    const pending = resolveDetailPending({
+      current: getCurrentAdminClassification(detailModal.detail),
+      desired: isAdmin() ? readAdminTicketEditor(editor) : null,
+      comment: detailModal.commentDraft,
+      pendingFiles: detailModal.pendingFiles,
+    });
+
+    const button =
+      root.querySelector?.(
+        "[data-modal-footer='true'] .incidencias-modal-submit-btn"
+      );
+
+    if (button) {
+      const enabled = canUpdateDetail({
+        pending,
+        submitting: detailModal.submitting,
+      });
+
+      button.disabled = !enabled;
+
+      if (enabled) {
+        button.removeAttribute("aria-disabled");
+      } else {
+        button.setAttribute("aria-disabled", "true");
+      }
+
+      button.dataset.detailPending = pending.parts.join(" ");
+    }
+
+    const summary =
+      root.querySelector?.(
+        "[data-detail-pending-summary='true']"
+      );
+
+    if (summary) {
+      summary.textContent =
+        detailModal.submitting
+          ? "Guardando los cambios pendientes…"
+          : pending.parts.length
+            ? `Se guardarán: ${describePendingParts(pending.parts)}.`
+            : "No hay cambios pendientes.";
+    }
+
+    return true;
+  }
+
   function patchDetailComment(
     field = null
   ) {
@@ -4795,6 +4907,12 @@ async function load(options = {}) {
           )
           ?.replaceChildren();
       }
+
+      /* The global action lives in the footer and must answer to typing too, but a
+         keystroke may never re-render the panel: focus, selection and scroll have to stay
+         physically intact. So the footer is synchronized locally here, from the same
+         authority the render and the submit handler ask. */
+      syncDetailFooterState(root);
     }
 
     return true;
@@ -5398,21 +5516,24 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       detailModal.adminDraft = { ...liveAdminDraft };
     }
 
-    const hasAdminChanges =
-      adminClassificationChanged(
-        liveAdminDraft,
-        detailModal.detail
-      );
+    /* The same authority the button asked to decide whether to enable itself. A click
+       that reaches here with nothing pending -- keyboard, a stale DOM, a double submit --
+       does nothing and writes nothing. `disabled` is a courtesy; this is the protection. */
+    const pending = resolveDetailPending({
+      current: getCurrentAdminClassification(detailModal.detail),
+      desired: liveAdminDraft,
+      comment: detailModal.commentDraft,
+      pendingFiles: detailModal.pendingFiles,
+    });
 
-    const hasContentDraft =
-      Boolean(
-        multilineValue(
-          detailModal.commentDraft
-        ).trim() ||
-        arrayFrom(
-          detailModal.pendingFiles
-        ).length
-      );
+    if (!canUpdateDetail({ pending, submitting: detailModal.submitting })) {
+      detailModal.adminDraft = null;
+      return false;
+    }
+
+    const hasAdminChanges = pending.fields;
+
+    const hasContentDraft = pending.comment || pending.attachments;
 
     if (!hasAdminChanges) {
       detailModal.adminDraft = null;

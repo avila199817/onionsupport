@@ -31,11 +31,8 @@ import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
    - No hacer HTTP, fetch, Store, Router, Auth ni localStorage.
 ========================================================= */
 
-export const CLIENTES_MODAL_TEMPLATE_VERSION =
+const CLIENTES_MODAL_TEMPLATE_VERSION =
   "clientes.template.modal.backend-contract.v4.readonly.index-v6-api-v4";
-
-export const CLIENTES_MODAL_VERSION =
-  CLIENTES_MODAL_TEMPLATE_VERSION;
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -44,9 +41,6 @@ export const DETAIL_ACTIONS = Object.freeze({
   COPY_PHONE: "detail-copy-phone",
   COPY_FIELD: "detail-copy-field",
 });
-
-export const CLIENTES_DETAIL_ACTIONS =
-  DETAIL_ACTIONS;
 
 const MODAL_ID =
   "clientes-detail-modal-root";
@@ -3731,7 +3725,7 @@ export function renderClientesDetailModal(
   });
 }
 
-export function renderClientesDetailModalClosed() {
+function renderClientesDetailModalClosed() {
   return "";
 }
 
@@ -4430,7 +4424,7 @@ export function openClientesDetailModal(
   return true;
 }
 
-export function showClientesDetailModal(
+function showClientesDetailModal(
   detail = {},
   options = {}
 ) {
@@ -4440,7 +4434,7 @@ export function showClientesDetailModal(
   );
 }
 
-export function renderClientesModal(
+function renderClientesModal(
   detail = {},
   options = {}
 ) {
@@ -4454,7 +4448,7 @@ export function closeClientesDetailModal(options = {}) {
   return closeBridge(options);
 }
 
-export function destroyClientesDetailModalBridge({
+function destroyClientesDetailModalBridge({
   emit = false,
   restoreFocus = false,
 } = {}) {
@@ -4480,47 +4474,6 @@ export function destroyClientesDetailModalBridge({
 /* =========================================================
    HELPERS / COMPAT EXPORTS
 ========================================================= */
-
-export function getClienteDetailId(
-  detail = {}
-) {
-  return getClienteId(
-    resolveDetail(
-      detail
-    )
-  );
-}
-
-export function getClienteDetailContact(
-  detail = {}
-) {
-  const current =
-    resolveDetail(
-      detail
-    );
-
-  return {
-    name:
-      getContactName(
-        current
-      ),
-
-    email:
-      getEmail(
-        current
-      ),
-
-    phone:
-      getPhone(
-        current
-      ),
-
-    username:
-      getUsername(
-        current
-      ),
-  };
-}
 
 /*
   Compatibilidad con código antiguo:
@@ -4806,12 +4759,6 @@ export function getDetailTemplateSnapshot(
 
 export const getSnapshot =
   getDetailTemplateSnapshot;
-
-export const renderClienteDetailModal =
-  renderClientesDetailModal;
-
-export const renderClienteDetailModalClosed =
-  renderClientesDetailModalClosed;
 
 export const renderDetailModal =
   renderClientesDetailModal;

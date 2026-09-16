@@ -21,6 +21,19 @@ const listener = (source) => {
   return `(domain) => {${match[1]}\n}`;
 };
 const safeObject = (value, fallback = {}) => value && typeof value === "object" ? value : fallback;
+// The curated Clientes create rules come from the module itself, never a copy:
+// a second list here would drift from the one users actually see. The literal is
+// evaluated, not hand-parsed, because a message may contain a colon or a brace.
+const clienteCreateErrorRules = (() => {
+  const marker = "const CREATE_CLIENTE_ERROR_RULES = Object.freeze(";
+  const start = clientCreate.indexOf(marker);
+  assert.ok(start >= 0, "CREATE_CLIENTE_ERROR_RULES missing from clientes.create-controller.js");
+  const open = clientCreate.indexOf("[", start);
+  const close = clientCreate.indexOf("\n]);", open);
+  assert.ok(close > open, "CREATE_CLIENTE_ERROR_RULES is not a closed literal");
+  return vm.runInNewContext(`(${clientCreate.slice(open, close + 2)})`);
+})();
+
 const noop = () => {};
 const defaults = () => ({ subject: "Fixture", targetUserId: "U1", attachments: [] });
 
@@ -71,6 +84,19 @@ function clientFixture() {
         scheduleRender: noop, renderNow: noop, removeModalHost: noop,
         modalLifecycle: { activate: noop, deactivate: noop },
         safeError: (error) => error.message, errorMessage: (error, fallback) => error?.message || fallback, ERROR_MESSAGE_POLICIES: { messageFirst: "messageFirst", payloadFirst: "payloadFirst" }, normalizeClienteModel: (value) => value,
+        // The create path presents by canonical code now, so the sandbox carries the real
+        // rule list and a presentError with the authority's semantics (ordered, first match
+        // wins, any condition, fallback last) instead of a stub that would prove nothing.
+        CREATE_CLIENTE_ERROR_RULES: clienteCreateErrorRules,
+        presentError: (error, rules, fallback) => {
+          const status = Number(error?.status ?? error?.statusCode ?? 0) || 0;
+          const code = String(error?.code ?? error?.data?.code ?? "");
+          for (const rule of rules) {
+            if (rule.offline === true && status === 0) return rule.message;
+            if (rule.codes?.includes(code)) return rule.message;
+          }
+          return fallback;
+        },
         createClienteRequest: async () => { const created = await gate.promise; parent.changed("clientes"); return created; },
         loadClienteDetailRequest: async () => ({ clienteId: "C1" }),
       });
@@ -117,7 +143,19 @@ for (const name of ["incidencias", "clientes"]) {
         fixture.gate.reject(new Error("Fixture write failed"));
         assert.equal(await pending, false);
         assert.equal(child.createModal.open, true);
-        assert.equal(child.createModal.serverError, "Fixture write failed");
+        // What a person reads on a failed create is domain policy, not the raw throw.
+        // Incidencias still shows the backend/exception message; Clientes presents by
+        // canonical code (U10e) and a statusless failure lands on its safe fallback, so
+        // the technical text must not surface at all.
+        if (name === "clientes") {
+          assert.equal(child.createModal.serverError, "No se pudo crear el cliente.");
+          assert.ok(
+            !String(child.createModal.serverError).includes("Fixture write failed"),
+            "clientes: the raw failure text must never reach the create modal",
+          );
+        } else {
+          assert.equal(child.createModal.serverError, "Fixture write failed");
+        }
         assert.equal(fixture.reads.length, 0, `${name}: rejected submit retains pending refresh and draft`);
       }
       child.close();

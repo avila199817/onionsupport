@@ -19,6 +19,8 @@ const RULE_LISTS = Object.freeze({
   "src/views/public/activate-account/index.js": { lists: ["ACTIVATION_ERROR_RULES"], domains: ["auth", "config"] },
   "src/features/public-support/index.js": { lists: ["ACTIVE_TICKET_ERROR_CODES", "SUPPORT_ERROR_RULES"], domains: ["tickets"] },
   "src/views/usuarios/usuarios.template.create.js": { lists: ["CREATE_USER_ERROR_RULES"], domains: ["users"] },
+  "src/views/clientes/index.js": { lists: ["CLIENTE_DETAIL_ERROR_RULES"], domains: ["clientes"] },
+  "src/views/clientes/clientes.create-controller.js": { lists: ["CREATE_CLIENTE_ERROR_RULES"], domains: ["clientes"] },
 });
 // Codes the frontend fabricates (core/http.js) and may therefore interpret.
 const FRONTEND_CODES = Object.freeze(["HTTP_ERROR", "NETWORK_ERROR", "REQUEST_TIMEOUT"]);

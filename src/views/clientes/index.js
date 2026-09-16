@@ -33,6 +33,7 @@ import { createClientesCreateController } from "./clientes.create-controller.js"
 import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage } from "../../core/errors.js";
+import { presentError } from "../../core/error-rules.js";
 import { coercedNumber } from "../../core/numbers.js";
 
 const CLIENTES_CANONICAL_PATH = "/clientes";
@@ -334,6 +335,20 @@ function csvEscape(value = "") {
   if (/^\s*[=+\-@]/.test(text)) text = `'${text}`;
   return `"${text.replace(/"/g, '""')}"`;
 }
+
+// GET /api/clientes/:id answers with a code and no message at all
+// (router/clientes/clienteGet.js sends { ok:false, error:code, code }), so
+// before this list all five ended under the same single sentence.
+const CLIENTE_DETAIL_ERROR_RULES = Object.freeze([
+  // No offline rule here on purpose: status 0 only means "no HTTP answer", which
+  // covers the network, a timeout, an abort AND any local throw. Claiming "sin
+  // conexion" would assert a cause we have not established, so an unknown cause
+  // falls through to the domain fallback, which is what it already did.
+  { codes: ["FORBIDDEN"], message: "No tienes permisos para ver este cliente." },
+  { codes: ["INVALID_ID"], message: "El identificador del cliente no es válido." },
+  { codes: ["CLIENTE_NOT_FOUND"], message: "Ese cliente ya no existe." },
+  { codes: ["CLIENTE_ID_MISMATCH", "CLIENTE_GET_ERROR"], message: "No se pudo abrir el cliente. Inténtalo de nuevo." },
+]);
 
 function createClientesController(host = null, initialContext = {}) {
   const id = ++controllerSequence;
@@ -745,7 +760,9 @@ function createClientesController(host = null, initialContext = {}) {
       syncInfiniteObserver();
       return true;
     } catch (renderError) {
-      error = errorMessage(renderError, "No se pudo renderizar la vista de clientes.", ERROR_MESSAGE_POLICIES.messageFirst);
+      // A local exception, not an HTTP answer: its message is a stack-level
+      // detail, never UI text. The view says what failed, not how.
+      error = "No se pudo renderizar la vista de clientes.";
       root.textContent = error;
       return false;
     }
@@ -1019,6 +1036,11 @@ function createClientesController(host = null, initialContext = {}) {
         return requestPage({ append: false, silent: false });
       }
 
+      // DOCUMENTED EXCEPTION. GET /api/clientes is the one Clientes endpoint whose
+      // sendError takes a message, and router/clientes/clientes_page.js writes each
+      // one for a person: it tells apart an invalid filter, an invalid order and
+      // three distinct cursor states. No curated text of ours would say more, so
+      // here the backend message is the human contract and stays visible.
       const message = errorMessage(loadError, "No se pudieron cargar los clientes.", ERROR_MESSAGE_POLICIES.messageFirst);
       if (append && items.length) {
         loadMoreError = message;
@@ -1342,7 +1364,7 @@ function createClientesController(host = null, initialContext = {}) {
         return seq === detailSeq && alive() && detailModalOpen;
       } catch (detailError) {
         if (seq === detailSeq && alive() && !isAbortError(detailError) && !request?.signal.aborted) {
-          showToast(errorMessage(detailError, "No se pudo abrir el cliente.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
+          showToast(presentError(detailError, CLIENTE_DETAIL_ERROR_RULES, "No se pudo abrir el cliente."), "error");
         }
         return false;
       } finally {
@@ -1380,10 +1402,8 @@ async function openCreate() {
     try {
       return ensureCreateController().open() !== false;
     } catch (createError) {
-      showToast(
-        errorMessage(createError, "No se pudo abrir la creación de cliente.", ERROR_MESSAGE_POLICIES.messageFirst),
-        "error"
-      );
+      // Opening the modal is local work: a thrown TypeError must not reach the toast.
+      showToast("No se pudo abrir la creación de cliente.", "error");
       return false;
     } finally {
       creating = false;

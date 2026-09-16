@@ -80,14 +80,13 @@ import { slugKey } from "../../core/slug-key.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 import { coercedNumber } from "../../core/numbers.js";
 
-export const USUARIOS_MODULE_NAME = "usuarios";
-export const USUARIOS_VIEW_NAME = "UsuariosView";
-export const USUARIOS_CANONICAL_PATH = "/usuarios";
-export const USUARIOS_INDEX_VERSION =
+const USUARIOS_MODULE_NAME = "usuarios";
+const USUARIOS_VIEW_NAME = "UsuariosView";
+const USUARIOS_CANONICAL_PATH = "/usuarios";
+const USUARIOS_INDEX_VERSION =
   "usuarios.index.v14.session-order-silent-refresh";
-export const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
-export const USUARIOS_MODULE_VERSION = USUARIOS_INDEX_VERSION;
-export const USUARIOS_INDEX_SOURCE = "views.usuarios.index";
+const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
+const USUARIOS_INDEX_SOURCE = "views.usuarios.index";
 
 export {
   USUARIOS_API_VERSION,
@@ -1785,13 +1784,13 @@ export async function UsuariosView(host = null, context = {}) {
   }
 }
 
-export const UsuariosIndex = UsuariosView;
+const UsuariosIndex = UsuariosView;
 export const view = UsuariosView;
 export const component = UsuariosView;
 export const page = UsuariosView;
 export default UsuariosView;
 
-export function getActiveUsuariosController() {
+function getActiveUsuariosController() {
   const active = getGlobalObject()?.[USUARIOS_GLOBAL_CONTROLLER_KEY] || lastController || null;
   return active?.isDestroyed?.() === true ? null : active;
 }
@@ -1810,19 +1809,18 @@ export const refreshUsuario = (userId = "") => {
   const modal = UsuariosDetailModal.getState();
   return !userId || modal.userId === userId ? UsuariosDetailModal.refresh() : Promise.resolve(null);
 };
-export const copyUsuarioId = (userId = "") => {
+const copyUsuarioId = (userId = "") => {
   const modal = UsuariosDetailModal.getState();
   return !userId || modal.userId === userId ? UsuariosDetailModal.copyId() : Promise.resolve(false);
 };
 export const openCreate = () => getActiveUsuariosController()?.openCreate?.() || Promise.resolve(false);
 export const createUsuario = openCreate;
-export const createUsuarioView = openCreate;
-export const initCreate = openCreate;
-export const closeCreate = () => getActiveUsuariosController()?.closeCreate?.() ?? true;
-export const renderCreate = () => safeCall(UsuariosCreateModal, "render", [], null);
-export const resetCreate = () => safeCall(UsuariosCreateModal, "reset", [], undefined);
-export const getCreateState = () => safeCall(UsuariosCreateModal, "getState", [], null);
-export const submitCreateUsuario = (payloadValue = {}) => {
+const createUsuarioView = openCreate;
+const closeCreate = () => getActiveUsuariosController()?.closeCreate?.() ?? true;
+const renderCreate = () => safeCall(UsuariosCreateModal, "render", [], null);
+const resetCreate = () => safeCall(UsuariosCreateModal, "reset", [], undefined);
+const getCreateState = () => safeCall(UsuariosCreateModal, "getState", [], null);
+const submitCreateUsuario = (payloadValue = {}) => {
   const controller = getActiveUsuariosController();
   if (controller?.submitCreateUsuario) return controller.submitCreateUsuario(payloadValue);
   const submit = UsuariosCreateModal?.submit || UsuariosCreateModal?.submitCreate || UsuariosCreateModal?.save;
@@ -1832,11 +1830,11 @@ export const exportCsv = () => getActiveUsuariosController()?.exportCsv?.() || P
 export const loadMore = () => getActiveUsuariosController()?.loadMore?.() || Promise.resolve(0);
 export const setSortOrder = (order = USUARIOS_DEFAULT_SORT_ORDER) => getActiveUsuariosController()?.setSortOrder?.(order) || normalizeSessionSortOrder(order);
 export const toggleSortOrder = (order = "") => getActiveUsuariosController()?.toggleSortOrder?.(order) || normalizeSessionSortOrder(order || USUARIOS_DEFAULT_SORT_ORDER);
-export const setVisibleLimit = (limit = DEFAULT_VISIBLE_ROWS) => getActiveUsuariosController()?.setVisibleLimit?.(limit) || 0;
-export const goToPage = (pageNumber = 1) => getActiveUsuariosController()?.goToPage?.(pageNumber) || 1;
-export const goPrevPage = () => getActiveUsuariosController()?.goPrevPage?.() || 1;
-export const goNextPage = () => getActiveUsuariosController()?.goNextPage?.() || 1;
-export const changePageSize = (size = DEFAULT_VISIBLE_ROWS) => getActiveUsuariosController()?.changePageSize?.(size) || 0;
+const setVisibleLimit = (limit = DEFAULT_VISIBLE_ROWS) => getActiveUsuariosController()?.setVisibleLimit?.(limit) || 0;
+const goToPage = (pageNumber = 1) => getActiveUsuariosController()?.goToPage?.(pageNumber) || 1;
+const goPrevPage = () => getActiveUsuariosController()?.goPrevPage?.() || 1;
+const goNextPage = () => getActiveUsuariosController()?.goNextPage?.() || 1;
+const changePageSize = (size = DEFAULT_VISIBLE_ROWS) => getActiveUsuariosController()?.changePageSize?.(size) || 0;
 
 export const fetchUsuariosRequest = (options = {}) => fetchUsuariosRequestApi(options);
 export const getUsuarioByIdRequest = (id = "", options = {}) => getUsuarioByIdRequestApi(id, options);
@@ -1858,10 +1856,10 @@ export async function loadUsuarios(options = {}) {
 }
 export const listUsuarios = loadUsuarios;
 export const loadUsuarioDetail = (id = "", options = {}) => loadUsuarioDetailApi(id, options);
-export const getUsuarioByIdApi = loadUsuarioDetail;
-export const createUsuarioApi = (payloadValue = {}, options = {}) => createUsuarioApiRequest(payloadValue, options);
-export const updateUsuarioApi = (id = "", payloadValue = {}, options = {}) => updateUsuarioApiRequest(id, payloadValue, options);
-export const deleteUsuarioApi = (id = "", options = {}) => deleteUsuarioApiRequest(id, options);
+const getUsuarioByIdApi = loadUsuarioDetail;
+const createUsuarioApi = (payloadValue = {}, options = {}) => createUsuarioApiRequest(payloadValue, options);
+const updateUsuarioApi = (id = "", payloadValue = {}, options = {}) => updateUsuarioApiRequest(id, payloadValue, options);
+const deleteUsuarioApi = (id = "", options = {}) => deleteUsuarioApiRequest(id, options);
 
 export const usuariosState = usuariosApiState;
 export const getUsuarios = () => {
@@ -1905,9 +1903,9 @@ export const getUsuariosStateSnapshot = () => ({
   view: getActiveUsuariosController()?.getState?.() || null,
 });
 export const getItems = getUsuarios;
-export const getPageItems = () => getActiveUsuariosController()?.getPageItems?.() || [];
-export const getVisibleItems = () => getActiveUsuariosController()?.getVisibleItems?.() || getPageItems();
-export const getPagination = () => getActiveUsuariosController()?.getPagination?.() || null;
+const getPageItems = () => getActiveUsuariosController()?.getPageItems?.() || [];
+const getVisibleItems = () => getActiveUsuariosController()?.getVisibleItems?.() || getPageItems();
+const getPagination = () => getActiveUsuariosController()?.getPagination?.() || null;
 export const getUsuarioByIdStore = (id = "") => getActiveUsuariosController()?.getUsuarioById?.(id) || getUsuarioByIdApiStore(id) || null;
 export const getUsuarioById = getUsuarioByIdStore;
 export const getState = () => getActiveUsuariosController()?.getState?.() || { ...getUsuariosApiStateSnapshot(), items: getUsuarios() };
@@ -1928,10 +1926,10 @@ export const getSnapshot = () => getActiveUsuariosController()?.getSnapshot?.() 
   },
 };
 export const isAdmin = () => getActiveUsuariosController()?.isAdmin?.() || isAdminContext({});
-export const isInitialized = () => getActiveUsuariosController()?.isInitialized?.() || false;
-export const isDestroyed = () => getActiveUsuariosController()?.isDestroyed?.() ?? true;
-export const isMounted = () => getActiveUsuariosController()?.isMounted?.() || false;
-export const canRenderUsuariosNow = (context = {}) => isUsuariosRoute(safeObject(context, {}));
+const isInitialized = () => getActiveUsuariosController()?.isInitialized?.() || false;
+const isDestroyed = () => getActiveUsuariosController()?.isDestroyed?.() ?? true;
+const isMounted = () => getActiveUsuariosController()?.isMounted?.() || false;
+const canRenderUsuariosNow = (context = {}) => isUsuariosRoute(safeObject(context, {}));
 export const getUsuariosRouteDebug = (context = {}) => {
   const state = getAppState();
   const role = getCurrentRole(context, state);
@@ -1957,13 +1955,13 @@ export const getUsuariosRouteDebug = (context = {}) => {
    MODAL COMPAT
 ========================================================= */
 
-export const openModal = (detail = {}, opener = null) => openUsuario(getUsuarioId(normalizeUsuarioModel(detail)), opener);
+const openModal = (detail = {}, opener = null) => openUsuario(getUsuarioId(normalizeUsuarioModel(detail)), opener);
 export const closeModal = () => AppCore.getModule?.("entities")?.close?.() ?? UsuariosDetailModal.close();
-export const refreshModal = () => UsuariosDetailModal?.refresh?.() || false;
-export const updateModal = (detail = {}) => UsuariosDetailModal?.update?.(normalizeUsuarioModel(detail)) || false;
-export const getModalState = () => UsuariosDetailModal?.getState?.() || null;
+const refreshModal = () => UsuariosDetailModal?.refresh?.() || false;
+const updateModal = (detail = {}) => UsuariosDetailModal?.update?.(normalizeUsuarioModel(detail)) || false;
+const getModalState = () => UsuariosDetailModal?.getState?.() || null;
 
-export const UsuariosModule = {
+const UsuariosModule = {
   name: USUARIOS_MODULE_NAME,
   viewName: USUARIOS_VIEW_NAME,
   version: USUARIOS_VIEW_VERSION,

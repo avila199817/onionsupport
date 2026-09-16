@@ -59,24 +59,15 @@ import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
    META / CONFIG
 ========================================================= */
 
-export const SERVIDOR_MODULE_NAME = "servidor";
-export const SERVER_MODULE_NAME = "server";
+const SERVIDOR_CANONICAL_PATH = "/servidor";
 
-export const SERVIDOR_VIEW_NAME = "ServidorView";
-export const SERVER_VIEW_NAME = "ServerView";
-
-export const SERVIDOR_CANONICAL_PATH = "/servidor";
-
-export const SERVIDOR_INDEX_VERSION =
+const SERVIDOR_INDEX_VERSION =
   "servidor.index.api-boundary.v3.nonblocking-observability";
 
-export const SERVER_INDEX_VERSION =
-  SERVIDOR_INDEX_VERSION;
-
-export const SERVIDOR_INDEX_SOURCE =
+const SERVIDOR_INDEX_SOURCE =
   "views.server.index";
 
-export const SERVER_REFRESH_INTERVAL_MS =
+const SERVER_REFRESH_INTERVAL_MS =
   SERVER_AUTO_REFRESH_DEFAULT_MS;
 
 export const SERVER_REQUEST_TIMEOUT_MS =
@@ -2085,10 +2076,6 @@ function ensureController(
   return activeController;
 }
 
-export function getActiveServerController() {
-  return activeController;
-}
-
 /* =========================================================
    PUBLIC VIEW API
 ========================================================= */
@@ -2317,7 +2304,7 @@ export async function loadServerHealth(
   );
 }
 
-export async function loadServerSnapshotPublic(
+async function loadServerSnapshotPublic(
   options = {}
 ) {
   const controller =
@@ -2378,7 +2365,7 @@ export async function refreshServerSnapshot(
   );
 }
 
-export function startServerLive(
+function startServerLive(
   options = {}
 ) {
   return ensureController()
@@ -2387,7 +2374,7 @@ export function startServerLive(
     );
 }
 
-export function stopServerLive(
+function stopServerLive(
   options = {}
 ) {
   return ensureController()
@@ -2396,7 +2383,7 @@ export function stopServerLive(
     );
 }
 
-export function toggleServerLive(
+function toggleServerLive(
   options = {}
 ) {
   return ensureController()
@@ -2405,7 +2392,7 @@ export function toggleServerLive(
     );
 }
 
-export async function copyServerJson() {
+async function copyServerJson() {
   const controller =
     activeController;
 
@@ -2416,7 +2403,7 @@ export async function copyServerJson() {
   return controller.copyJson();
 }
 
-export async function copyServerDetail(
+async function copyServerDetail(
   serviceId = ""
 ) {
   const controller =
@@ -2435,7 +2422,7 @@ export async function copyServerDetail(
    DEBUG / CONTRACT SNAPSHOT
 ========================================================= */
 
-export function getServerRouteDebug(
+function getServerRouteDebug(
   context = {}
 ) {
   return {

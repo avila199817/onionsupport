@@ -26,7 +26,7 @@ export const SERVER_CACHE_TTL_MS = Base.SERVER_CACHE_TTL_MS;
 export const SERVER_AUTO_REFRESH_DEFAULT_MS = Base.SERVER_AUTO_REFRESH_DEFAULT_MS;
 export const SERVER_CACHE_KEY = Base.SERVER_CACHE_KEY;
 
-export const SERVER_COST_CACHE_TTL_MS = 5 * 60 * 1000;
+const SERVER_COST_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export const SERVER_ENDPOINTS = Object.freeze({
   ...Base.SERVER_ENDPOINTS,
@@ -237,7 +237,7 @@ function costCacheIsFresh() {
   );
 }
 
-export async function fetchServerCostsRequest(options = {}) {
+async function fetchServerCostsRequest(options = {}) {
   let response;
 
   if (typeof Http?.get === "function") {
@@ -264,7 +264,7 @@ export async function fetchServerCostsRequest(options = {}) {
   return normalizeCostSnapshot(response);
 }
 
-export async function loadServerCosts(options = {}) {
+async function loadServerCosts(options = {}) {
   const opts = safeObject(options);
 
   if (!opts.force && costCacheIsFresh()) {
@@ -326,7 +326,7 @@ export async function loadServerCosts(options = {}) {
   return task;
 }
 
-export async function refreshServerCosts(options = {}) {
+async function refreshServerCosts(options = {}) {
   return loadServerCosts({
     ...safeObject(options),
     force: true,

@@ -45,18 +45,18 @@ import { ERROR_MESSAGE_POLICIES, errorMessage, errorStatus } from "../../core/er
 export const CUENTA_API_VERSION =
   "cuenta.api.backend-contract.v5-canonical-runtime";
 
-export const CUENTA_RESOURCE = "cuenta";
+const CUENTA_RESOURCE = "cuenta";
 
-export const CUENTA_ENDPOINTS = Object.freeze({
+const CUENTA_ENDPOINTS = Object.freeze({
   me: "/api/auth/me",
   changePassword: "/api/auth/change-password",
   deactivateSelf: "/api/auth/deactivate/self",
   usersAvatar: "/api/users/avatar",
 });
 
-export const CUENTA_ENDPOINT = CUENTA_ENDPOINTS.me;
-export const CUENTA_TIMEOUT = 30_000;
-export const CUENTA_UPLOAD_TIMEOUT = 60_000;
+const CUENTA_ENDPOINT = CUENTA_ENDPOINTS.me;
+const CUENTA_TIMEOUT = 30_000;
+const CUENTA_UPLOAD_TIMEOUT = 60_000;
 export const CUENTA_SELF_UPDATE_SUPPORTED = false;
 
 export const CUENTA_PASSWORD_POLICY = Object.freeze({
@@ -874,7 +874,7 @@ export function getCuentaApiSnapshot() {
   };
 }
 
-export const CuentaApi = Object.freeze({
+const CuentaApi = Object.freeze({
   version: CUENTA_API_VERSION,
   resource: CUENTA_RESOURCE,
   endpoints: CUENTA_ENDPOINTS,

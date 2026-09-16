@@ -32,11 +32,11 @@ import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage, errorStatus } from "..
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
 
-export const HOME_API_VERSION =
+const HOME_API_VERSION =
   "home.api.domain-aggregator.v13-domain-counts";
 
 export const HOME_TIMEOUT_MS = 15_000;
-export const HOME_LIST_LIMIT = 8;
+const HOME_LIST_LIMIT = 8;
 export const HOME_CACHE_TTL_MS = 60_000;
 
 const LIST_KEYS = Object.freeze([
@@ -776,7 +776,7 @@ export function getHomeCacheState() {
   };
 }
 
-export function getHomeApiSnapshot() {
+function getHomeApiSnapshot() {
   const dashboard = cacheMatches() ? cacheState.dashboard : null;
 
   return {
@@ -811,7 +811,7 @@ export function getHomeApiSnapshot() {
   };
 }
 
-export const HomeApi = Object.freeze({
+const HomeApi = Object.freeze({
   version: HOME_API_VERSION,
   loadHomeDashboard,
   hydrateHomeFromCache,

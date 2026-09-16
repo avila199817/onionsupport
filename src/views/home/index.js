@@ -45,8 +45,8 @@ import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 const ERROR_FALLBACK = "No se pudo cargar el inicio.";
 
-export const HOME_INDEX_VERSION = "home.index.v13-persisted-onboarding";
-export const HOME_VIEW_VERSION = HOME_INDEX_VERSION;
+const HOME_INDEX_VERSION = "home.index.v13-persisted-onboarding";
+const HOME_VIEW_VERSION = HOME_INDEX_VERSION;
 
 const SOURCE = "home.view";
 const ROUTER_EVENT_HANDLED_KEY = "__onionRouterHandled";
@@ -939,41 +939,11 @@ export function refresh() {
   }
 }
 
-export function loadHome(options = {}) {
-  try {
-    if (lastInstance?.ensureLoaded) {
-      return lastInstance.ensureLoaded(options);
-    }
-
-    return loadHomeDashboard({
-      ...safeObject(options),
-      returnStaleOnError: true,
-    });
-  } catch {
-    return null;
-  }
-}
-
 export function getDashboard() {
   try {
     return lastInstance?.getDashboard?.() || getCachedDashboard() || null;
   } catch {
     return getCachedDashboard();
-  }
-}
-
-export function clearHomeViewCache() {
-  return clearHomeDashboardCache();
-}
-
-export function clearHomeDom() {
-  try {
-    return Boolean(lastInstance?.destroy?.({
-      keepDom: false,
-      clearDom: true,
-    }));
-  } catch {
-    return false;
   }
 }
 

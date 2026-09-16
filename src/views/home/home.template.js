@@ -158,10 +158,6 @@ function welcomePilot(vm = {}) {
   `;
 }
 
-export function renderHomeLoadingState(input = {}) {
-  return renderHomeTemplate({ ...input, loading: true });
-}
-
 export function renderHomeErrorState(message = "No se pudo cargar el inicio.") {
   const safeMessage = cleanText(message, "No se pudo cargar el inicio.");
 

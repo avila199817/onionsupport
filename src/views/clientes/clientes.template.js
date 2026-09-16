@@ -15,7 +15,7 @@ import { safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 import { coercedNumber } from "../../core/numbers.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
-import { CURRENCY_POLICIES, formatCurrency, formatDecimal } from "../../core/format.js";
+import { CURRENCY_POLICIES, DATE_PRESETS, dateFormatter, formatCurrency, formatDecimal } from "../../core/format.js";
 
 export {
   normalizeClienteModel,
@@ -82,11 +82,7 @@ function formatDateShort(value = null) {
   const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!timestamp) return "—";
   try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(timestamp));
+    return dateFormatter(DATE_PRESETS.shortMonthDate).format(new Date(timestamp));
   } catch {
     return new Date(timestamp).toISOString().slice(0, 10);
   }
@@ -109,13 +105,7 @@ function formatDateTime(value = null) {
   const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!timestamp) return "—";
   try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(timestamp));
+    return dateFormatter(DATE_PRESETS.dateTime).format(new Date(timestamp));
   } catch {
     return new Date(timestamp).toISOString();
   }

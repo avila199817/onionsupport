@@ -8,7 +8,7 @@ import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
-import { CURRENCY_POLICIES, currencyCode, currencyFormatter } from "../../core/format.js";
+import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, currencyFormatter, dateFormatter } from "../../core/format.js";
 /* =========================================================
    Onion Support - Clientes Detail Template
    Archivo: /src/views/clientes/clientes.template.modal.js
@@ -674,21 +674,7 @@ function formatDate(
   }
 
   try {
-    return new Intl.DateTimeFormat(
-      "es-ES",
-      {
-        day:
-          "2-digit",
-        month:
-          "2-digit",
-        year:
-          "numeric",
-        hour:
-          "2-digit",
-        minute:
-          "2-digit",
-      }
-    ).format(
+    return dateFormatter(DATE_PRESETS.dateTime).format(
       new Date(timestamp)
     );
   } catch {
@@ -712,17 +698,7 @@ function formatShortDate(
   }
 
   try {
-    return new Intl.DateTimeFormat(
-      "es-ES",
-      {
-        day:
-          "2-digit",
-        month:
-          "short",
-        year:
-          "numeric",
-      }
-    ).format(
+    return dateFormatter(DATE_PRESETS.shortMonthDate).format(
       new Date(timestamp)
     );
   } catch {

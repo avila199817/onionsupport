@@ -38,10 +38,9 @@ import { safeArray } from "../../core/arrays.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 
-export const WHATSAPP_VIEW_VERSION =
+const WHATSAPP_VIEW_VERSION =
   "whatsapp.view.v2.professional-inbox";
-export const WHATSAPP_VIEW_NAME = "WhatsAppView";
-export const WHATSAPP_CANONICAL_PATH = "/whatsapp";
+const WHATSAPP_CANONICAL_PATH = "/whatsapp";
 
 const POLL_INTERVAL_MS = 12_000;
 const SEARCH_DEBOUNCE_MS = 120;

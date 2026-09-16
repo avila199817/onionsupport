@@ -18,8 +18,8 @@ import { safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 
 
-export const CORREO_API_VERSION = "correo.api.microsoft.production.v3-pure-http";
-export const MICROSOFT_ENDPOINT = "/api/microsoft";
+const CORREO_API_VERSION = "correo.api.microsoft.production.v3-pure-http";
+const MICROSOFT_ENDPOINT = "/api/microsoft";
 
 const DEFAULT_TIMEOUT = 20000;
 const SEND_TIMEOUT = 45000;
@@ -132,7 +132,7 @@ function mailboxEndpoint(path = "", input = {}) {
   return `${base}${separator}mailbox=${encodeURIComponent(mailbox)}`;
 }
 
-export async function getMicrosoftStatus(input = {}) {
+async function getMicrosoftStatus(input = {}) {
   const payload = await Http.get(endpoint("status"), {
     ...options(input),
     query: input.probe === true ? { probe: "true" } : undefined,
@@ -163,7 +163,7 @@ export async function getMicrosoftStatus(input = {}) {
   });
 }
 
-export async function beginMicrosoftConnect(input = {}) {
+async function beginMicrosoftConnect(input = {}) {
   const payload = await Http.get(endpoint("connect"), options(input));
   const authorizationUrl = cleanText(payload?.authorizationUrl, "");
   if (!/^https:\/\/login\.microsoftonline\.com\//i.test(authorizationUrl)) {
@@ -179,12 +179,12 @@ export async function beginMicrosoftConnect(input = {}) {
   });
 }
 
-export async function disconnectMicrosoft(input = {}) {
+async function disconnectMicrosoft(input = {}) {
   const payload = await Http.post(endpoint("disconnect"), {}, options(input));
   return payload?.connected === false;
 }
 
-export async function getMicrosoftProfile(input = {}) {
+async function getMicrosoftProfile(input = {}) {
   const payload = await Http.get(endpoint("me"), options(input));
   return Object.freeze({
     id: cleanText(payload?.profile?.id, ""),
@@ -194,7 +194,7 @@ export async function getMicrosoftProfile(input = {}) {
   });
 }
 
-export async function listMailFolders(input = {}) {
+async function listMailFolders(input = {}) {
   const payload = await Http.get(endpoint("folders"), {
     ...options(input),
     query: withMailboxQuery(input, input.includeHidden === true ? { includeHidden: "true" } : {}),
@@ -202,7 +202,7 @@ export async function listMailFolders(input = {}) {
   return Object.freeze(safeArray(payload?.folders).map(normalizeFolder).filter((item) => item.id));
 }
 
-export async function listMessages(input = {}) {
+async function listMessages(input = {}) {
   const cursor = cleanText(input.cursor, "");
   const query = withMailboxQuery(input, cursor
     ? { cursor }
@@ -224,7 +224,7 @@ export async function listMessages(input = {}) {
   });
 }
 
-export async function getMessage(id, input = {}) {
+async function getMessage(id, input = {}) {
   const cleanId = cleanText(id, "");
   if (!cleanId) throw new Error("MAIL_MESSAGE_ID_REQUIRED");
   const payload = await Http.get(mailboxEndpoint(`messages/${encodeURIComponent(cleanId)}`, input), options(input));
@@ -273,7 +273,7 @@ function normalizeWritePayload(payload = {}) {
   };
 }
 
-export async function sendMessage(payload = {}, input = {}) {
+async function sendMessage(payload = {}, input = {}) {
   const response = await Http.post(mailboxEndpoint("send", input), normalizeWritePayload(payload), {
     ...options(input),
     timeout: SEND_TIMEOUT,
@@ -281,7 +281,7 @@ export async function sendMessage(payload = {}, input = {}) {
   return response?.accepted === true;
 }
 
-export async function replyMessage(id, comment = "", input = {}) {
+async function replyMessage(id, comment = "", input = {}) {
   const cleanId = cleanText(id, "");
   if (!cleanId) throw new Error("MAIL_MESSAGE_ID_REQUIRED");
   const response = await Http.post(
@@ -292,7 +292,7 @@ export async function replyMessage(id, comment = "", input = {}) {
   return response?.accepted === true;
 }
 
-export async function replyAllMessage(id, comment = "", input = {}) {
+async function replyAllMessage(id, comment = "", input = {}) {
   const cleanId = cleanText(id, "");
   if (!cleanId) throw new Error("MAIL_MESSAGE_ID_REQUIRED");
   const response = await Http.post(
@@ -303,7 +303,7 @@ export async function replyAllMessage(id, comment = "", input = {}) {
   return response?.accepted === true;
 }
 
-export async function forwardMessage(id, payload = {}, input = {}) {
+async function forwardMessage(id, payload = {}, input = {}) {
   const cleanId = cleanText(id, "");
   if (!cleanId) throw new Error("MAIL_MESSAGE_ID_REQUIRED");
   const response = await Http.post(
@@ -347,7 +347,7 @@ export async function sendDraft(id, input = {}) {
   return response?.accepted === true;
 }
 
-export async function listAttachments(messageId, input = {}) {
+async function listAttachments(messageId, input = {}) {
   const cleanId = cleanText(messageId, "");
   if (!cleanId) throw new Error("MAIL_MESSAGE_ID_REQUIRED");
   const response = await Http.get(

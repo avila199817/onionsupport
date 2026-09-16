@@ -37,7 +37,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage } from "../../core/errors.js";
 
 
-export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v6-canonical-user";
+const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v6-canonical-user";
 
 const INSTANCES = new WeakMap();
 let lastInstance = null;

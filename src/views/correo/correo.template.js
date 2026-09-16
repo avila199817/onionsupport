@@ -94,7 +94,7 @@ function safeDate(value = "") {
   return Number.isFinite(time) ? new Date(time) : null;
 }
 
-export function formatMessageTime(value = "", now = new Date()) {
+function formatMessageTime(value = "", now = new Date()) {
   const date = safeDate(value);
   if (!date) return "";
   if (date.toDateString() === now.toDateString()) {
@@ -107,7 +107,7 @@ export function formatMessageTime(value = "", now = new Date()) {
     : { day: "2-digit", month: "short", year: "2-digit" }).format(date);
 }
 
-export function formatLongDate(value = "") {
+function formatLongDate(value = "") {
   const date = safeDate(value);
   if (!date) return "";
   return new Intl.DateTimeFormat("es-ES", {

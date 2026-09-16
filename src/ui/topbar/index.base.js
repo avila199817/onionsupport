@@ -47,7 +47,7 @@ import { isObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 
 
-export const TOPBAR_VERSION =
+const TOPBAR_VERSION =
   "topbar.controller.backend-search.v9-search-runtime-context";
 
 const TOPBAR_ROOT_ID =

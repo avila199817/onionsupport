@@ -26,7 +26,7 @@
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { isObject } from "../../core/objects.js";
 
-export const TOPBAR_TEMPLATE_VERSION =
+const TOPBAR_TEMPLATE_VERSION =
   "topbar.template.backend-search.v5-hardened";
 
 const TOPBAR_ID =
@@ -577,7 +577,7 @@ function typeIcon(
    TITLE
 ========================================================= */
 
-export function createTopbarTitle(
+function createTopbarTitle(
   title = DEFAULT_TITLE
 ) {
   return createElement(
@@ -607,7 +607,7 @@ export function createTopbarTitle(
    SEARCH
 ========================================================= */
 
-export function createTopbarSearch(
+function createTopbarSearch(
   options = {}
 ) {
   const placeholder =
@@ -2026,7 +2026,7 @@ export function setTopbarSearchActiveIndex(
   return changed;
 }
 
-export function setTopbarSearchValue(
+function setTopbarSearchValue(
   root = null,
   value = ""
 ) {
@@ -2062,7 +2062,7 @@ export function setTopbarSearchValue(
   return true;
 }
 
-export function getTopbarSearchResultsState(
+function getTopbarSearchResultsState(
   root = null
 ) {
   const refs =
@@ -2795,7 +2795,7 @@ export function setTopbarSearchExpanded(
    SNAPSHOT
 ========================================================= */
 
-export function getTopbarTemplateSnapshot(
+function getTopbarTemplateSnapshot(
   root = null
 ) {
   const refs =
@@ -2946,7 +2946,7 @@ export function getTopbarTemplateSnapshot(
    API
 ========================================================= */
 
-export const TopbarTemplate = {
+const TopbarTemplate = {
   version:
     TOPBAR_TEMPLATE_VERSION,
 

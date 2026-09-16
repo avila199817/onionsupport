@@ -53,7 +53,7 @@ import { isObject, isFunction } from "../../core/objects.js";
 import { redactSecrets } from "../../core/redact.js";
 
 
-export const SIDEBAR_VERSION =
+const SIDEBAR_VERSION =
   "sidebar.controller.v8-whatsapp-sidebar-placeholder";
 
 const SIDEBAR_ROOT_ID =

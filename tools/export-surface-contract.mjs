@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 // docs, dynamic access by string); anything else is either used only inside
 // its own module (then it is not an export) or dead (then it goes). The
 // list of swept directories only grows; a swept directory never regresses.
-const SWEPT_DIRECTORIES = Object.freeze(["src/views/cuenta", "src/views/server"]);
+const SWEPT_DIRECTORIES = Object.freeze(["src/ui/sidebar", "src/ui/topbar", "src/views/correo", "src/views/cuenta", "src/views/server", "src/views/whatsapp"]);
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKIP = new Set(["node_modules", "dist", ".git", "build-metadata", "scratchpad"]);
 function walk(dir, accept) {
@@ -20,8 +20,21 @@ function walk(dir, accept) {
   });
 }
 const rel = (path) => relative(ROOT, path).split(sep).join("/");
+// The reference corpus needs the whole repository. Some jobs build a partial
+// checkout (the home comparison copies src, tools and the build config only);
+// there the corpus cannot prove a name unused, so the check reports that it
+// was skipped instead of failing on a directory that is not there.
+const OPTIONAL_ROOTS = Object.freeze([
+  ["tools", (p) => /\.(mjs|js|json|sh)$/u.test(p)],
+  [".github", (p) => /\.(mjs|js|py|sh|yml|yaml|json)$/u.test(p)],
+  ["docs", (p) => p.endsWith(".md")],
+]);
+const missingRoots = OPTIONAL_ROOTS.filter(([name]) => !existsSync(join(ROOT, name))).map(([name]) => name);
 const codeFiles = walk(join(ROOT, "src"), (p) => p.endsWith(".js"));
-const otherFiles = [...walk(join(ROOT, "tools"), (p) => /\.(mjs|js|json|sh)$/u.test(p)), ...walk(join(ROOT, ".github"), (p) => /\.(mjs|js|py|sh|yml|yaml|json)$/u.test(p)), ...walk(join(ROOT, "docs"), (p) => p.endsWith(".md")), ...readdirSync(ROOT).filter((n) => n.endsWith(".html") || n === "vite.config.js" || n === "package.json").map((n) => join(ROOT, n))];
+const otherFiles = [
+  ...OPTIONAL_ROOTS.filter(([name]) => existsSync(join(ROOT, name))).flatMap(([name, accept]) => walk(join(ROOT, name), accept)),
+  ...readdirSync(ROOT).filter((n) => n.endsWith(".html") || n === "vite.config.js" || n === "package.json").map((n) => join(ROOT, n)),
+];
 const sources = new Map([...codeFiles, ...otherFiles].map((p) => [rel(p), readFileSync(p, "utf8")]));
 const DECLARATION = /^export\s+(?:async\s+)?(?:function\*?|const|let|var|class)\s+([A-Za-z_$][\w$]*)/gmu;
 const LIST = /^export\s*\{([^}]*)\}/gmu;
@@ -43,6 +56,10 @@ for (const directory of SWEPT_DIRECTORIES) {
       if (!referencedElsewhere) violations.push(`${path}#${name}`);
     }
   }
+}
+if (missingRoots.length) {
+  console.log(`Export surface contract: SKIPPED · partial checkout without ${missingRoots.join(", ")} · ${checked} exports not verifiable here`);
+  process.exit(0);
 }
 assert.deepEqual(violations, [], `every export of ${SWEPT_DIRECTORIES.join(", ")} has a consumer outside its module`);
 console.log(`Export surface contract: PASS · ${checked} exports in ${SWEPT_DIRECTORIES.length} swept ${SWEPT_DIRECTORIES.length === 1 ? "directory" : "directories"} (${SWEPT_DIRECTORIES.join(", ")}) each referenced outside its module`);

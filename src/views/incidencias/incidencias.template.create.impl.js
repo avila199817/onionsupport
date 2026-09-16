@@ -986,13 +986,19 @@ export function renderIncidenciasCreateModal(input = {}) {
 
         ${renderFileInput(vm)}
 
-        <div class="inc-create-actions">
-          <span class="inc-create-actions-note">${vm.admin ? "La incidencia se añadirá al historial del usuario seleccionado." : "Podrás seguir el estado y las respuestas desde Incidencias."}</span>
-          <button id="incidencias-create-submit-btn" type="submit" data-create-action="${CREATE_ACTIONS.SUBMIT}" ${disabledAttrs(vm.submitting, vm.submitting)} class="inc-create-submit">
-            ${vm.submitting ? `<span class="inc-create-spinner" aria-hidden="true"></span><span>Creando...</span>` : `<span>Crear incidencia</span>`}
-          </button>
-        </div>
       </form>
+    `,
+    /* La acción principal vive en el pie estructural del shell, no dentro del cuerpo
+       desplazable: mismo sitio, mismo aire y mismo borde que en el detalle. El botón sigue
+       enviando su formulario por el atributo `form`, que es el mecanismo estándar para un
+       control que está fuera de él. */
+    footer: `
+      <div class="inc-create-actions">
+        <span class="inc-create-actions-note">${vm.admin ? "La incidencia se añadirá al historial del usuario seleccionado." : "Podrás seguir el estado y las respuestas desde Incidencias."}</span>
+        <button id="incidencias-create-submit-btn" type="submit" form="${FORM_ID}" data-create-action="${CREATE_ACTIONS.SUBMIT}" ${disabledAttrs(vm.submitting, vm.submitting)} class="inc-create-submit">
+          ${vm.submitting ? `<span class="inc-create-spinner" aria-hidden="true"></span><span>Creando...</span>` : `<span>Crear incidencia</span>`}
+        </button>
+      </div>
     `,
   });
 }

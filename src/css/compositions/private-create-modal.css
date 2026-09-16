@@ -538,9 +538,12 @@
   justify-content: space-between;
   gap: var(--space-md);
   margin: 0;
-  padding-block-start: var(--space-xs);
+  /* El pie estructural del shell pone el aire, el borde y la superficie: la fila de acciones
+     no vuelve a declararlos por su cuenta ni con un margen propio de un dominio. */
+  padding: 0;
   border: 0;
   background: transparent;
+  flex: 1 1 auto;
 }
 
 :is(

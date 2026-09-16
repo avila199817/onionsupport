@@ -944,18 +944,23 @@ function renderModalHtml() {
           </div>
         </section>
 
-        <div class="usr-create-actions inc-create-actions">
-          <span class="usr-create-actions-note inc-create-actions-note">El usuario recibirá el enlace de activación en el email indicado.</span>
-          <button
-            type="submit"
-            class="usr-create-submit inc-create-submit"
-            data-usr-create-action="submit"
-            ${disabled ? "disabled" : ""}
-          >
-            ${state.submitting ? `<span class="usr-create-spinner inc-create-spinner" aria-hidden="true"></span><span>Creando...</span>` : `<span>Crear y enviar activación</span>`}
-          </button>
-        </div>
       </form>
+    `,
+    /* La acción principal vive en el pie estructural del shell, no dentro del cuerpo
+       desplazable: mismo sitio, mismo aire y mismo borde que en el detalle. El botón sigue
+       enviando su formulario por el atributo `form`. */
+    footer: `
+      <div class="usr-create-actions inc-create-actions">
+        <span class="usr-create-actions-note inc-create-actions-note">El usuario recibirá el enlace de activación en el email indicado.</span>
+        <button
+          type="submit" form="${FORM_ID}"
+          class="usr-create-submit inc-create-submit"
+          data-usr-create-action="submit"
+          ${disabled ? "disabled" : ""}
+        >
+          ${state.submitting ? `<span class="usr-create-spinner inc-create-spinner" aria-hidden="true"></span><span>Creando...</span>` : `<span>Crear y enviar activación</span>`}
+        </button>
+      </div>
     `,
   });
 }

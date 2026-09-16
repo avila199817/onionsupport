@@ -17,7 +17,7 @@ import {
   setAppChromeTemplateState,
 } from "./template.js";
 
-export const APP_CHROME_VERSION =
+const APP_CHROME_VERSION =
   "app-chrome.controller.v4-no-mobile-shell-compat";
 
 const MOBILE_QUERY = "(max-width: 900px)";
@@ -134,7 +134,7 @@ function syncDocumentState({ mobile, visible, open }) {
   return true;
 }
 
-export function syncAppChrome() {
+function syncAppChrome() {
   if (!isBrowser()) return false;
 
   if (syncFrame) {
@@ -229,7 +229,7 @@ function focusSidebarEntry() {
   return focusNode(target);
 }
 
-export function openAppChromeNavigation({ focus = true } = {}) {
+function openAppChromeNavigation({ focus = true } = {}) {
   if (!isMobile() || !chromeIsVisible()) return false;
 
   try {
@@ -243,7 +243,7 @@ export function openAppChromeNavigation({ focus = true } = {}) {
   return true;
 }
 
-export function closeAppChromeNavigation({ focus = false } = {}) {
+function closeAppChromeNavigation({ focus = false } = {}) {
   if (!isMobile()) return false;
 
   try {
@@ -257,7 +257,7 @@ export function closeAppChromeNavigation({ focus = false } = {}) {
   return true;
 }
 
-export function toggleAppChromeNavigation() {
+function toggleAppChromeNavigation() {
   if (!isMobile() || !chromeIsVisible()) return false;
 
   return sidebarIsOpen()
@@ -437,7 +437,7 @@ function unbindMediaQuery() {
   return true;
 }
 
-export function initAppChrome() {
+function initAppChrome() {
   if (!isBrowser() || initialized) return AppChromeUI;
 
   initialized = true;
@@ -461,7 +461,7 @@ export function initAppChrome() {
   return AppChromeUI;
 }
 
-export function destroyAppChrome() {
+function destroyAppChrome() {
   if (!isBrowser() || !initialized) return AppChromeUI;
 
   unbindMediaQuery();
@@ -499,7 +499,7 @@ export function destroyAppChrome() {
   return AppChromeUI;
 }
 
-export function getAppChromeSnapshot() {
+function getAppChromeSnapshot() {
   const refs = getAppChromeTemplateRefs();
 
   return Object.freeze({

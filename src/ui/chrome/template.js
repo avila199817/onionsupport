@@ -12,7 +12,7 @@
    - Sin Router, Auth, HTTP, Store ni lógica de dominio.
 ========================================================= */
 
-export const APP_CHROME_TEMPLATE_VERSION =
+const APP_CHROME_TEMPLATE_VERSION =
   "app-chrome.template.v2-single-layout-authority";
 
 const SELECTOR = Object.freeze({
@@ -260,7 +260,7 @@ export function setAppChromeTemplateState({
   return refs;
 }
 
-export const AppChromeTemplate = Object.freeze({
+const AppChromeTemplate = Object.freeze({
   version: APP_CHROME_TEMPLATE_VERSION,
   ensure: ensureAppChromeTemplate,
   getRefs: getAppChromeTemplateRefs,

@@ -21,7 +21,9 @@ import { fileURLToPath } from "node:url";
 //   decision, not an architectural target: it is expected to move.
 const BASELINE = Object.freeze({
   "src/features/avatar-system": 48,
+  "src/ui/chrome": 4,
   "src/ui/sidebar": 7,
+  "src/ui/toast": 18,
   "src/ui/topbar": 10,
   "src/views/correo": 25,
   "src/views/clientes": 102,

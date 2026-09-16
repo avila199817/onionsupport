@@ -113,6 +113,28 @@ const ROUTE_COMMITTED_SELECTOR =
 const ROUTE_HOST_NODE_SELECTOR =
   ".route-view-host, [data-route-host='true']";
 
+/* UN DOMINIO SE ACTIVA TAMBIÉN POR LO QUE ESTÁ MONTADO, NO SÓLO POR LA URL.
+ *
+ * El detalle de una entidad no vive sólo en su ruta: la capa de entidad lo abre desde Home,
+ * desde Facturas, desde una relación o desde un enlace profundo, y siempre monta su portal
+ * como hijo directo de `body`. Derivando el ámbito únicamente del `pathname`, el MISMO modal
+ * llegaba sin sus features en 11 de las 13 rutas: el ojo del técnico, el estado del detalle,
+ * la sincronización en vivo y los dos juegos de avatares sólo existían en /incidencias.
+ *
+ * La carga sigue siendo perezosa y por demanda: no se adelanta nada en el arranque. Lo que
+ * cambia es la señal — antes sólo el commit de ruta, ahora también la aparición real del
+ * portal del dominio. */
+const MOUNTED_SCOPE_SELECTORS = Object.freeze([
+  Object.freeze({
+    scope: "incidencias",
+    selector: "[data-incidencias-modal-host='true'], [data-incidencias-modal-root='true']",
+  }),
+  Object.freeze({
+    scope: "facturas",
+    selector: "[data-facturas-detail-host='true'], [data-facturas-detail-root='true']",
+  }),
+]);
+
 const records = new Map();
 let preRouterPromise = null;
 let postRouterPromise = null;
@@ -125,6 +147,8 @@ let fallbackTimer = 0;
 let initialRouteLoads = 0;
 let lazyRouteLoads = 0;
 let observerTriggers = 0;
+let mountTriggers = 0;
+let lastMountedScopes = "";
 let coalescedRouteSyncs = 0;
 let fallbackPreloads = 0;
 
@@ -239,7 +263,33 @@ function routeScopes(pathname = activeRoutePathname()) {
   return scopes;
 }
 
-function routeDefinitions(scopes = routeScopes()) {
+function mountedScopes() {
+  const scopes = new Set();
+  if (!isBrowser()) return scopes;
+
+  for (const { scope, selector } of MOUNTED_SCOPE_SELECTORS) {
+    try {
+      if (document.querySelector(selector)) scopes.add(scope);
+    } catch {
+      /* Un selector no soportado nunca impide calcular el resto del ámbito. */
+    }
+  }
+
+  return scopes;
+}
+
+function mountedScopeKey() {
+  return [...mountedScopes()].sort().join(",");
+}
+
+/* El ámbito real: donde estamos MÁS lo que está montado. */
+function activeScopes() {
+  const scopes = routeScopes();
+  for (const scope of mountedScopes()) scopes.add(scope);
+  return scopes;
+}
+
+function routeDefinitions(scopes = activeScopes()) {
   return POST_ROUTER.filter((definition) =>
     scopes.has(definition.scope || "global")
   );
@@ -376,6 +426,24 @@ function mutationTouchesRouteHost(mutation = null) {
     .some(nodeIsRouteHost);
 }
 
+function nodeIsDomainPortal(node = null) {
+  if (node?.nodeType !== 1 || typeof node.matches !== "function") return false;
+
+  return MOUNTED_SCOPE_SELECTORS.some(({ selector }) => {
+    try {
+      return node.matches(selector) || Boolean(node.querySelector?.(selector));
+    } catch {
+      return false;
+    }
+  });
+}
+
+function mutationTouchesDomainPortal(mutation = null) {
+  if (mutation?.type !== "childList") return false;
+
+  return [...mutation.addedNodes].some(nodeIsDomainPortal);
+}
+
 function installRouteObserver() {
   if (!isBrowser() || routeObserver) {
     return Boolean(routeObserver);
@@ -390,7 +458,21 @@ function installRouteObserver() {
 
   lastCommittedHost = currentCommittedRouteHost();
 
+  lastMountedScopes = mountedScopeKey();
+
   routeObserver = new MutationObserver((mutations) => {
+    /* Un portal de dominio recién montado activa su ámbito aunque la ruta no lo nombre. Se
+       compara el conjunto, no el nodo: reabrir el mismo detalle no vuelve a disparar nada. */
+    if (mutations.some(mutationTouchesDomainPortal)) {
+      const mounted = mountedScopeKey();
+
+      if (mounted && mounted !== lastMountedScopes) {
+        lastMountedScopes = mounted;
+        mountTriggers += 1;
+        void queueRouteFeatureSync("detail-mount");
+      }
+    }
+
     if (!mutations.some(mutationTouchesRouteHost)) return;
 
     const committedHost = currentCommittedRouteHost();
@@ -405,6 +487,15 @@ function installRouteObserver() {
     childList: true,
     subtree: false,
   });
+
+  /* El portal del dominio cuelga de `body`, no del contenedor de la vista. Es la MISMA
+     instancia de observador: una autoridad, dos motivos para recalcular el ámbito. */
+  if (document.body && document.body !== root) {
+    routeObserver.observe(document.body, {
+      childList: true,
+      subtree: false,
+    });
+  }
 
   return true;
 }
@@ -435,8 +526,11 @@ async function loadPostRouterPhase() {
   /*
     MutationObserver sigue únicamente el cambio del route-view-host realmente
     comprometido. El append oculto/preparing previo al render no dispara carga.
-    No observa el subtree de la vista: cambios internos de tablas/modales no
-    disparan trabajo de carga progresiva.
+    No observa el subtree de la vista: cambios internos de tablas y listas no
+    disparan trabajo de carga progresiva. Sí observa, como hijo directo de
+    `body`, la aparición del portal de un dominio: es la señal de que su detalle
+    está realmente montado, venga de la ruta que venga. Sigue sin adelantarse
+    nada en el arranque.
 
     Una navegación que llega mientras otra feature importa se coalesce y vuelve
     a evaluar la última ruta al terminar, evitando perder commits rápidos.
@@ -488,10 +582,13 @@ export function getAppEnhancementsSnapshot() {
     version: APP_ENHANCEMENTS_VERSION,
     routePathname: activeRoutePathname(),
     routeScopes: Object.freeze([...routeScopes()]),
+    mountedScopes: Object.freeze([...mountedScopes()]),
+    activeScopes: Object.freeze([...activeScopes()]),
     initialRouteLoads,
     lazyRouteLoads,
     observerActive: Boolean(routeObserver),
     observerTriggers,
+    mountTriggers,
     coalescedRouteSyncs,
     fallbackPreloads,
     readyPostRouter,
@@ -507,7 +604,8 @@ export function getAppEnhancementsSnapshot() {
       speculativeRoutePreload: false,
       routeIntentPreload: true,
       localRuntimePerformance: true,
-      routeHostOnlyObservation: true,
+      routeHostOnlyObservation: false,
+      mountedDomainScopes: true,
       mutationObserverFallback: true,
     }),
     features: Object.freeze(output),

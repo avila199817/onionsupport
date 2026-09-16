@@ -1096,6 +1096,13 @@ export function mountIncidenciasTechnicianProfile() {
 
   observer = new MutationObserver(schedule);
   observer.observe(mountRoot, { childList: true, subtree: true });
+
+  /* El portal del detalle NO cuelga de la vista, sino de `body`, y al cerrarlo se destruye:
+     al reabrir hay un host nuevo. Sin mirar dónde aparece, la feature seguía enganchada al
+     host anterior y el ojo del técnico sólo salía la primera vez. Se observan sólo los hijos
+     directos de `body`, no su subtree. */
+  if (document.body) observer.observe(document.body, { childList: true });
+
   schedule();
   return true;
 }

@@ -49,6 +49,7 @@ import {
 } from "./usuarios.api.js";
 import { isObject, safeObject, isFunction } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
+import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 
 /* =========================================================
    META / CONSTANTS
@@ -150,50 +151,6 @@ function normalizeEmail(value = "") {
     ? email
     : "";
 }
-
-function parseBoolean(value, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  if (value === 1 || value === "1") {
-    return true;
-  }
-
-  if (value === 0 || value === "0") {
-    return false;
-  }
-
-  const key = slugKey(value);
-
-  if (
-    [
-      "true",
-      "yes",
-      "si",
-      "on",
-      "active",
-      "enabled",
-    ].includes(key)
-  ) {
-    return true;
-  }
-
-  if (
-    [
-      "false",
-      "no",
-      "off",
-      "inactive",
-      "disabled",
-    ].includes(key)
-  ) {
-    return false;
-  }
-
-  return fallback;
-}
-
 
 function attr(value = "") {
   return escapeHtml(
@@ -330,12 +287,12 @@ function cloneForm(form = {}) {
 
     privacyMode: parseBoolean(
       source.privacyMode,
-      false
+      BOOLEAN_POLICIES.activity, false
     ),
 
     darkMode: parseBoolean(
       source.darkMode,
-      true
+      BOOLEAN_POLICIES.activity, true
     ),
   };
 }
@@ -1103,7 +1060,7 @@ function readFieldValue(target = null) {
   ) {
     return parseBoolean(
       target.value,
-      name === "darkMode"
+      BOOLEAN_POLICIES.activity, name === "darkMode"
     );
   }
 

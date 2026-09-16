@@ -12,6 +12,26 @@ for (const candidate of [process.env.CHROME_BIN, "/usr/bin/google-chrome", "/usr
 }
 if (!executablePath) throw new Error("Chrome/Chromium is required; set CHROME_BIN for the avatar DOM contract.");
 const transparentImage = '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="2" height="2" fill="red"/></svg>';
+/*
+  Chromium awaits the promise of an evaluated async function weakly. When
+  that function dynamically imports modules, a garbage collection during the
+  load can collect the promise and Playwright reports "Resulting promise was
+  garbage collected" although the page finished the work. Steps that import
+  run on the page and expose their settled outcome, which the contract polls.
+*/
+async function runOnPage(page, step) {
+  await page.evaluate((source) => {
+    window.__avatarStep = null;
+    (0, eval)(source)().then(
+      () => { window.__avatarStep = { ok: true }; },
+      (error) => { window.__avatarStep = { error: String((error && error.stack) || error) }; },
+    );
+  }, `(${step.toString()})`);
+  await page.waitForFunction(() => window.__avatarStep);
+  const outcome = await page.evaluate(() => window.__avatarStep);
+  assert.equal(outcome.error, undefined, outcome.error);
+}
+
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url, "http://127.0.0.1").pathname;
   if (pathname === "/") {
@@ -43,7 +63,7 @@ try {
   page.on("pageerror", (error) => failures.push(error.message));
   await page.goto(origin);
   await page.addScriptTag({ type: "module", url: `${origin}/src/ui/sidebar/template.js` });
-  await page.evaluate(async () => {
+  await runOnPage(page, async () => {
     window.avatars = await import("/src/features/avatar-system/index.js");
     window.makeHost = (name = "Ana López", parent = document.querySelector("#fixture")) => {
       const host = document.createElement("span");
@@ -157,7 +177,7 @@ try {
   await page.waitForFunction(() => transient.dataset.avatarInitials === "ED");
 
   // Existing private adapters must yield failed-image recovery to the same engine.
-  await page.evaluate(async () => {
+  await runOnPage(page, async () => {
     const facturas = await import("/src/views/facturas/facturas.template.js");
     await import("/src/features/incidencias-detail-state/index.js");
     window.invoiceHost = makeHost("Factura Persona");
@@ -176,7 +196,7 @@ try {
   });
   await page.waitForFunction(() => invoiceHost.dataset.avatarState === "image" && technicianHost.dataset.avatarState === "image");
 
-  await page.evaluate(async () => {
+  await runOnPage(page, async () => {
     const sidebar = await import("/src/ui/sidebar/template.js");
     const footer = sidebar.createSidebarFooter({ name: "Maria del Carmen Ortiz", userId: "fixture-sidebar", avatarUrl: "/missing-sidebar.svg" });
     document.querySelector("#fixture").append(footer);
@@ -189,7 +209,7 @@ try {
   await page.evaluate(() => { sidebarHost.querySelector("img").src = "/transparent.svg"; });
   await page.waitForFunction(() => sidebarHost.dataset.avatarState === "image");
 
-  await page.evaluate(async () => {
+  await runOnPage(page, async () => {
     window.userModal = await import("/src/views/usuarios/usuarios.template.modal.js");
     userModal.openUsuariosModal({ id: "fixture-user", name: "Usuario Persona", email: "fixture@example.test", avatarUrl: "/missing-user.svg" });
     window.userHost = document.querySelector("[data-usuarios-avatar-frame='true']");
@@ -303,7 +323,7 @@ try {
     if (result.expectNoPhoto) assert.equal(result.hasImage, false, `${result.label}: hasAvatar=false must not revive an older raw or snapshot photo`);
   }
 
-  await page.evaluate(async () => {
+  await runOnPage(page, async () => {
     const mail = await import("/src/views/correo/correo.template.js");
     const container = document.createElement("div");
     container.innerHTML = mail.renderConnectionCard({ connected: true, mailbox: "fixture@example.test" }, { displayName: "Ana Maria López", avatarUrl: "/missing-mail-avatar.svg" });
@@ -316,7 +336,7 @@ try {
   await page.waitForFunction(() => mailHost.dataset.avatarState === "image");
 
   // Exercise the actual public account adapter with a fixture session, no API.
-  await page.evaluate(async () => {
+  await runOnPage(page, async () => {
     const { AppCore } = await import("/src/core/index.js");
     window.publicCore = AppCore;
     AppCore.runtimeState.write({ token: "fixture.header.payload", user: { userId: "fixture-user", username: "ana", name: "Ana López", email: "ana@example.test", role: "user", avatarUrl: "https://untrusted.example.test/avatar.svg" } });

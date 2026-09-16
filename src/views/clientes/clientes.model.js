@@ -14,6 +14,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 
 export const CLIENTES_MODEL_VERSION =
   "clientes.model.v1.single-authority";
@@ -94,17 +95,6 @@ function normalizePhone(value = "") {
     .slice(0, PHONE_MAX_LENGTH);
 }
 
-function parseBoolean(value, fallback = null) {
-  if (value === true || value === false) return value;
-  if (value === 1 || value === "1") return true;
-  if (value === 0 || value === "0") return false;
-
-  const key = slugKey(value);
-  if (["true", "yes", "si", "on", "enabled", "active", "activo"].includes(key)) return true;
-  if (["false", "no", "off", "disabled", "inactive", "inactivo"].includes(key)) return false;
-  return fallback;
-}
-
 function sanitizeDomainValue(value, depth = 0, seen = new WeakSet()) {
   if (depth > SAFE_OBJECT_MAX_DEPTH) return null;
   if (value === null || value === undefined) return value ?? null;
@@ -178,9 +168,9 @@ function normalizeStatusValue(value = "", source = {}) {
   if (["vip", "premium"].includes(explicit)) return "vip";
   if (["active", "activo", "enabled", "ok"].includes(explicit)) return "active";
 
-  const blocked = parseBoolean(raw.blocked, null);
-  const disabled = parseBoolean(raw.disabled, null);
-  const active = parseBoolean(firstNonBlank(raw.active, raw.isActive, raw.enabled, null), null);
+  const blocked = parseBoolean(raw.blocked, BOOLEAN_POLICIES.activityEs, null);
+  const disabled = parseBoolean(raw.disabled, BOOLEAN_POLICIES.activityEs, null);
+  const active = parseBoolean(firstNonBlank(raw.active, raw.isActive, raw.enabled, null), BOOLEAN_POLICIES.activityEs, null);
   if (blocked === true) return "blocked";
   if (disabled === true || active === false) return "inactive";
   return "active";

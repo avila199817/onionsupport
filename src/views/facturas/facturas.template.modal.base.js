@@ -39,6 +39,7 @@ import { resolveAvatarPresentation } from "../../features/avatar-system/identity
 import { renderModalCloseButton, renderModalShell, renderModalState } from "../../features/entity-overlay/modal-host.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
+import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
   "facturas.template.modal.productivo.v4.admin-payment";
@@ -164,48 +165,6 @@ function number(
   return Number.isFinite(parsed)
     ? parsed
     : fallback;
-}
-
-function bool(
-  value,
-  fallback = false
-) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  const key =
-    normalizeKey(value);
-
-  if (
-    [
-      "true",
-      "1",
-      "yes",
-      "si",
-      "on",
-    ].includes(key)
-  ) {
-    return true;
-  }
-
-  if (
-    [
-      "false",
-      "0",
-      "no",
-      "off",
-    ].includes(key)
-  ) {
-    return false;
-  }
-
-  return fallback;
 }
 
 function attr(
@@ -2423,9 +2382,9 @@ function getObjectTax(
     );
 
   const enabled =
-    bool(
+    parseBoolean(
       obj.enabled,
-      Boolean(
+      BOOLEAN_POLICIES.switchAny, Boolean(
         importe ||
         porcentaje ||
         base
@@ -2847,9 +2806,9 @@ function getFacturaPdfAvailable(
     raw !== null &&
     raw !== undefined
   ) {
-    return bool(
+    return parseBoolean(
       raw,
-      false
+      BOOLEAN_POLICIES.switchAny, false
     );
   }
 
@@ -2909,9 +2868,9 @@ function isFacturaAlreadySent(
     explicit !== null &&
     explicit !== undefined
   ) {
-    return bool(
+    return parseBoolean(
       explicit,
-      false
+      BOOLEAN_POLICIES.switchAny, false
     );
   }
 

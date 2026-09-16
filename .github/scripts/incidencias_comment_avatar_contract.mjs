@@ -179,7 +179,7 @@ for (const [rendererPath, rendererSource] of detailCommentRendererSources) {
   );
   assert.match(
     rendererSource,
-    /\[(?:comment|item)\.id, (?:comment|item)\.persistedCommentId, (?:comment|item)\.author, (?:comment|item)\.body, timestamp\(/u,
+    /\[(?:comment|item)\.id, (?:comment|item)\.persistedCommentId, (?:comment|item)\.author, (?:comment|item)\.body, (?:toTimestamp|timestamp)\(/u,
     `${rendererPath} debe invalidar la firma al cambiar autor o procedencia del ID`
   );
   assert.match(

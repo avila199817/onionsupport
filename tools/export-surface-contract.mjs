@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 //   exports lowers it in the same commit. The number is a record of a
 //   decision, not an architectural target: it is expected to move.
 const BASELINE = Object.freeze({
+  "src/features/avatar-system": 48,
   "src/ui/sidebar": 7,
   "src/ui/topbar": 10,
   "src/views/correo": 25,

@@ -214,11 +214,7 @@ export function isAvatarHostClassName(value = "") {
   return classTokens(value).some((token) => AVATAR_HOST_TOKEN.test(token));
 }
 
-export function isAvatarImageClassName(value = "") {
-  return classTokens(value).some((token) => AVATAR_IMAGE_TOKEN.test(token));
-}
-
-export function isAvatarFallbackClassName(value = "") {
+function isAvatarFallbackClassName(value = "") {
   return classTokens(value).some((token) => AVATAR_FALLBACK_TOKEN.test(token));
 }
 
@@ -363,7 +359,7 @@ function hostScore(node = null, image = null, depth = 0) {
   return score;
 }
 
-export function findAvatarHost(image = null) {
+function findAvatarHost(image = null) {
   if (!isImage(image)) return null;
 
   let node = image.parentElement || null;
@@ -996,7 +992,7 @@ export function synchronizeAvatarHost(host = null, preferredImage = null) {
   );
 }
 
-export function synchronizeAvatarImage(image = null) {
+function synchronizeAvatarImage(image = null) {
   if (!isImage(image)) return false;
 
   const host = findAvatarHost(image);

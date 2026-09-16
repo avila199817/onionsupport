@@ -289,7 +289,7 @@ export function microsoftPersonaHash(displayName = "") {
   return hashCode;
 }
 
-export function avatarToneFromName(displayName = "") {
+function avatarToneFromName(displayName = "") {
   const name = cleanText(displayName, "");
   if (!name) return 1;
   return microsoftPersonaHash(name) % AVATAR_TONE_COUNT;
@@ -325,7 +325,7 @@ export function avatarToneFromIdentity(input = {}) {
   );
 }
 
-export function avatarColorFromTone(value = 1) {
+function avatarColorFromTone(value = 1) {
   const numeric = Number(value);
   const tone = Number.isFinite(numeric)
     ? ((Math.trunc(numeric) % AVATAR_TONE_COUNT) + AVATAR_TONE_COUNT) %
@@ -335,7 +335,7 @@ export function avatarColorFromTone(value = 1) {
   return MICROSOFT_PERSONA_COLORS[tone]?.hex || "#0078D4";
 }
 
-export function avatarColorKeyFromTone(value = 1) {
+function avatarColorKeyFromTone(value = 1) {
   const numeric = Number(value);
   const tone = Number.isFinite(numeric)
     ? ((Math.trunc(numeric) % AVATAR_TONE_COUNT) + AVATAR_TONE_COUNT) %
@@ -345,7 +345,7 @@ export function avatarColorKeyFromTone(value = 1) {
   return MICROSOFT_PERSONA_COLORS[tone]?.key || "blue";
 }
 
-export function avatarColorKeyFromSeed(value = "") {
+function avatarColorKeyFromSeed(value = "") {
   return avatarColorKeyFromTone(
     avatarToneFromSeed(value)
   );

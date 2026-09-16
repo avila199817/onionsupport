@@ -120,6 +120,7 @@ export const ROUTE_NAMES = Object.freeze({
   PUBLIC_HOME: "public-home",
   HOME: "home",
   INCIDENCIAS: "incidencias",
+  AGENDA: "agenda",
   FACTURAS: "facturas",
   CLIENTES: "clientes",
   USUARIOS: "usuarios",
@@ -773,6 +774,9 @@ const VIEW_SPECS = Object.freeze({
       import(
         "../views/agenda/index.js"
       ),
+    names: Object.freeze([
+      "AgendaView",
+    ]),
   }),
 
   facturas: Object.freeze({
@@ -1487,7 +1491,9 @@ const ROUTE_DEFINITIONS = Object.freeze([
 
   createRoute({
     path: ROUTES.agenda,
+    name: ROUTE_NAMES.AGENDA,
     title: "Agenda",
+    viewKey: "agenda",
     order: 25,
   }),
 

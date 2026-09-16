@@ -35,19 +35,19 @@ import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage, errorStatus } from "..
 import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
 
 export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v24.cursor-scale-safe";
-export const INCIDENCIAS_ENDPOINT = "/api/tickets";
+const INCIDENCIAS_ENDPOINT = "/api/tickets";
 export const USERS_SEARCH_ENDPOINT = "/api/users";
 
-export const USERS_SEARCH_LIMIT = 8;
-export const USERS_SEARCH_MIN_LENGTH = 2;
+const USERS_SEARCH_LIMIT = 8;
+const USERS_SEARCH_MIN_LENGTH = 2;
 
-export const INCIDENCIAS_TIMEOUT = 15000;
-export const INCIDENCIAS_DETAIL_TIMEOUT = 25000;
-export const INCIDENCIAS_UPLOAD_TIMEOUT = 180000;
+const INCIDENCIAS_TIMEOUT = 15000;
+const INCIDENCIAS_DETAIL_TIMEOUT = 25000;
+const INCIDENCIAS_UPLOAD_TIMEOUT = 180000;
 
 export const INCIDENCIAS_LIST_LIMIT = 48;
 export const INCIDENCIAS_CACHE_TTL_MS = 60000;
-export const INCIDENCIAS_DETAIL_CACHE_TTL_MS = 20000;
+const INCIDENCIAS_DETAIL_CACHE_TTL_MS = 20000;
 export const INCIDENCIAS_DETAIL_CACHE_MAX_ENTRIES = 96;
 export const INCIDENCIAS_LIST_RESPONSE_CONTRACT = "v2";
 
@@ -2221,7 +2221,7 @@ export async function listIncidencias(options = {}) {
   }
 }
 
-export async function loadIncidencias(options = {}) {
+async function loadIncidencias(options = {}) {
   const response = await listIncidencias(options);
   return response.items;
 }
@@ -2271,7 +2271,7 @@ export const loadIncidenciaDetail = getIncidenciaByIdRequest;
    CREATE / UPDATE / COMMENT / REOPEN
 ========================================================= */
 
-export async function createIncidenciaRequest(payload = {}, { timeout = INCIDENCIAS_UPLOAD_TIMEOUT, signal } = {}) {
+async function createIncidenciaRequest(payload = {}, { timeout = INCIDENCIAS_UPLOAD_TIMEOUT, signal } = {}) {
   const mutation = buildMutationBody(payload);
 
   const response = mutation.hasFiles
@@ -2320,7 +2320,7 @@ export async function updateIncidencia(id = "", payload = {}, options = {}) {
   return updated ? upsertCachedIncidencia(updated) : null;
 }
 
-export async function closeIncidenciaRequest(
+async function closeIncidenciaRequest(
   id = "",
   { timeout = INCIDENCIAS_TIMEOUT, signal } = {}
 ) {
@@ -2350,7 +2350,7 @@ export async function closeIncidencia(id = "", options = {}) {
   return closed ? upsertCachedIncidencia(closed) : null;
 }
 
-export async function commentIncidenciaRequest(id = "", message = "", { timeout = INCIDENCIAS_TIMEOUT, status = "open", signal } = {}) {
+async function commentIncidenciaRequest(id = "", message = "", { timeout = INCIDENCIAS_TIMEOUT, status = "open", signal } = {}) {
   const text = cleanText(message, "");
   if (!text) throw new Error("INCIDENCIA_COMMENT_REQUIRED");
 
@@ -2373,7 +2373,7 @@ export async function commentIncidencia(id = "", message = "", options = {}) {
   return updated ? upsertCachedIncidencia(updated) : null;
 }
 
-export async function reopenIncidenciaRequest(id = "", { timeout = INCIDENCIAS_TIMEOUT, signal } = {}) {
+async function reopenIncidenciaRequest(id = "", { timeout = INCIDENCIAS_TIMEOUT, signal } = {}) {
   const response = await postJson(
     getIncidenciaReopenEndpoint(id),
     { status: "open", estado: "open", reopen: true },
@@ -2397,7 +2397,7 @@ export async function reopenIncidencia(id = "", options = {}) {
    ATTACHMENTS
 ========================================================= */
 
-export async function uploadIncidenciaAttachmentsRequest(id = "", files = [], { timeout = INCIDENCIAS_UPLOAD_TIMEOUT, status = "open", extra = {}, signal } = {}) {
+async function uploadIncidenciaAttachmentsRequest(id = "", files = [], { timeout = INCIDENCIAS_UPLOAD_TIMEOUT, status = "open", extra = {}, signal } = {}) {
   const list = dedupeFiles(normalizeFilesInput(files));
   if (!list.length) throw new Error("INCIDENCIA_ATTACHMENTS_REQUIRED");
 
@@ -2544,7 +2544,7 @@ function normalizeFileResponse(response = {}, context = {}) {
   };
 }
 
-export async function getIncidenciaAttachmentFileRequest({ ticketId = "", attachmentId = "", mode = "view", kind = "attachments" } = {}, { timeout = INCIDENCIAS_DETAIL_TIMEOUT, signal } = {}) {
+async function getIncidenciaAttachmentFileRequest({ ticketId = "", attachmentId = "", mode = "view", kind = "attachments" } = {}, { timeout = INCIDENCIAS_DETAIL_TIMEOUT, signal } = {}) {
   const endpoint = getIncidenciaAttachmentFileEndpoint({ ticketId, attachmentId, mode, kind });
   const response = await getJson(endpoint, { timeout, source: "views.incidencias.attachment.file", signal });
 
@@ -2680,7 +2680,7 @@ export function computeIncidenciasStats(items = lastList.items) {
   );
 }
 
-export async function loadIncidenciasStats() {
+async function loadIncidenciasStats() {
   return computeIncidenciasStats(lastList.items);
 }
 

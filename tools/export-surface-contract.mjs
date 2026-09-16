@@ -25,6 +25,7 @@ const BASELINE = Object.freeze({
   "src/views/correo": 25,
   "src/views/cuenta": 53,
   "src/views/home": 75,
+  "src/views/incidencias": 165,
   "src/views/server": 127,
   "src/views/whatsapp": 9,
 });

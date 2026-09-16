@@ -30,7 +30,7 @@ const REMOVE_SELECTOR =
   "[data-detail-action='detail-pending-file-remove'], [data-remove-attachment]";
 const FEEDBACK_ATTR = "data-detail-upload-policy-feedback";
 
-export const INCIDENCIAS_DETAIL_ATTACHMENT_LIMITS = Object.freeze({
+const INCIDENCIAS_DETAIL_ATTACHMENT_LIMITS = Object.freeze({
   user: Object.freeze({
     role: "user",
     maxFiles: 10,

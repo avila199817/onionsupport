@@ -24,7 +24,7 @@ export const INCIDENCIAS_PRIORITY_POLICY_VERSION =
 
 export const INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY = "high";
 
-export const INCIDENCIAS_HIGH_PRIORITY_KEYS = Object.freeze([
+const INCIDENCIAS_HIGH_PRIORITY_KEYS = Object.freeze([
   "high",
   "alta",
   "p1",

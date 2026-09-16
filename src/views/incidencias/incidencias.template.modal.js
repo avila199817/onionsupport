@@ -45,10 +45,10 @@ export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
 export const INCIDENCIAS_DETAIL_WINDOW_UI_VERSION =
   "incidencias.detail-window-ui.v1";
 
-export const INCIDENCIAS_DETAIL_COMMENTS_UI_VERSION =
+const INCIDENCIAS_DETAIL_COMMENTS_UI_VERSION =
   "incidencias.detail-comments-ui.v2-canonical-followup";
 
-export const INCIDENCIAS_DETAIL_AVATAR_UI_VERSION =
+const INCIDENCIAS_DETAIL_AVATAR_UI_VERSION =
   "incidencias.detail-avatar-ui.v1-global-identity-boundary";
 
 /* Structure (root, overlay, panel, header, body) comes from the canonical

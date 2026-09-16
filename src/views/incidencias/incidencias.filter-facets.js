@@ -18,17 +18,17 @@ import { safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { coercedNumber } from "../../core/numbers.js";
 
-export const INCIDENCIAS_FILTER_FACETS_VERSION =
+const INCIDENCIAS_FILTER_FACETS_VERSION =
   "incidencias.filter-facets.v2-priority-truth";
 
-export const INCIDENCIAS_FILTER_FACET_KEYS = Object.freeze([
+const INCIDENCIAS_FILTER_FACET_KEYS = Object.freeze([
   "all",
   "open",
   "closed",
   "urgent",
 ]);
 
-export function normalizeIncidenciasFilterFacet(value = "all") {
+function normalizeIncidenciasFilterFacet(value = "all") {
   const key = cleanText(value).toLowerCase();
   return INCIDENCIAS_FILTER_FACET_KEYS.includes(key) ? key : "all";
 }
@@ -74,7 +74,7 @@ export function getIncidenciasFacetRequestQuery(
   return query;
 }
 
-export function getIncidenciasFacetTotal(response = {}, fallback = 0) {
+function getIncidenciasFacetTotal(response = {}, fallback = 0) {
   const source = safeObject(response);
   const rows = safeArray(source.items);
   return Math.max(rows.length, exactTotal(source) ?? exactCount(fallback) ?? rows.length);

@@ -19,16 +19,16 @@ import { errorStatus } from "../../core/errors.js";
 export const WHATSAPP_API_VERSION =
   "whatsapp.api.v1.onion-backend-authority";
 
-export const WHATSAPP_ENDPOINTS = Object.freeze({
+const WHATSAPP_ENDPOINTS = Object.freeze({
   meta: "/api/whatsapp/_meta",
   conversations: "/api/whatsapp/conversations",
   messages: "/api/whatsapp/messages",
 });
 
-export const WHATSAPP_REQUEST_TIMEOUT_MS = 15_000;
+const WHATSAPP_REQUEST_TIMEOUT_MS = 15_000;
 export const WHATSAPP_MAX_TEXT_LENGTH = 4096;
-export const WHATSAPP_CONVERSATION_LIMIT = 100;
-export const WHATSAPP_MESSAGE_LIMIT = 200;
+const WHATSAPP_CONVERSATION_LIMIT = 100;
+const WHATSAPP_MESSAGE_LIMIT = 200;
 
 function cleanMessageText(value = "", fallback = "", max = 4096) {
   const text = cleanText(String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " "), fallback);

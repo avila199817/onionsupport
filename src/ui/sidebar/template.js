@@ -28,7 +28,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, isFunction } from "../../core/objects.js";
 
 
-export const SIDEBAR_TEMPLATE_VERSION =
+const SIDEBAR_TEMPLATE_VERSION =
   "sidebar.template.unified.v6-core-role-authority";
 
 const SIDEBAR_ROOT_ID = "app-sidebar";
@@ -512,7 +512,7 @@ function normalizeItem(item = {}) {
    ICONS / BRAND / AVATAR
 ========================================================= */
 
-export function createSidebarIcon(
+function createSidebarIcon(
   name = ICONS.home,
   className = "sidebar-icon"
 ) {
@@ -562,7 +562,7 @@ function getPreferredBrandLogoSrc() {
   }
 }
 
-export function createSidebarBrandLogo() {
+function createSidebarBrandLogo() {
   const preferredLogo = getPreferredBrandLogoSrc();
 
   const logo = el("span", {
@@ -653,7 +653,7 @@ function createUserAvatar(
    HEADER / NAV
 ========================================================= */
 
-export function createSidebarHeader(options = {}) {
+function createSidebarHeader(options = {}) {
   const open = options.open !== false;
   const brandHref = safeInternalHref(options.brandHref, "/");
   const brandLabel = cleanText(options.brandLabel, BRAND_LABEL);
@@ -712,7 +712,7 @@ export function createSidebarHeader(options = {}) {
   return append(header, [brand, toggle]);
 }
 
-export function createSidebarNav(items = []) {
+function createSidebarNav(items = []) {
   const nav = el("nav", {
     className: CLASSES.nav,
     attrs: {
@@ -735,7 +735,7 @@ export function createSidebarNav(items = []) {
   return append(nav, list);
 }
 
-export function createSidebarNavItem(rawItem = {}) {
+function createSidebarNavItem(rawItem = {}) {
   const item = normalizeItem(rawItem);
 
   const li = el("li", {
@@ -956,7 +956,7 @@ function createAccountDropdown(user = {}, options = {}) {
   return append(dropdown, [trigger, menu]);
 }
 
-export function createSidebarFooter(user = {}, options = {}) {
+function createSidebarFooter(user = {}, options = {}) {
   return append(
     el("footer", {
       className: CLASSES.footer,
@@ -1279,7 +1279,7 @@ function attachDocumentDropdownHandlers(root = null) {
   return true;
 }
 
-export function setSidebarDropdownOpen(
+function setSidebarDropdownOpen(
   root = null,
   open = false,
   options = {}
@@ -1320,7 +1320,7 @@ export function setSidebarDropdownOpen(
   return true;
 }
 
-export function openSidebarDropdown(root = null, options = {}) {
+function openSidebarDropdown(root = null, options = {}) {
   return setSidebarDropdownOpen(root, true, options);
 }
 
@@ -1335,7 +1335,7 @@ export function closeSidebarDropdown(root = null, options = {}) {
   return setSidebarDropdownOpen(target, false, options);
 }
 
-export function toggleSidebarDropdown(root = null, options = {}) {
+function toggleSidebarDropdown(root = null, options = {}) {
   if (!isElement(root)) return false;
   return setSidebarDropdownOpen(root, !isDropdownOpen(root), options);
 }
@@ -1510,7 +1510,7 @@ export function unbindSidebarTemplate(root = null) {
    SNAPSHOT
 ========================================================= */
 
-export function getSidebarTemplateSnapshot(root = null) {
+function getSidebarTemplateSnapshot(root = null) {
   const currentRoot = isElement(root) ? root : null;
   const trigger = getDropdownTrigger(currentRoot);
   const menu = getDropdownMenu(currentRoot);
@@ -1564,7 +1564,7 @@ export function getSidebarTemplateSnapshot(root = null) {
    API
 ========================================================= */
 
-export const SidebarTemplate = {
+const SidebarTemplate = {
   version: SIDEBAR_TEMPLATE_VERSION,
 
   createSidebarTemplate,

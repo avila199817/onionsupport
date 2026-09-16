@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 // docs, dynamic access by string); anything else is either used only inside
 // its own module (then it is not an export) or dead (then it goes). The
 // list of swept directories only grows; a swept directory never regresses.
-const SWEPT_DIRECTORIES = Object.freeze(["src/views/cuenta", "src/views/server"]);
+const SWEPT_DIRECTORIES = Object.freeze(["src/ui/sidebar", "src/ui/topbar", "src/views/correo", "src/views/cuenta", "src/views/server", "src/views/whatsapp"]);
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SKIP = new Set(["node_modules", "dist", ".git", "build-metadata", "scratchpad"]);
 function walk(dir, accept) {

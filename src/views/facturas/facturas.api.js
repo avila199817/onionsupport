@@ -56,7 +56,7 @@ export * from "./facturas.api.canonical.js";
   hasActionablePdf
 */
 
-export const FACTURAS_API_ENTRY_VERSION =
+const FACTURAS_API_ENTRY_VERSION =
   "facturas.api.entry.canonical-alias.v4-detail-intent-cache";
 
 export const FACTURAS_DETAIL_PREFETCH_VERSION =

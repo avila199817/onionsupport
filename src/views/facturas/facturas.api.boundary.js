@@ -211,7 +211,7 @@ function isUnsignedAzureBlobUrl(value = "") {
   }
 }
 
-export function isFacturaDocumentActionUrl(value = "") {
+function isFacturaDocumentActionUrl(value = "") {
   const raw = cleanText(value, "");
   if (!raw) return false;
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return false;

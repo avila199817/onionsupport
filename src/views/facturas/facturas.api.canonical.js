@@ -12,7 +12,7 @@ import { finiteNumber } from "../../core/numbers.js";
 
 export * from "./facturas.api.alias-core.js";
 
-export const FACTURA_RAW_ALIAS_RECONCILIATION_VERSION =
+const FACTURA_RAW_ALIAS_RECONCILIATION_VERSION =
   "facturas.api.raw-alias-reconciliation.v5";
 
 const TECHNICAL_PREFIX = "FACTURA_CREATE_IDEMP_";

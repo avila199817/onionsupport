@@ -23,7 +23,7 @@ import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, dateFormatter, formatCurrency } from "../../core/format.js";
 import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
 
-export const FACTURAS_TEMPLATE_VERSION =
+const FACTURAS_TEMPLATE_VERSION =
   "facturas.template.private.v7.admin-visual-parity";
 
 export const FACTURAS_ACTIONS = Object.freeze({
@@ -1010,7 +1010,7 @@ export function renderFacturasTemplate(input = {}) {
   </section>`;
 }
 
-export const renderFacturasViewTemplate = renderFacturasTemplate;
+const renderFacturasViewTemplate = renderFacturasTemplate;
 
 /* =========================================================
    OPTIONAL DOM HARDENING
@@ -1026,7 +1026,7 @@ export function bindFacturasTemplateDom(root = null) {
   return true;
 }
 
-export function getFacturasTemplateSnapshot() {
+function getFacturasTemplateSnapshot() {
   return {
     version: FACTURAS_TEMPLATE_VERSION,
     actions: FACTURAS_ACTIONS,

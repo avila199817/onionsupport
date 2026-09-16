@@ -2765,7 +2765,7 @@ function renderChip(
   `;
 }
 
-export function renderMiniMeta(
+function renderMiniMeta(
   label = "",
   value = ""
 ) {
@@ -2787,7 +2787,7 @@ export function renderMiniMeta(
   `;
 }
 
-export function renderDetailStat(
+function renderDetailStat(
   label = "",
   value = "",
   options = {}
@@ -2906,7 +2906,7 @@ function renderTaxCard(
   `;
 }
 
-export function renderSectionCard({
+function renderSectionCard({
   title = "",
   subtitle = "",
   content = "",
@@ -4213,7 +4213,7 @@ export function renderFacturasDetailModal({
   });
 }
 
-export function renderFacturasDetailModalClosed() {
+function renderFacturasDetailModalClosed() {
   return "";
 }
 

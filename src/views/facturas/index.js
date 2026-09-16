@@ -67,7 +67,7 @@ import {
 import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
-import { clamp } from "../../core/numbers.js";
+import { clamp, finiteNumber } from "../../core/numbers.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { redactSecrets } from "../../core/redact.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
@@ -148,13 +148,6 @@ function multilineValue(value = "") {
 }
 
 /* No aplanar arrays de dominio. */
-function number(value = 0, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
 function nextFrame(callback = null) {
   if (!isBrowser() || !isFunction(callback)) return 0;
 
@@ -1679,7 +1672,7 @@ function createFacturasController(host = null, context = {}) {
   let items = arrayFrom(cache.items);
   let itemsContextKey = cleanText(cache.contextKey, "");
   let total = Math.max(
-    number(cache.total, items.length),
+    finiteNumber(cache.total, items.length),
     items.length
   );
   let totalKnown = cache.totalKnown === true;
@@ -1697,7 +1690,7 @@ function createFacturasController(host = null, context = {}) {
 
   let page = Math.max(
     DEFAULT_PAGE,
-    number(cache.page, DEFAULT_PAGE)
+    finiteNumber(cache.page, DEFAULT_PAGE)
   );
   const cachedHasMore = Boolean(
     items.length &&
@@ -1707,7 +1700,7 @@ function createFacturasController(host = null, context = {}) {
     cachedHasMore
       ? Math.max(
           page + 1,
-          number(
+          finiteNumber(
             cache.nextPage,
             Math.floor(items.length / DEFAULT_BATCH_SIZE) + 1
           )
@@ -2476,7 +2469,7 @@ function createFacturasController(host = null, context = {}) {
     );
     const previousTotalKnown = totalKnown;
     total = Math.max(
-      number(
+      finiteNumber(
         firstNonEmpty(
           response.total,
           response.remoteCount,
@@ -2497,7 +2490,7 @@ function createFacturasController(host = null, context = {}) {
 
     page = Math.max(
       DEFAULT_PAGE,
-      number(
+      finiteNumber(
         firstNonEmpty(
           response.page,
           response.paging?.page,
@@ -2526,7 +2519,7 @@ function createFacturasController(host = null, context = {}) {
     nextPage = hasMore
       ? Math.max(
           page + 1,
-          number(
+          finiteNumber(
             firstNonEmpty(
               response.nextPage,
               response.paging?.nextPage,
@@ -2910,7 +2903,7 @@ function createFacturasController(host = null, context = {}) {
     const breakdown = getFacturaCreateBreakdown(createModal.form);
 
     const formatMoney = (value = 0) =>
-      formatCurrency(number(value, 0), "EUR", CURRENCY_POLICIES.standard);
+      formatCurrency(finiteNumber(value, 0), "EUR", CURRENCY_POLICIES.standard);
 
     const base = createModalHost.querySelector(
       "[data-role='base-preview-inline']"
@@ -3292,7 +3285,7 @@ function createFacturasController(host = null, context = {}) {
     const append = mode === "append";
     const requestedPage = Math.max(
       DEFAULT_PAGE,
-      number(requestPage, DEFAULT_PAGE)
+      finiteNumber(requestPage, DEFAULT_PAGE)
     );
 
     const sortParts = getSortParts();
@@ -3442,7 +3435,7 @@ function createFacturasController(host = null, context = {}) {
       );
       const responseTotal = Math.max(
         0,
-        number(
+        finiteNumber(
           firstNonEmpty(
             response?.total,
             response?.remoteCount,
@@ -3697,7 +3690,7 @@ function createFacturasController(host = null, context = {}) {
       mode: "append",
       requestPage: Math.max(
         DEFAULT_PAGE,
-        number(nextPage, page + 1)
+        finiteNumber(nextPage, page + 1)
       ),
       force: false,
       silent: false,
@@ -3790,7 +3783,7 @@ function createFacturasController(host = null, context = {}) {
       mode: "replace",
       requestPage: Math.max(
         DEFAULT_PAGE,
-        number(value, DEFAULT_PAGE)
+        finiteNumber(value, DEFAULT_PAGE)
       ),
       force: false,
       silent: false,
@@ -3880,7 +3873,7 @@ function createFacturasController(host = null, context = {}) {
     if (!field) return false;
 
     const lineField = cleanText(field.dataset?.lineField, "");
-    const lineIndex = number(field.dataset?.lineIndex, -1);
+    const lineIndex = finiteNumber(field.dataset?.lineIndex, -1);
     const value =
       field.type === "checkbox"
         ? Boolean(field.checked)
@@ -4537,7 +4530,7 @@ function createFacturasController(host = null, context = {}) {
 
   function removeCreateLineItem(index = -1) {
     const lineas = arrayFrom(createModal.form.lineas).map((linea) => ({ ...safeObject(linea) }));
-    const targetIndex = number(index, -1);
+    const targetIndex = finiteNumber(index, -1);
     if (
       !Number.isInteger(targetIndex) ||
       targetIndex < 0 ||
@@ -4584,9 +4577,9 @@ function createFacturasController(host = null, context = {}) {
         ),
         concepto: cleanText(read("concepto"), ""),
         descripcion: multilineValue(read("descripcion")),
-        cantidad: number(read("cantidad"), 0),
+        cantidad: finiteNumber(read("cantidad"), 0),
         unidad: cleanText(read("unidad"), "ud"),
-        precioUnitario: number(read("precioUnitario"), 0),
+        precioUnitario: finiteNumber(read("precioUnitario"), 0),
       };
     });
   }
@@ -4735,7 +4728,7 @@ function createFacturasController(host = null, context = {}) {
       moneda: "EUR",
 
       lineas: arrayFrom(breakdown.lineas).map((linea, index) => {
-        const baseLinea = number(linea.base, 0);
+        const baseLinea = finiteNumber(linea.base, 0);
         const ivaImporte = Math.round(
           (baseLinea * (breakdown.ivaRate / 100) + Number.EPSILON) * 100
         ) / 100;
@@ -4756,9 +4749,9 @@ function createFacturasController(host = null, context = {}) {
             firstNonEmpty(linea.descripcion, linea.concepto),
             ""
           ),
-          cantidad: number(linea.cantidad, 0),
+          cantidad: finiteNumber(linea.cantidad, 0),
           unidad: cleanText(linea.unidad, "ud"),
-          precioUnitario: number(linea.precioUnitario, 0),
+          precioUnitario: finiteNumber(linea.precioUnitario, 0),
           subtotal: baseLinea,
           base: baseLinea,
           baseImponible: baseLinea,
@@ -5388,7 +5381,7 @@ function createFacturasController(host = null, context = {}) {
     }
 
     if (isBrowser()) {
-      const amount = number(
+      const amount = finiteNumber(
         firstNonEmpty(
           before.total,
           before.totalFactura,
@@ -5650,7 +5643,7 @@ function createFacturasController(host = null, context = {}) {
 
     if (type === FACTURA_CREATE_ACTIONS.LINE_REMOVE) {
       return removeCreateLineItem(
-        number(node?.dataset?.lineIndex, -1)
+        finiteNumber(node?.dataset?.lineIndex, -1)
       );
     }
 
@@ -5998,7 +5991,7 @@ function createFacturasController(host = null, context = {}) {
       });
 
       pageSize = clamp(
-        number(
+        finiteNumber(
           context.pageSize ||
           context.limit ||
           DEFAULT_BATCH_SIZE,

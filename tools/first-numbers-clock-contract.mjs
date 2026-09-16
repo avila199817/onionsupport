@@ -20,7 +20,7 @@ import { nowIso, nowMs } from "../src/core/clock.js";
 //   carried it as number/finiteNumber with value = 0. finiteNumber: a blank
 //   is the fallback; the copies with value = null or without a value default
 //   (safeNumber, number, optionalNumber, the canonical finiteNumber) carried
-//   it. Four modules still declare finiteNumber's body with value = 0, where
+//   it. Three modules still declare finiteNumber's body with value = 0, where
 //   undefined is 0 instead of the fallback: they are the pending upper bound
 //   below until that difference is decided. clamp(value, min, max) has no
 //   numeric policy of its own: callers parse first. correo.api keeps
@@ -46,7 +46,7 @@ const COERCED_BODY = /^(?:export )?function \w+\(\s*value = 0,\s*fallback = 0\s*
 const FINITE_BODY = /^(?:export )?function \w+\(\s*value(?: = null)?,\s*fallback = (?:0|null)\s*\)\s*\{\s*if \(\s*value === null \|\|\s*value === undefined \|\|\s*value === ""\s*\)\s*(?:\{\s*)?return fallback;(?:\s*\})?\s*const \w+ =\s*Number\(\s*value\s*\);/mu;
 const FINITE_BODY_VALUE_ZERO = /^(?:export )?function \w+\(\s*value = 0,\s*fallback = 0\s*\)\s*\{\s*if \(\s*value === null \|\|\s*value === undefined \|\|\s*value === ""\s*\)\s*(?:\{\s*)?return fallback;(?:\s*\})?\s*const \w+ =\s*Number\(\s*value\s*\);/mu;
 // Upper bound of modules that still carry finiteNumber's body with value = 0 (undefined is 0 there, not the fallback).
-const FINITE_VALUE_ZERO_PENDING = Object.freeze(["src/views/facturas/index.js", "src/views/server/index.js", "src/views/server/server.api.base.js", "src/views/usuarios/usuarios.api.js"]);
+const FINITE_VALUE_ZERO_PENDING = Object.freeze(["src/views/server/index.js", "src/views/server/server.api.base.js", "src/views/usuarios/usuarios.api.js"]);
 const RETIRED_LOCAL = Object.freeze([
   ["first(...values)", /^(?:export )?(?:function first\s*\(\s*\.\.\.values\s*\)|const first = \(\.\.\.values\) =>)/mu],
   ["coercedNumber body (Number(value) finite or fallback, value = 0)", COERCED_BODY],

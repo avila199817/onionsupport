@@ -34,6 +34,7 @@ import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { renderModalCloseButton, renderModalShell, renderModalState } from "../../features/entity-overlay/modal-host.js";
 import { persistedCommentId, requesterIdentity, technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
+import { canUpdateDetail, describePendingParts, resolveDetailPending } from "./incidencias.detail-pending.js";
 import {
   INCIDENCIA_STATUS_OPTIONS,
   INCIDENCIA_PRIORITY_OPTIONS,
@@ -2106,18 +2107,35 @@ function buildVm(input = {}) {
       currentCategory
     );
 
-  const hasAdminChanges =
+  /* Only an admin may edit the classification, so a non-admin never has a readable
+     editor and therefore never has field changes. That gate is permission, not
+     pending-state, so it stays here and the authority is asked only what changed. */
+  const editableDesired =
     data.admin === true &&
     Boolean(
       adminDraft.status ||
       adminDraft.priority ||
       adminDraft.category
-    ) &&
-    (
-      desiredStatus !== status ||
-      desiredPriority !== currentPriority ||
-      desiredCategory !== currentCategory
-    );
+    )
+      ? {
+          status: desiredStatus,
+          priority: desiredPriority,
+          category: desiredCategory,
+        }
+      : null;
+
+  const pending = resolveDetailPending({
+    current: {
+      status,
+      priority: currentPriority,
+      category: currentCategory,
+    },
+    desired: editableDesired,
+    comment: commentDraft,
+    pendingFiles,
+  });
+
+  const hasAdminChanges = pending.fields;
 
   const previewSource =
     safeObject(
@@ -2179,18 +2197,19 @@ function buildVm(input = {}) {
     adminDraft,
     hasAdminChanges,
 
-    hasContentDraft:
-      Boolean(
-        commentDraft ||
-        pendingFiles.length
-      ),
+    pending,
 
-    hasDraft:
-      Boolean(
-        commentDraft ||
-        pendingFiles.length ||
-        hasAdminChanges
-      ),
+    hasContentDraft: pending.comment || pending.attachments,
+
+    hasDraft: pending.hasChanges,
+
+    /* The button is the global confirmation of this edit, so it is enabled only when
+       there is really something to confirm. The submit handler asks the same authority
+       again: `disabled` is a courtesy, never the protection. */
+    canUpdate: canUpdateDetail({
+      pending,
+      submitting: Boolean(data.submitting),
+    }),
 
     requiresReopen:
       statusWillReopen(
@@ -3052,17 +3071,17 @@ function submitButtonLabel(
 
   if (vm.hasAdminChanges && vm.hasContentDraft) {
     return vm.requiresReopen
-      ? "Aplicar cambios, enviar y reabrir"
-      : "Aplicar cambios y enviar";
+      ? "Actualizar incidencia y reabrir"
+      : "Actualizar incidencia";
   }
 
   if (vm.hasAdminChanges) {
-    return "Aplicar cambios";
+    return "Actualizar incidencia";
   }
 
   return vm.requiresReopen
-    ? "Enviar actualización y reabrir"
-    : "Enviar actualización";
+    ? "Actualizar incidencia y reabrir"
+    : "Actualizar incidencia";
 }
 
 function renderSubmitButton(
@@ -3077,8 +3096,9 @@ function renderSubmitButton(
       data-detail-action="${DETAIL_ACTIONS.COMMENT_SUBMIT}"
       data-ticket-id="${attr(vm.ticketId)}"
       data-reopens-ticket="${vm.requiresReopen ? "true" : "false"}"
+      data-detail-pending="${(vm.pending?.parts || []).join(" ")}"
       ${disabledAttrs(
-        vm.submitting,
+        !vm.canUpdate,
         vm.submitting
       )}
       class="incidencias-modal-submit-btn ui-detail-modal-submit-btn"
@@ -3186,17 +3206,35 @@ function renderComposer(
       </label>
 
       ${renderPendingFiles(vm)}
-
-      <footer
-        class="incidencias-modal-footer ui-detail-modal-footer incidencias-modal-footer--composer"
-        data-modal-footer="true"
-        data-modal-footer-placement="composer"
-      >
-        ${renderSubmitButton(vm)}
-      </footer>
     </section>
   `;
 }
+
+/* The global action of the edit, in the shell's own footer slot -- the same slot every
+   other dialog uses. It lives outside the "Añadir actualización" card on purpose: it
+   confirms every pending change of the incidencia, not just the comment. */
+function renderDetailFooter(
+  vm = {}
+) {
+  const parts = vm.pending?.parts || [];
+
+  const summary =
+    vm.submitting
+      ? "Guardando los cambios pendientes…"
+      : parts.length
+        ? `Se guardarán: ${describePendingParts(parts)}.`
+        : "No hay cambios pendientes.";
+
+  return `
+    <p
+      class="incidencias-modal-footer-summary ui-detail-modal-footer-summary"
+      data-detail-pending-summary="true"
+    >${escapeHtml(summary)}</p>
+
+    ${renderSubmitButton(vm)}
+  `;
+}
+
 
 /* =========================================================
    ATTACHMENT CARDS
@@ -4281,6 +4319,8 @@ export function renderIncidenciasDetailModal(
     labelledBy: TITLE_ID,
     describedBy: DESCRIPTION_ID,
     submitting: vm.submitting,
+    footer: renderDetailFooter(vm),
+    footerClass: "incidencias-modal-footer",
     prelude: `${renderDetailConfirmation(vm)}${vm.submitting
       ? renderLoadingOverlay(
           vm.operation === "close"

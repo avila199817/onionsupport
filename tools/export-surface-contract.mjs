@@ -32,7 +32,7 @@ const BASELINE = Object.freeze({
   "src/views/empleados": 2,
   "src/views/facturas": 153,
   "src/views/home": 75,
-  "src/views/incidencias": 165,
+  "src/views/incidencias": 168,
   "src/views/server": 127,
   "src/views/usuarios": 160,
   "src/views/whatsapp": 9,

@@ -40,6 +40,7 @@ import {
 } from "./home.template.js";
 import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { nowMs } from "../../core/clock.js";
+import { redactSecrets } from "../../core/redact.js";
 
 export const HOME_INDEX_VERSION = "home.index.v13-persisted-onboarding";
 export const HOME_VIEW_VERSION = HOME_INDEX_VERSION;
@@ -112,17 +113,7 @@ function safeError(error = null, fallback = "No se pudo cargar el inicio.") {
     fallback
   );
 
-  return redact(message) || fallback;
-}
-
-function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+  return redactSecrets(cleanText(message, "")) || fallback;
 }
 
 /* =========================================================
@@ -919,12 +910,12 @@ function createHomeController(host = null, context = {}) {
         hasDashboard: hasContent(dashboard),
         mountedFrom,
         role: getCurrentRole(context),
-        error: redact(error),
+        error: redactSecrets(cleanText(error, "")),
         lastRenderAt,
         onboarding: {
           loaded: onboardingLoaded,
           saving: onboardingSaving,
-          error: redact(onboardingError),
+          error: redactSecrets(cleanText(onboardingError, "")),
           assignedVersion: Number(onboarding?.assignedVersion || 0),
           completedVersion: Number(onboarding?.completedVersion || 0),
           completedStep: Number(onboarding?.completedStep || 0),

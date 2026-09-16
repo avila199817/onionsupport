@@ -1,14 +1,13 @@
 import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { renderModalCloseButton, renderModalShell, renderModalState } from "./modal-host.js";
+import { redactSecrets } from "../../core/redact.js";
 export { cleanText };
 
 /* The shared surface owns imports and loading failures only. Entity data
    and commands always render through the canonical domain controller. */
 export function safeError(error) {
-  return cleanText(error?.message || error?.data?.message || error?.code, "No se pudo cargar el detalle.")
-    .replace(/([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***").slice(0, 500);
+  return redactSecrets(cleanText(error?.message || error?.data?.message || error?.code, "No se pudo cargar el detalle.")).slice(0, 500);
 }
 
 /* Pending and failed detail sessions render through the same shell as every

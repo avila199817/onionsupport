@@ -23,10 +23,10 @@ import {
 } from "../../core/config.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, isFunction, firstNonBlank } from "../../core/objects.js";
+import { redactSecrets } from "../../core/redact.js";
 
 export const AUTH_VERSION = "auth.minimal.v10-logout-fail-closed";
 const ROOT_PATH = "/";
-const LEGACY_RESET_TOKEN_PATH = /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
 const AUTH_ROUTES = Object.freeze({
   login: ROUTES.login || "/login",
   passwordRequest: ROUTES.passwordRequest || "/password-request",
@@ -45,19 +45,12 @@ const sessionState = {
 const activeFlowControllers = new Set();
 const selectorMetrics = { coreReads: 0, httpTokenFallbacks: 0, contexts: 0 };
 
-function redact(value = "") {
-  return cleanText(value, "")
-    .replace(LEGACY_RESET_TOKEN_PATH, "$1***")
-    .replace(/([?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=)([^&#\s]+)/gi, "$1***")
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-}
 function safeError(error = null, type = "auth") {
   if (!error) return null;
   return {
     type,
     name: cleanText(error?.name, "Error"),
-    message: redact(error?.message || String(error)),
+    message: redactSecrets(cleanText(error?.message || String(error), "")),
     status: error?.status || error?.statusCode || error?.response?.status || null,
     code: cleanText(error?.code || error?.error || "", "") || null,
     canRefresh: isRefreshableAuthError(error),
@@ -67,7 +60,7 @@ function safeError(error = null, type = "auth") {
 function safePayload(value, depth = 0) {
   if (depth > 5) return null;
   if (value === null || value === undefined) return value;
-  if (typeof value === "string") return redact(value);
+  if (typeof value === "string") return redactSecrets(cleanText(value, ""));
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (["function", "symbol", "bigint"].includes(typeof value)) return undefined;
   if (Array.isArray(value)) return value.slice(0, 100).map((item) => safePayload(item, depth + 1));

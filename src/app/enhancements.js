@@ -16,6 +16,8 @@
    - Sin Auth, Router, HTTP, Store ni lógica de dominio propia.
 ========================================================= */
 
+import { cleanText } from "../core/presentation-text.js";
+import { redactSecrets } from "../core/redact.js";
 export const APP_ENHANCEMENTS_VERSION =
   "app.enhancements.v20-public-support-extreme";
 
@@ -129,23 +131,10 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function cleanErrorText(value = "") {
-  return String(value ?? "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***")
-    .replace(/[\r\n\t]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function safeError(error = null) {
   return Object.freeze({
-    name: cleanErrorText(error?.name || "Error").slice(0, 80) || "Error",
-    message: cleanErrorText(error?.message || error || "").slice(0, 240),
+    name: cleanText(redactSecrets(error?.name || "Error"), "").slice(0, 80) || "Error",
+    message: cleanText(redactSecrets(error?.message || error || ""), "").slice(0, 240),
   });
 }
 

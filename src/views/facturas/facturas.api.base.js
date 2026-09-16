@@ -23,6 +23,7 @@ import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/obje
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { nowIso } from "../../core/clock.js";
+import { redactSecrets } from "../../core/redact.js";
 
 export const FACTURAS_API_VERSION =
   "facturas.api.production.v9.continuous-list-snapshot";
@@ -145,16 +146,6 @@ function parseBooleanFlag(value, fallback = false) {
   return fallback;
 }
 
-function redact(value = "") {
-  return String(value ?? "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-}
-
 function hasSensitiveQuery(value = "") {
   return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(
     String(value || "")
@@ -162,7 +153,7 @@ function hasSensitiveQuery(value = "") {
 }
 
 function safePublicText(value = "", fallback = "") {
-  const text = redact(cleanText(value, ""));
+  const text = redactSecrets(cleanText(value, ""));
   if (!text) return fallback;
   if (hasSensitiveQuery(text)) return fallback;
   return text;
@@ -1692,7 +1683,7 @@ export function computeFacturasStats(items = lastList.items) {
 
 function normalizeError(error = null) {
   return {
-    message: redact(error?.message || "No se pudieron cargar las facturas."),
+    message: redactSecrets(error?.message || "No se pudieron cargar las facturas."),
     status: error?.status || error?.statusCode || error?.response?.status || null,
     code: error?.code || error?.error || null,
     at: nowIso()

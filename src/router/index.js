@@ -30,7 +30,6 @@ import { createAsyncScope } from "../core/async-scope.js";
 import {
   ROUTES,
   USER_HOME_PREFIX,
-  SENSITIVE_QUERY_PARAMS,
   buildUserHomeRoute,
   buildUserScopedRoute,
   getUserScopedRouteInfo,
@@ -53,6 +52,7 @@ export const ROUTER_VERSION =
 import { syncPageMetadata } from "./page-metadata.js";
 import { cleanText, normalizeKey } from "../core/presentation-text.js";
 import { isObject, isFunction } from "../core/objects.js";
+import { SENSITIVE_QUERY_KEYS, redactSecrets } from "../core/redact.js";
 
 const PUBLIC_HOME_PATH = "/";
 
@@ -78,60 +78,8 @@ const ROUTER_EVENT_HANDLED_KEY =
 const LEGACY_RESET_TOKEN_PATH =
   /^\/(?:reset-password|password-reset)\/confirm\/([^/?#]+)(?:\/)?$/i;
 
-const LEGACY_RESET_TOKEN_REDACT =
-  /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
-
 const LEGACY_ACTIVATION_TOKEN_PATH =
   /^\/activate-account\/([^/?#]+)(?:\/)?$/i;
-
-const LEGACY_ACTIVATION_TOKEN_REDACT =
-  /(\/activate-account\/)([^/?#\s]+)/gi;
-
-const DEFAULT_SENSITIVE_QUERY_PARAMS =
-  [
-    "access_token",
-    "accessToken",
-    "refresh_token",
-    "refreshToken",
-    "id_token",
-    "idToken",
-    "token",
-    "code",
-    "secret",
-    "session",
-    "sessionId",
-    "session_id",
-    "password",
-    "pwd",
-    "key",
-    "sig",
-    "signature",
-    "jwt",
-    "authorization",
-    "reset_token",
-    "resetToken",
-    "activation_token",
-    "activationToken",
-  ];
-
-const SENSITIVE_QUERY_KEYS =
-  new Set(
-    [
-      ...(
-        Array.isArray(
-          SENSITIVE_QUERY_PARAMS
-        )
-          ? SENSITIVE_QUERY_PARAMS
-          : []
-      ),
-      ...DEFAULT_SENSITIVE_QUERY_PARAMS,
-    ]
-      .map(
-        (key) =>
-          normalizeKey(key)
-      )
-      .filter(Boolean)
-  );
 
 let initialized = false;
 let bound = false;
@@ -158,45 +106,6 @@ function isBrowser() {
   return (
     typeof window !== "undefined" &&
     typeof document !== "undefined"
-  );
-}
-
-function redactLegacyResetToken(
-  value = ""
-) {
-  return String(
-    value ?? ""
-  )
-    .replace(
-      LEGACY_RESET_TOKEN_REDACT,
-      "$1***"
-    )
-    .replace(
-      LEGACY_ACTIVATION_TOKEN_REDACT,
-      "$1***"
-    );
-}
-
-function redact(
-  value = ""
-) {
-  return redactLegacyResetToken(
-    cleanText(
-      value,
-      ""
-    )
-      .replace(
-        /([?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=)([^&#\s]+)/gi,
-        "$1***"
-      )
-      .replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      )
-      .replace(
-        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-        "***"
-      )
   );
 }
 
@@ -4873,7 +4782,7 @@ async function redirectTo(
         "redirect-loop",
 
       redirectTo:
-        redact(path),
+        redactSecrets(cleanText(path, "")),
     };
   }
 
@@ -5869,19 +5778,13 @@ function getSnapshot() {
       ),
 
     pendingPath:
-      redact(
-        pendingPath
-      ),
+      redactSecrets(cleanText(pendingPath, "")),
 
     publicPath:
-      redact(
-        currentPublicPath()
-      ),
+      redactSecrets(cleanText(currentPublicPath(), "")),
 
     canonicalPath:
-      redact(
-        currentCanonicalPath()
-      ),
+      redactSecrets(cleanText(currentCanonicalPath(), "")),
 
     authenticated:
       isAuthenticated(),
@@ -5898,9 +5801,7 @@ function getSnapshot() {
       null,
 
     defaultHome:
-      redact(
-        getDefaultHome()
-      ),
+      redactSecrets(cleanText(getDefaultHome(), "")),
 
     routes:
       Object.freeze(
@@ -5987,9 +5888,7 @@ function debug(
   return target
     ? {
         target:
-          redact(
-            target
-          ),
+          redactSecrets(cleanText(target, "")),
 
         match:
           safeMatchForDebug(

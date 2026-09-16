@@ -208,6 +208,14 @@ min-inline-size: 0;
   gap: var(--space-md);
 }
 
+/* EL AVATAR DE UNA CABECERA DE DETALLE ES UNA SOLA VARIANTE.
+   Quien dibuja el avatar -tamaño, recorte, radio, color, imagen y fallback- es
+   components/avatar-system.css, que viaja en la capa `guardrails`, la última: cualquier
+   regla de tamaño o radio escrita aquí sería letra muerta en el producto aunque se viera
+   en un fixture que no cargue esa hoja.
+   Lo que esta autoridad declara es el HUECO: la columna del hero y la caja que lo reserva,
+   con el mismo tamaño que el sistema de avatares va a pintar, para que el espacio esté
+   ocupado antes de que llegue ninguna imagen y no haya salto al cargarla. */
 .ui-detail-modal-avatar,
 .ui-detail-modal-avatar-frame {
   display: grid;
@@ -215,6 +223,11 @@ min-inline-size: 0;
   font-size: var(--font-lg);
   font-weight: var(--weight-black);
   letter-spacing: var(--letter-tight);
+}
+
+.ui-detail-modal-avatar {
+  inline-size: var(--ui-detail-modal-avatar-size);
+  block-size: var(--ui-detail-modal-avatar-size);
 }
 
 .ui-detail-modal-hero-content {
@@ -646,16 +659,6 @@ inline-size: 100%;
 padding: 14px 15px;
 }
 
-.ui-detail-modal-hero {
-grid-template-columns: 54px minmax(0, 1fr);
-}
-
-.ui-detail-modal-avatar,
-.ui-detail-modal-avatar-frame {
-inline-size: 54px;
-    block-size: 54px;
-}
-
 .ui-detail-modal-body {
 padding: var(--space-md);
 }
@@ -684,14 +687,7 @@ padding: 12px 13px;
 }
 
 .ui-detail-modal-hero {
-grid-template-columns: 46px minmax(0, 1fr);
-    gap: 10px;
-}
-
-.ui-detail-modal-avatar,
-.ui-detail-modal-avatar-frame {
-inline-size: 46px;
-    block-size: 46px;
+gap: 10px;
 }
 
 .ui-detail-modal-title {

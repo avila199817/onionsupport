@@ -1346,8 +1346,10 @@
   --ui-detail-modal-header-gap: var(--space-sm);
   --ui-detail-modal-header-border: var(--border-soft);
 
-  --ui-detail-modal-avatar-size: 66px;
-  --ui-detail-modal-avatar-radius: 21px;
+  /* El hueco del avatar en una cabecera de detalle vale exactamente lo que el sistema de
+     avatares pinta (components/avatar-system.css, capa `guardrails`). Un número propio aquí
+     dejaría hueco de más en escritorio y hueco de menos en móvil. */
+  --ui-detail-modal-avatar-size: var(--avatar-size-detail, 56px);
 
   --ui-detail-modal-title-size: clamp(19px, 1.9vw, 27px);
   --ui-detail-modal-title-line: 1.14;
@@ -1552,8 +1554,6 @@ body[data-route-mode="app"] {
   :root {
     --ui-detail-modal-width: min(calc(100vw - 20px), 1160px);
     --ui-detail-modal-padding: var(--space-md);
-    --ui-detail-modal-avatar-size: 58px;
-    --ui-detail-modal-avatar-radius: 17px;
     --ui-detail-modal-title-size: clamp(18px, 5.4vw, 23px);
     --incidencias-modal-thumb-width: 74px;
     --incidencias-modal-thumb-height: 62px;

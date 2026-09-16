@@ -268,12 +268,12 @@ try {
       ["Facturas selected client", invoiceCreate.renderFacturaCreateSelectedClientsSlot({ selectedClientes: [client] }), ".fac-create-avatar", user],
       ["Facturas selected client without email", invoiceCreate.renderFacturaCreateSelectedClientsSlot({ selectedClientes: [{ ...client, ...clientWithoutEmail, email: "" }] }), ".fac-create-avatar", clientWithoutEmail],
       ["Facturas unlinked client", invoiceCreate.renderFacturaCreateClientSearchSlot({ clientSearch: { query: "Ana", results: [clients.normalizeClienteModel({ clienteId: client.id, nombreFiscal: clientWithoutEmail.name })] } }), ".fac-create-avatar", { name: clientWithoutEmail.name }],
-      ["Facturas detail", invoiceDetail.renderFacturasDetailModal({ open: true, factura: invoice }), ".facturas-detail-avatar", user],
+      ["Facturas detail", invoiceDetail.renderFacturasDetailModal({ open: true, factura: invoice }), "[data-modal-avatar-frame='true']", user],
       ["Facturas removed photo list", invoices.renderFacturasTemplate({ items: [removedInvoicePhoto] }), ".facturas-avatar", user, true],
-      ["Facturas removed photo detail", invoiceDetail.renderFacturasDetailModal({ open: true, factura: removedInvoicePhoto }), ".facturas-detail-avatar", user, true],
-      ["Facturas detail without email", invoiceDetail.renderFacturasDetailModal({ open: true, factura: { ...invoice, clienteNombre: clientWithoutEmail.name, clienteEmail: "" } }), ".facturas-detail-avatar", clientWithoutEmail],
+      ["Facturas removed photo detail", invoiceDetail.renderFacturasDetailModal({ open: true, factura: removedInvoicePhoto }), "[data-modal-avatar-frame='true']", user, true],
+      ["Facturas detail without email", invoiceDetail.renderFacturasDetailModal({ open: true, factura: { ...invoice, clienteNombre: clientWithoutEmail.name, clienteEmail: "" } }), "[data-modal-avatar-frame='true']", clientWithoutEmail],
       ["Facturas list without email", invoices.renderFacturasTemplate({ items: [{ ...invoice, clienteNombre: clientWithoutEmail.name, clienteEmail: "" }] }), ".facturas-avatar", clientWithoutEmail],
-      ["Facturas without user identity", invoiceDetail.renderFacturasDetailModal({ open: true, factura: { id: invoice.id, clienteId: client.id, clienteNombre: clientWithoutEmail.name } }), ".facturas-detail-avatar", { name: clientWithoutEmail.name }],
+      ["Facturas without user identity", invoiceDetail.renderFacturasDetailModal({ open: true, factura: { id: invoice.id, clienteId: client.id, clienteNombre: clientWithoutEmail.name } }), "[data-modal-avatar-frame='true']", { name: clientWithoutEmail.name }],
       ["Incidencias requester", tickets.renderIncidenciasTemplate({ items: [ticket] }), ".incidencias-avatar", user],
       ["Incidencias selected user", ticketCreate.renderIncidenciasCreateModal({ open: true, admin: true, form: { targetUserId: user.userId, targetClienteId: client.id, targetUserName: user.name, targetUserEmail: user.email }, userSearch: { selectedUser: user } }), ".inc-create-target-user-avatar", user],
       ["Incidencias user search", ticketCreate.renderIncidenciasCreateModal({ open: true, admin: true, userSearch: { results: [user] } }), ".inc-create-user-avatar", user],
@@ -300,6 +300,9 @@ try {
       container.innerHTML = html;
       document.querySelector("#fixture").append(container);
       const avatar = container.querySelector(selector);
+      // A renamed host must fail by name: a null here used to surface as an
+      // unattributable TypeError several lines later.
+      if (!avatar) throw new Error(`${label}: no element matches ${selector}`);
       // A requester ID on an enclosing entity must not become a technician ID.
       if (label === "Incidencias technician without aliases") avatar.closest("[data-ticket-row='true']").dataset.userId = user.userId;
       const before = snapshot(avatar);

@@ -2451,6 +2451,13 @@ function renderAvatar(
             : "incidencias-modal-avatar-frame--fallback"
         )}"
         data-modal-avatar-frame="true"
+        data-avatar-system="true"
+        data-avatar-host="true"
+        data-avatar-source="incidencias-detail"
+        data-avatar-name="${attr(presentation.name)}"
+        data-avatar-email="${attr(presentation.email)}"
+        data-avatar-user-id="${attr(presentation.userId)}"
+        data-avatar-username="${attr(presentation.username)}"
         data-has-avatar="${avatarUrl ? "true" : "false"}"
         data-fallback="${avatarUrl ? "false" : "true"}"
         data-avatar-tone="${attr(String(tone))}"
@@ -2467,13 +2474,14 @@ function renderAvatar(
                 decoding="async"
                 referrerpolicy="no-referrer"
                 draggable="false"
+                data-avatar-image="true"
                 data-modal-avatar-img="true"
               >
             `
             : ""
         }
 
-        <span class="incidencias-modal-avatar-fallback ui-detail-modal-avatar-fallback">
+        <span class="incidencias-modal-avatar-fallback ui-detail-modal-avatar-fallback" data-avatar-fallback="true">
           ${escapeHtml(
             presentation.initials
           )}

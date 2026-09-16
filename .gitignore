@@ -2,3 +2,5 @@ dist/
 build-metadata/
 node_modules/
 .onion-build-*/
+__pycache__/
+*.pyc

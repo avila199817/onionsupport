@@ -21,7 +21,15 @@ const JS_ROOT = resolve(DIST, "assets/js");
 // keeps a requested fragment aligned while late route styles settle adds
 // 317 raw bytes to home-*.js (observed 218293); the ceiling moves to 218500,
 // leaving 207 bytes. app and auth keep their ceilings (157619 / 63958).
-const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218500 });
+// R05 (2026-09-16): the entity detail now carries its features from every real
+// entry point, so the enhancements registry derives its scope from the domain
+// portal that is really mounted and not only from the pathname. That is +250
+// raw bytes on the bootstrap/Home union (observed 218543 on main 2bd80114),
+// already compacted once from 218578. The registry is the module that decides
+// what the SPA loads, so it belongs in this closure; the ceiling moves to
+// 218600, leaving 57 bytes. Nothing is preloaded: the growth is the rule, not
+// the payload. app and auth keep their ceilings.
+const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218600 });
 
 function staticImports(code, identifier) {
   // PARSE ONLY. Never link, evaluate or supply a dynamic-import callback.

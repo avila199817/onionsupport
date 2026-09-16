@@ -16,8 +16,9 @@
 // "" are the fallback. They stay listed in the contract until the reachable
 // differences (live cadence, request timeouts) are decided
 // (docs/FRONTEND_SHARED_SYSTEMS.md).
-// Amount parsers (currency symbols, decimal comma) and integer policies
-// stay with their domains.
+// Amount parsers (currency symbols, decimal comma, cents) live in
+// core/amounts.js with their own policies; integer policies stay with
+// their domains.
 export function coercedNumber(value = 0, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;

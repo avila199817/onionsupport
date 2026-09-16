@@ -16,6 +16,7 @@ import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
+import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
 
 export const CLIENTES_MODEL_VERSION =
   "clientes.model.v1.single-authority";
@@ -38,37 +39,6 @@ const SAFE_ARRAY_LIMIT = 10_000;
 const SENSITIVE_KEY_RE =
   /^(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|pwd|secret|authorization|cookie|jwt|api[_-]?key|connection[_-]?string|sas|sig|signature|activation[_-]?token|reset[_-]?token|activationUrl|resetUrl|signedUrl|sasUrl)$/i;
 const PROTOTYPE_KEY_RE = /^(?:__proto__|prototype|constructor)$/i;
-
-function number(value = 0, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-
-  if (typeof value === "string") {
-    let normalized = value
-      .trim()
-      .replace(/[€$£¥%]/g, "")
-      .replace(/[^\d.,+\-\s]/g, "")
-      .replace(/\s+/g, "");
-
-    if (!normalized || normalized === "-" || normalized === "+") return fallback;
-    const comma = normalized.lastIndexOf(",");
-    const dot = normalized.lastIndexOf(".");
-
-    if (comma >= 0 && dot >= 0) {
-      normalized = comma > dot
-        ? normalized.replace(/\./g, "").replace(/,/g, ".")
-        : normalized.replace(/,/g, "");
-    } else if (comma >= 0) {
-      normalized = normalized.replace(/,/g, ".");
-    }
-
-    const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 function normalizeEmail(value = "") {
   const email = cleanText(value, "").toLowerCase();
@@ -253,9 +223,9 @@ export function normalizeClienteModel(item = {}) {
   const active = status === "active" || status === "vip";
   const createdAt = firstNonBlank(raw.createdAt, raw.created_at, raw.fechaCreacion, null);
   const updatedAt = firstNonBlank(raw.updatedAt, raw.updated_at, raw.modifiedAt, createdAt, null);
-  const invoicesCount = Math.max(0, number(firstNonBlank(raw.invoicesCount, raw.facturasCount, raw.invoiceCount, raw.stats?.facturasCount, 0), 0));
-  const ticketsCount = Math.max(0, number(firstNonBlank(raw.ticketsCount, raw.incidenciasCount, raw.ticketCount, raw.stats?.ticketsCount, 0), 0));
-  const totalAmount = number(firstNonBlank(raw.totalAmount, raw.totalImporte, raw.facturasTotal, raw.stats?.totalFacturado, 0), 0);
+  const invoicesCount = Math.max(0, parseAmount(firstNonBlank(raw.invoicesCount, raw.facturasCount, raw.invoiceCount, raw.stats?.facturasCount, 0), 0, AMOUNT_POLICIES.coerced));
+  const ticketsCount = Math.max(0, parseAmount(firstNonBlank(raw.ticketsCount, raw.incidenciasCount, raw.ticketCount, raw.stats?.ticketsCount, 0), 0, AMOUNT_POLICIES.coerced));
+  const totalAmount = parseAmount(firstNonBlank(raw.totalAmount, raw.totalImporte, raw.facturasTotal, raw.stats?.totalFacturado, 0), 0, AMOUNT_POLICIES.coerced);
 
   const normalizedAddress = {
     ...direccion,
@@ -444,9 +414,9 @@ export function computeClientesStats(items = []) {
     if (bucket === "pending") stats.pendingCount += 1;
     if (bucket === "blocked") stats.blockedCount += 1;
     if (item.vip) stats.vipCount += 1;
-    stats.invoicesCount += Math.max(0, number(item.invoicesCount, 0));
-    stats.ticketsCount += Math.max(0, number(item.ticketsCount, 0));
-    stats.totalAmount += number(item.totalAmount, 0);
+    stats.invoicesCount += Math.max(0, parseAmount(item.invoicesCount, 0, AMOUNT_POLICIES.coerced));
+    stats.ticketsCount += Math.max(0, parseAmount(item.ticketsCount, 0, AMOUNT_POLICIES.coerced));
+    stats.totalAmount += parseAmount(item.totalAmount, 0, AMOUNT_POLICIES.coerced);
     return stats;
   }, {
     total: 0,

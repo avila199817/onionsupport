@@ -25,9 +25,10 @@ import { nowIso, nowMs } from "../src/core/clock.js";
 //   below until that difference is decided. clamp(value, min, max) has no
 //   numeric policy of its own: callers parse first. correo.api keeps
 //   clamp(value, fallback, min, max), an integer parse with fallback.
-//   Amount parsers (currency symbols, decimal comma, round2) and the
-//   integer policies (integer, nonNegativeInteger, parseNumber, the
-//   positive-only number of the Incidencias create form) stay local.
+//   Amount parsers (currency symbols, decimal comma, round2) live in
+//   core/amounts.js (amounts-contract); the integer policies (integer,
+//   nonNegativeInteger, parseNumber, the positive-only number of the
+//   Incidencias create form) stay local.
 // - core/clock.js: nowIso() and nowMs(), the single time source. The copy in
 //   server.api.base wrapped toISOString in try/catch: new Date() is always
 //   valid, so the catch branch could not run.

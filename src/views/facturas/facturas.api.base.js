@@ -25,6 +25,7 @@ import { slugKey } from "../../core/slug-key.js";
 import { nowIso } from "../../core/clock.js";
 import { redactSecrets } from "../../core/redact.js";
 import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage, errorStatus } from "../../core/errors.js";
+import { AMOUNT_POLICIES, parseAmount, round2 } from "../../core/amounts.js";
 
 export const FACTURAS_API_VERSION =
   "facturas.api.production.v9.continuous-list-snapshot";
@@ -95,46 +96,8 @@ function isBlob(value) {
   No aplanar values. Arrays de líneas, relaciones, adjuntos o IDs son
   valores completos del dominio; firstNonEmpty() sólo escoge entre candidatos.
 */
-function number(value = 0, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-  if (typeof value === "boolean") return value ? 1 : 0;
-  if (typeof value === "object") return fallback;
-
-  if (typeof value === "string") {
-    let clean = value
-      .trim()
-      .replace(/[€$£¥%]/g, "")
-      .replace(/[^\d.,+\-\s]/g, "")
-      .replace(/\s+/g, "");
-
-    if (!clean || clean === "-" || clean === "+") return fallback;
-
-    const hasComma = clean.includes(",");
-    const hasDot = clean.includes(".");
-
-    if (hasComma && hasDot) {
-      const lastComma = clean.lastIndexOf(",");
-      const lastDot = clean.lastIndexOf(".");
-
-      clean = lastComma > lastDot
-        ? clean.replace(/\./g, "").replace(/,/g, ".")
-        : clean.replace(/,/g, "");
-    } else if (hasComma) {
-      clean = clean.replace(/,/g, ".");
-    }
-
-    const parsed = Number(clean);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function round2(value = 0) {
-  const parsed = number(value, 0);
-  return Math.round((parsed + Number.EPSILON) * 100) / 100;
+function roundAmount(value) {
+  return round2(parseAmount(value, 0, AMOUNT_POLICIES.booleanDigit));
 }
 
 function parseBooleanFlag(value, fallback = false) {
@@ -347,8 +310,8 @@ function buildListQuery({
 } = {}) {
   const query = {};
 
-  query.page = Math.max(1, number(page, FACTURAS_DEFAULT_PAGE));
-  query.limit = Math.min(Math.max(1, number(limit, FACTURAS_DEFAULT_LIMIT)), FACTURAS_MAX_LIMIT);
+  query.page = Math.max(1, parseAmount(page, FACTURAS_DEFAULT_PAGE, AMOUNT_POLICIES.booleanDigit));
+  query.limit = Math.min(Math.max(1, parseAmount(limit, FACTURAS_DEFAULT_LIMIT, AMOUNT_POLICIES.booleanDigit)), FACTURAS_MAX_LIMIT);
 
   const finalSearch = cleanText(firstNonEmpty(search, q), "");
   if (finalSearch) {
@@ -505,7 +468,7 @@ function totalFromPayload(payload = null, fallback = 0) {
 
   return Math.max(
     fallback,
-    number(
+    parseAmount(
       firstNonEmpty(
         envelope.total,
         envelope.totalMatched,
@@ -524,7 +487,8 @@ function totalFromPayload(payload = null, fallback = 0) {
         object.totalCount,
         fallback
       ),
-      fallback
+      fallback,
+      AMOUNT_POLICIES.booleanDigit
     )
   );
 }
@@ -550,7 +514,7 @@ function hasExplicitTotal(payload = null) {
     object.totalCount,
   ].some((value) => {
     if (value === undefined || value === null || value === "") return false;
-    const parsed = number(value, Number.NaN);
+    const parsed = parseAmount(value, Number.NaN, AMOUNT_POLICIES.booleanDigit);
     return Number.isFinite(parsed) && parsed >= 0;
   });
 }
@@ -559,29 +523,29 @@ function pagingFromPayload(payload = null, requestMeta = {}, itemsCount = 0) {
   const envelope = safeObject(unwrapEnvelope(payload), {});
   const paging = pagingMetadataFromPayload(payload);
 
-  const page = number(firstNonEmpty(envelope.page, paging.page, paging.currentPage, requestMeta.page, FACTURAS_DEFAULT_PAGE), FACTURAS_DEFAULT_PAGE);
-  const limit = number(firstNonEmpty(envelope.limit, paging.limit, paging.pageSize, requestMeta.limit, itemsCount || FACTURAS_DEFAULT_LIMIT), itemsCount || FACTURAS_DEFAULT_LIMIT);
+  const page = parseAmount(firstNonEmpty(envelope.page, paging.page, paging.currentPage, requestMeta.page, FACTURAS_DEFAULT_PAGE), FACTURAS_DEFAULT_PAGE, AMOUNT_POLICIES.booleanDigit);
+  const limit = parseAmount(firstNonEmpty(envelope.limit, paging.limit, paging.pageSize, requestMeta.limit, itemsCount || FACTURAS_DEFAULT_LIMIT), itemsCount || FACTURAS_DEFAULT_LIMIT, AMOUNT_POLICIES.booleanDigit);
   const total = totalFromPayload(payload, itemsCount);
   const nextPage = firstNonEmpty(envelope.nextPage, paging.nextPage, null);
-  const totalPages = number(firstNonEmpty(envelope.totalPages, paging.totalPages, Math.ceil((total || 0) / (limit || 1))), Math.max(1, Math.ceil((total || 0) / (limit || 1))));
+  const totalPages = parseAmount(firstNonEmpty(envelope.totalPages, paging.totalPages, Math.ceil((total || 0) / (limit || 1))), Math.max(1, Math.ceil((total || 0) / (limit || 1))), AMOUNT_POLICIES.booleanDigit);
   const hasMore = firstNonEmpty(envelope.hasMore, paging.hasMore, nextPage ? true : null, null);
-  const offset = number(firstNonEmpty(envelope.offset, paging.offset, requestMeta.offset, Math.max(0, (page - 1) * limit)), Math.max(0, (page - 1) * limit));
+  const offset = parseAmount(firstNonEmpty(envelope.offset, paging.offset, requestMeta.offset, Math.max(0, (page - 1) * limit)), Math.max(0, (page - 1) * limit), AMOUNT_POLICIES.booleanDigit);
 
   return {
     ...paging,
     page,
-    nextPage: nextPage === null || nextPage === undefined || nextPage === "" ? null : number(nextPage, null),
+    nextPage: nextPage === null || nextPage === undefined || nextPage === "" ? null : parseAmount(nextPage, null, AMOUNT_POLICIES.booleanDigit),
     totalPages,
     hasMore: hasMore === null
       ? itemsCount < total
       : parseBooleanFlag(hasMore, itemsCount < total),
     offset,
     limit,
-    returned: number(firstNonEmpty(envelope.count, paging.returned, itemsCount), itemsCount),
+    returned: parseAmount(firstNonEmpty(envelope.count, paging.returned, itemsCount), itemsCount, AMOUNT_POLICIES.booleanDigit),
     total,
     totalKnown: hasExplicitTotal(payload),
     remoteCount: total,
-    fetchLimit: number(firstNonEmpty(envelope.fetchLimit, paging.fetchLimit, limit), limit),
+    fetchLimit: parseAmount(firstNonEmpty(envelope.fetchLimit, paging.fetchLimit, limit), limit, AMOUNT_POLICIES.booleanDigit),
     mode: cleanText(firstNonEmpty(envelope.queryMode, paging.mode, paging.queryMode, ""), "")
   };
 }
@@ -805,9 +769,9 @@ export function normalizeFactura(item = {}, options = {}) {
   const razonSocial = getCompanyName(raw);
   const clienteEmail = getClientEmail(raw);
 
-  const total = round2(firstNonEmpty(raw.total, raw.totalFactura, raw.importeTotal, raw.amount, raw.invoiceAmount, raw.importe, raw.facturaTotal, raw.totales?.total, raw.totals?.total, raw.resumen?.total, 0));
-  const paidAmount = round2(firstNonEmpty(raw.paidAmount, raw.pagado, raw.payment?.paidAmount, raw.totales?.pagado, normalizePaymentStatus(firstNonEmpty(raw.paymentStatus, raw.estadoPago)) === "paid" ? total : 0));
-  const pendingAmount = Math.max(0, round2(firstNonEmpty(raw.pendingAmount, raw.pendiente, raw.payment?.pendingAmount, raw.totales?.pendiente, total - paidAmount)));
+  const total = roundAmount(firstNonEmpty(raw.total, raw.totalFactura, raw.importeTotal, raw.amount, raw.invoiceAmount, raw.importe, raw.facturaTotal, raw.totales?.total, raw.totals?.total, raw.resumen?.total, 0));
+  const paidAmount = roundAmount(firstNonEmpty(raw.paidAmount, raw.pagado, raw.payment?.paidAmount, raw.totales?.pagado, normalizePaymentStatus(firstNonEmpty(raw.paymentStatus, raw.estadoPago)) === "paid" ? total : 0));
+  const pendingAmount = Math.max(0, roundAmount(firstNonEmpty(raw.pendingAmount, raw.pendiente, raw.payment?.pendingAmount, raw.totales?.pendiente, total - paidAmount)));
   const currency = cleanText(firstNonEmpty(raw.currency, raw.moneda, raw.facturaCurrency, raw.payment?.currency, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
 
   const paymentStatus = normalizePaymentStatus(firstNonEmpty(raw.paymentStatus, raw.estadoPago, raw.payment?.status, "pending"));
@@ -1151,7 +1115,7 @@ function stripUnsafePayload(payload = {}) {
 export function normalizeFacturaPayload(payload = {}) {
   const source = stripUnsafePayload(payload);
   const title = cleanText(firstNonEmpty(source.title, source.name, source.concepto, source.conceptoPrincipal), "");
-  const total = round2(firstNonEmpty(source.total, source.amount, source.importe, source.totalFactura, 0));
+  const total = roundAmount(firstNonEmpty(source.total, source.amount, source.importe, source.totalFactura, 0));
   const currency = cleanText(firstNonEmpty(source.currency, source.moneda, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
   const incidenciaId = cleanText(firstNonEmpty(source.ticketId, source.incidenciaId, source.relatedTicketId, source.relatedIncidentId, source.ticket?.ticketId, source.incidencia?.ticketId), "");
   const clienteId = cleanText(firstNonEmpty(source.clienteId, source.clientId, source.customerId), "");
@@ -1561,7 +1525,7 @@ export async function searchFacturaIncidencias({
   signal
 } = {}) {
   const query = {
-    limit: Math.min(Math.max(1, number(limit, 50)), 100),
+    limit: Math.min(Math.max(1, parseAmount(limit, 50, AMOUNT_POLICIES.booleanDigit)), 100),
     includeClosed: Boolean(includeClosed),
     includeAll: Boolean(includeAll),
     onlyMine: Boolean(onlyMine),
@@ -1607,7 +1571,7 @@ export function getFacturaStableId(item = {}) {
 
 export function getFacturaAmount(item = {}) {
   const raw = safeObject(item);
-  return round2(firstNonEmpty(raw.total, raw.totalFactura, raw.importeTotal, raw.amount, raw.invoiceAmount, raw.importe, raw.facturaTotal, raw.totals?.total, raw.totales?.total, raw.resumen?.total, 0));
+  return roundAmount(firstNonEmpty(raw.total, raw.totalFactura, raw.importeTotal, raw.amount, raw.invoiceAmount, raw.importe, raw.facturaTotal, raw.totals?.total, raw.totales?.total, raw.resumen?.total, 0));
 }
 
 export function resolveFacturaPdfFilename(id = "", options = {}) {
@@ -1678,12 +1642,12 @@ function normalizeError(error = null) {
 export function hydrateFacturasFromCache() {
   return {
     items: safeArray(lastList.items),
-    total: number(lastList.total, safeArray(lastList.items).length),
+    total: parseAmount(lastList.total, safeArray(lastList.items).length, AMOUNT_POLICIES.booleanDigit),
     totalKnown: lastList.totalKnown === true,
     queryKey: cleanText(lastList.queryKey, ""),
     contextKey: cleanText(lastList.contextKey, ""),
-    page: number(lastList.page, 0),
-    nextPage: number(lastList.nextPage, null),
+    page: parseAmount(lastList.page, 0, AMOUNT_POLICIES.booleanDigit),
+    nextPage: parseAmount(lastList.nextPage, null, AMOUNT_POLICIES.booleanDigit),
     hasMore: lastList.hasMore === true,
     stats: computeFacturasStats(lastList.items),
     loadedAt: lastLoadedAt,
@@ -1700,19 +1664,19 @@ export function syncFacturasListCache(snapshot = {}) {
   const hasMore = source.hasMore === true;
   const rawNextPage = source.nextPage;
   const nextPage = hasMore && rawNextPage !== null && rawNextPage !== undefined && rawNextPage !== ""
-    ? Math.max(FACTURAS_DEFAULT_PAGE + 1, number(rawNextPage, FACTURAS_DEFAULT_PAGE + 1))
+    ? Math.max(FACTURAS_DEFAULT_PAGE + 1, parseAmount(rawNextPage, FACTURAS_DEFAULT_PAGE + 1, AMOUNT_POLICIES.booleanDigit))
     : null;
   const sameContext = lastList.contextKey === contextKey;
 
   lastList = {
     items,
-    total: Math.max(items.length, number(source.total, items.length)),
+    total: Math.max(items.length, parseAmount(source.total, items.length, AMOUNT_POLICIES.booleanDigit)),
     totalKnown: source.totalKnown === true,
     queryKey: sameContext ? cleanText(lastList.queryKey, "") : "",
     contextKey,
     page: Math.max(
       FACTURAS_DEFAULT_PAGE,
-      number(source.page, FACTURAS_DEFAULT_PAGE)
+      parseAmount(source.page, FACTURAS_DEFAULT_PAGE, AMOUNT_POLICIES.booleanDigit)
     ),
     nextPage,
     hasMore: hasMore && nextPage !== null,

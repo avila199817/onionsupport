@@ -47,6 +47,7 @@ import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, currencyFormatter, dateFormatter } from "../../core/format.js";
+import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
   "incidencias.template.modal.extreme.v36-owned-attachment-delete-confirm";
@@ -127,90 +128,6 @@ function cleanMultiline(
    NO aplanar arrays aquí.
    attachments/history/comments son valores completos.
 */
-function number(
-  value = 0,
-  fallback = 0
-) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return fallback;
-  }
-
-  if (typeof value === "number") {
-    return Number.isFinite(value)
-      ? value
-      : fallback;
-  }
-
-  if (
-    typeof value === "boolean" ||
-    typeof value === "object"
-  ) {
-    return fallback;
-  }
-
-  if (typeof value === "string") {
-    let clean =
-      value
-        .trim()
-        .replace(/[€$£¥%]/g, "")
-        .replace(/[^\d.,+\-\s]/g, "")
-        .replace(/\s+/g, "");
-
-    if (
-      !clean ||
-      clean === "-" ||
-      clean === "+"
-    ) {
-      return fallback;
-    }
-
-    const hasComma =
-      clean.includes(",");
-
-    const hasDot =
-      clean.includes(".");
-
-    if (
-      hasComma &&
-      hasDot
-    ) {
-      const lastComma =
-        clean.lastIndexOf(",");
-
-      const lastDot =
-        clean.lastIndexOf(".");
-
-      clean =
-        lastComma > lastDot
-          ? clean
-              .replace(/\./g, "")
-              .replace(/,/g, ".")
-          : clean.replace(/,/g, "");
-    } else if (hasComma) {
-      clean =
-        clean.replace(/,/g, ".");
-    }
-
-    const parsed =
-      Number(clean);
-
-    return Number.isFinite(parsed)
-      ? parsed
-      : fallback;
-  }
-
-  const parsed =
-    Number(value);
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : fallback;
-}
-
 function attr(value = "") {
   return escapeHtml(
     cleanText(value, "")
@@ -612,7 +529,7 @@ function formatLimitBytes(
   value = MAX_PENDING_FILE_SIZE
 ) {
   const mb =
-    number(value, 0) /
+    parseAmount(value, 0, AMOUNT_POLICIES.textOnly) /
     1024 /
     1024;
 
@@ -694,7 +611,7 @@ function icon(name = "") {
 
 function formatBytes(bytes = 0) {
   const value =
-    number(bytes, 0);
+    parseAmount(bytes, 0, AMOUNT_POLICIES.textOnly);
 
   if (
     !value ||
@@ -739,7 +656,7 @@ function formatBytes(bytes = 0) {
 
 function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
   const formatter = currencyFormatter(currencyCode(currency, DEFAULT_CURRENCY), CURRENCY_POLICIES.currencyDigits);
-  return formatter ? formatter.format(number(value, 0)) : `${number(value, 0).toFixed(2)} €`;
+  return formatter ? formatter.format(parseAmount(value, 0, AMOUNT_POLICIES.textOnly)) : `${parseAmount(value, 0, AMOUNT_POLICIES.textOnly).toFixed(2)} €`;
 }
 
 function formatDate(value = "") {
@@ -1304,7 +1221,7 @@ function getInvoiceTotal(
   const raw =
     getRaw(detail);
 
-  return number(
+  return parseAmount(
     firstNonEmpty(
       detail.invoiceTotal,
       detail.invoicesTotal,
@@ -1329,7 +1246,8 @@ function getInvoiceTotal(
 
       0
     ),
-    0
+    0,
+    AMOUNT_POLICIES.textOnly
   );
 }
 
@@ -1551,21 +1469,23 @@ function normalizeAttachment(
       ),
 
     size:
-      number(
+      parseAmount(
         firstNonEmpty(
           raw.size,
           raw.sizeBytes
         ),
-        0
+        0,
+        AMOUNT_POLICIES.textOnly
       ),
 
     sizeBytes:
-      number(
+      parseAmount(
         firstNonEmpty(
           raw.sizeBytes,
           raw.size
         ),
-        0
+        0,
+        AMOUNT_POLICIES.textOnly
       ),
 
     /*
@@ -4520,9 +4440,10 @@ export function validateDetailUpdate({
 
   for (const file of files) {
     if (
-      number(
+      parseAmount(
         file?.size,
-        0
+        0,
+        AMOUNT_POLICIES.textOnly
       ) >
       MAX_PENDING_FILE_SIZE
     ) {

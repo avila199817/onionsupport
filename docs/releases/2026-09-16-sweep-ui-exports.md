@@ -12,14 +12,18 @@ La misma que en las unidades anteriores: `export` por costumbre y un alias de no
 
 - **Correo** (A ×17): `CORREO_API_VERSION`, `MICROSOFT_ENDPOINT` y las trece operaciones de la API (`getMicrosoftStatus`, `beginMicrosoftConnect`, `disconnectMicrosoft`, `getMicrosoftProfile`, `listMailFolders`, `listMessages`, `getMessage`, `sendMessage`, `replyMessage`, `replyAllMessage`, `forwardMessage`, `listAttachments`), que la vista consume por el objeto de la API; `formatMessageTime` y `formatLongDate` de la plantilla; `CORREO_VIEW_VERSION`.
 - **WhatsApp** (A ×6, B ×1): `WHATSAPP_VIEW_VERSION`, `WHATSAPP_CANONICAL_PATH`, `WHATSAPP_ENDPOINTS`, `WHATSAPP_REQUEST_TIMEOUT_MS`, `WHATSAPP_CONVERSATION_LIMIT`, `WHATSAPP_MESSAGE_LIMIT`; fuera `WHATSAPP_VIEW_NAME`. `WhatsAppView` (la ruta) intacta.
-- **sidebar** (A ×13) y **topbar** (A ×8): las versiones y los constructores de fragmento (`createSidebarIcon`, `createSidebarNav`, `createTopbarTitle`, `createTopbarSearch`…), que ya se consumen por `SidebarTemplate` / `TopbarTemplate` y por el objeto público de cada módulo.
+- **sidebar** (A ×12) y **topbar** (A ×8): las versiones y los constructores de fragmento (`createSidebarIcon`, `createSidebarNav`, `createTopbarTitle`, `createTopbarSearch`…), que ya se consumen por `SidebarTemplate` / `TopbarTemplate` y por el objeto público de cada módulo.
 - `export-surface-contract`: `SWEPT_DIRECTORIES` pasa a seis directorios (`src/ui/sidebar`, `src/ui/topbar`, `src/views/correo`, `src/views/cuenta`, `src/views/server`, `src/views/whatsapp`), 230 exportaciones vigiladas.
+
+## Lección: el acceso dinámico cuenta como consumidor
+
+`createSidebarFooter` parecía de clase A, pero `.github/scripts/avatar_runtime_dom_contract.mjs` importa el módulo dentro de una página real (`await import("/src/ui/sidebar/template.js")`) y llama al nombre como propiedad del espacio de nombres. La primera pasada del verificador no lo vio por un fallo propio (excluía por ruta todo el árbol de trabajo al estar bajo el directorio de trabajo temporal), y la batería lo detectó antes de fusionar. Se mantiene exportado, documentado como API pública deliberada del fixture (clase C), y el verificador ya recorre `tools`, `.github`, `docs` y los HTML de verdad.
 
 ## Métricas
 
 | Métrica | Antes | Después |
 | --- | --- | --- |
-| Exportaciones (4 directorios) | 95 | 51 |
+| Exportaciones (4 directorios) | 95 | 52 |
 | Nombres muertos retirados | | 1 (`WHATSAPP_VIEW_NAME`) |
 | Líneas de `src` | | +45 / −46 |
 | Chunks | `correo` 69384, `whatsapp` 31218, `sidebar` 33920, `topbar` 56635 | 69308 (−76), 31132 (−86), 33898 (−22), 56614 (−21) |

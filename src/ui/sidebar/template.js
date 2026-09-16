@@ -956,7 +956,9 @@ function createAccountDropdown(user = {}, options = {}) {
   return append(dropdown, [trigger, menu]);
 }
 
-function createSidebarFooter(user = {}, options = {}) {
+// Exported for the avatar runtime contract, which imports this module in a
+// real browser page and builds the footer to assert the avatar states.
+export function createSidebarFooter(user = {}, options = {}) {
   return append(
     el("footer", {
       className: CLASSES.footer,

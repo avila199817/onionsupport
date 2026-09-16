@@ -32,7 +32,11 @@ const BASELINE = Object.freeze({
   "src/views/empleados": 2,
   "src/views/facturas": 153,
   "src/views/home": 75,
-  "src/views/incidencias": 168,
+  // 168 -> 171 (2026-09-16): incidenciaStatusLabel / incidenciaPriorityLabel /
+  // incidenciaCategoryLabel. La autoridad que ya declaraba los valores declara
+  // ahora cómo se leen, y el chip de la cabecera deja de etiquetar por su
+  // cuenta. Ampliación deliberada: tres consumidores reales fuera del módulo.
+  "src/views/incidencias": 171,
   "src/views/server": 127,
   "src/views/usuarios": 160,
   "src/views/whatsapp": 9,

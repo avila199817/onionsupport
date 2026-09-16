@@ -13,6 +13,7 @@ import {
 } from "./clientes.model.js";
 import { safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
+import { coercedNumber } from "../../core/numbers.js";
 
 export {
   normalizeClienteModel,
@@ -59,12 +60,6 @@ const FILTERS = Object.freeze([
 ]);
 
 
-function number(value = 0, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-
 function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
 }
@@ -75,9 +70,9 @@ function attrExact(value = "") {
 
 function formatNumber(value = 0) {
   try {
-    return new Intl.NumberFormat("es-ES").format(number(value, 0));
+    return new Intl.NumberFormat("es-ES").format(coercedNumber(value, 0));
   } catch {
-    return String(number(value, 0));
+    return String(coercedNumber(value, 0));
   }
 }
 
@@ -88,9 +83,9 @@ function formatMoney(value = 0) {
       currency: "EUR",
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(number(value, 0));
+    }).format(coercedNumber(value, 0));
   } catch {
-    return `${number(value, 0).toFixed(2).replace(".", ",")} €`;
+    return `${coercedNumber(value, 0).toFixed(2).replace(".", ",")} €`;
   }
 }
 
@@ -389,7 +384,7 @@ function buildVm(input = {}) {
     error: cleanText(data.error, ""),
     loadMoreError: cleanText(data.loadMoreError, ""),
     openingClienteId: cleanText(data.openingClienteId, ""),
-    lastSyncAt: number(data.lastSyncAt, 0),
+    lastSyncAt: coercedNumber(data.lastSyncAt, 0),
     totalKnown: data.totalKnown === true,
     total: data.totalKnown === true && Number.isFinite(Number(data.total)) ? Number(data.total) : null,
     counts,

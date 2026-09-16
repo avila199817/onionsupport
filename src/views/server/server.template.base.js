@@ -4,7 +4,7 @@ import { escapeHtml } from "../../core/escape-html.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
-import { clamp } from "../../core/numbers.js";
+import { clamp, finiteNumber } from "../../core/numbers.js";
 /* =========================================================
    Onion Support - Servidor Template
    Archivo: /src/views/server/server.template.js
@@ -69,26 +69,6 @@ const HEALTH_CONTRACT_ORDER = Object.freeze([
 ========================================================= */
 
 
-
-function safeNumber(
-  value = null,
-  fallback = null
-) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return fallback;
-  }
-
-  const parsed =
-    Number(value);
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : fallback;
-}
 
 function attr(value = "") {
   return escapeHtml(
@@ -195,7 +175,7 @@ function formatMs(
   value = null
 ) {
   const numeric =
-    safeNumber(
+    finiteNumber(
       value,
       null
     );
@@ -381,7 +361,7 @@ function canonicalService(
       ),
 
     latencyMs:
-      safeNumber(
+      finiteNumber(
         source.latencyMs,
         null
       ),
@@ -509,7 +489,7 @@ function canonicalSnapshot(
       ),
 
     uptimeSeconds:
-      safeNumber(
+      finiteNumber(
         source.uptimeSeconds,
         0
       ),
@@ -521,7 +501,7 @@ function canonicalSnapshot(
       ),
 
     latencyMs:
-      safeNumber(
+      finiteNumber(
         source.latencyMs,
         null
       ),
@@ -548,7 +528,7 @@ function canonicalSnapshot(
       ),
 
     dbLatencyMs:
-      safeNumber(
+      finiteNumber(
         source.dbLatencyMs,
         null
       ),
@@ -562,7 +542,7 @@ function canonicalSnapshot(
       ),
 
     cpuUsage:
-      safeNumber(
+      finiteNumber(
         source.cpuUsage,
         null
       ),
@@ -574,7 +554,7 @@ function canonicalSnapshot(
       ),
 
     memoryUsage:
-      safeNumber(
+      finiteNumber(
         source.memoryUsage,
         null
       ),
@@ -592,7 +572,7 @@ function canonicalSnapshot(
       ),
 
     diskUsage:
-      safeNumber(
+      finiteNumber(
         source.diskUsage,
         null
       ),
@@ -610,7 +590,7 @@ function canonicalSnapshot(
       ),
 
     eventLoopLagMs:
-      safeNumber(
+      finiteNumber(
         source.eventLoopLagMs,
         null
       ),
@@ -958,7 +938,7 @@ function renderMetricMeter(
   label = ""
 ) {
   const numeric =
-    safeNumber(
+    finiteNumber(
       value,
       null
     );

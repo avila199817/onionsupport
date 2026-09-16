@@ -78,6 +78,7 @@ import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/obje
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { coercedNumber } from "../../core/numbers.js";
 
 export const USUARIOS_MODULE_NAME = "usuarios";
 export const USUARIOS_VIEW_NAME = "UsuariosView";
@@ -163,10 +164,6 @@ let lastController = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-function number(value = 0, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
 }
 function normalizeAction(value = "") {
   return ACTION_ALIASES[slugKey(value)] || "";
@@ -591,7 +588,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     );
     const scrollRoot = resolveInfiniteScrollRoot();
     return {
-      scrollTop: number(scrollRoot?.scrollTop, 0),
+      scrollTop: coercedNumber(scrollRoot?.scrollTop, 0),
       searchFocused: active === searchInput,
       selectionStart: active === searchInput ? searchInput.selectionStart : null,
       selectionEnd: active === searchInput ? searchInput.selectionEnd : null,
@@ -616,7 +613,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     if (!host || !isBrowser()) return false;
     try {
       const scrollRoot = resolveInfiniteScrollRoot();
-      if (scrollRoot) scrollRoot.scrollTop = number(snapshot.scrollTop, 0);
+      if (scrollRoot) scrollRoot.scrollTop = coercedNumber(snapshot.scrollTop, 0);
       if (snapshot.searchFocused) {
         const input = host.querySelector("[data-usuarios-search-input='true']");
         input?.focus?.({ preventScroll: true });
@@ -849,7 +846,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       : page.hasMore === true && Boolean(continuationToken);
     if (page.totalKnown === true) {
       totalKnown = true;
-      totalCount = Math.max(items.length, number(page.total, items.length));
+      totalCount = Math.max(items.length, coercedNumber(page.total, items.length));
     } else if (!append && !preservePages) {
       totalKnown = false;
       totalCount = null;
@@ -1568,11 +1565,11 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     toggleSortOrder,
     clearFilters,
     setVisibleLimit(value = DEFAULT_VISIBLE_ROWS) {
-      if (number(value, DEFAULT_VISIBLE_ROWS) > items.length && hasMore) void loadMore();
+      if (coercedNumber(value, DEFAULT_VISIBLE_ROWS) > items.length && hasMore) void loadMore();
       return items.length;
     },
     goToPage(value = 1) {
-      const target = Math.max(1, Math.floor(number(value, 1)));
+      const target = Math.max(1, Math.floor(coercedNumber(value, 1)));
       if (target * USUARIOS_CURSOR_PAGE_SIZE > items.length && hasMore) void loadMore();
       return Math.max(1, Math.ceil(items.length / USUARIOS_CURSOR_PAGE_SIZE));
     },
@@ -1900,7 +1897,7 @@ export const getUsuariosStoreSnapshot = () => {
     hasMore: state.hasMore === true,
     sortField: state.sortField,
     sortOrder: state.sortOrder,
-    lastSyncAt: number(state.lastSyncAt, 0),
+    lastSyncAt: coercedNumber(state.lastSyncAt, 0),
   };
 };
 export const getUsuariosStateSnapshot = () => ({

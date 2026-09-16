@@ -19,7 +19,7 @@ import {
 } from "./usuarios.api.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
-import { clamp } from "../../core/numbers.js";
+import { clamp, coercedNumber } from "../../core/numbers.js";
 import { errorCode } from "../../core/errors.js";
 
 export const USUARIOS_CURSOR_VERSION =
@@ -52,11 +52,6 @@ const INTERNAL_EMPLOYEE_MARKERS = new Set([
   "equipo",
 ]);
 
-
-function number(value = 0, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 export function isInternalEmployeeUsuario(item = {}) {
   const source = safeObject(item);
@@ -200,7 +195,7 @@ export function buildUsuariosCursorQuery({
     statusFilter === "all";
 
   const query = {
-    limit: clamp(number(limit, 1), 1, USUARIOS_CURSOR_MAX_PAGE_SIZE),
+    limit: clamp(coercedNumber(limit, 1), 1, USUARIOS_CURSOR_MAX_PAGE_SIZE),
     includeTotal: shouldIncludeTotal,
     sortBy: cleanText(sortBy, "updatedAt"),
     sortDir: cleanText(sortDir, "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC",
@@ -222,7 +217,7 @@ export async function fetchUsuariosCursorPage(options = {}) {
   const response = await Http.get(
     USUARIOS_CURSOR_ENDPOINT,
     {
-      timeout: clamp(number(options.timeout ?? USUARIOS_CURSOR_TIMEOUT, 1_000), 1_000, 120_000),
+      timeout: clamp(coercedNumber(options.timeout ?? USUARIOS_CURSOR_TIMEOUT, 1_000), 1_000, 120_000),
       query: buildUsuariosCursorQuery(options),
       source: "views.usuarios.cursor.page",
       signal: options.signal,

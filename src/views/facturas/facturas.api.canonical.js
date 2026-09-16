@@ -8,6 +8,7 @@
 
 import AliasCoreDefault, * as AliasCore from "./facturas.api.alias-core.js";
 import { isObject } from "../../core/objects.js";
+import { finiteNumber } from "../../core/numbers.js";
 
 export * from "./facturas.api.alias-core.js";
 
@@ -22,12 +23,6 @@ function text(value = "") {
 
 function isTechnicalIdentifier(value = "") {
   return text(value).startsWith(TECHNICAL_PREFIX);
-}
-
-function finiteNumber(value) {
-  if (value === undefined || value === null || value === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function technicalVersion(value = "") {
@@ -221,7 +216,7 @@ function adjustCountFields(value = {}, removed = 0, minimum = 0) {
     "remoteCount",
     "totalMatched",
   ]) {
-    const current = finiteNumber(value[name]);
+    const current = finiteNumber(value[name], null);
     if (current === null) continue;
 
     if (!changed) output = { ...value };

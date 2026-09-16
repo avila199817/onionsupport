@@ -37,6 +37,7 @@ import {
 import { cleanText } from "../../core/presentation-text.js";
 import { safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { coercedNumber } from "../../core/numbers.js";
 
 export * from "./incidencias.api.impl.js";
 export {
@@ -67,11 +68,6 @@ let completeUniverse = null;
 let universeRevalidationPromise = null;
 let universeRevalidatedAt = 0;
 let universeEpoch = 0;
-
-function finiteNumber(value = 0, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
 
 function normalizedText(value = "") {
   return cleanText(value)
@@ -144,7 +140,7 @@ function responseTotal(response = {}, fallback = 0) {
   const source = safeObject(response);
   return Math.max(
     fallback,
-    finiteNumber(
+    coercedNumber(
       source.total ??
       source.count ??
       source.totalCount ??
@@ -167,10 +163,10 @@ function isUnfilteredFirstPageQuery(query = {}) {
 
 function isMainListFirstPageQuery(query = {}) {
   const source = safeObject(query);
-  const limit = Math.max(1, Math.trunc(finiteNumber(source.limit, 0)));
+  const limit = Math.max(1, Math.trunc(coercedNumber(source.limit, 0)));
   const canonicalLimit = Math.max(
     1,
-    Math.trunc(finiteNumber(Impl.INCIDENCIAS_LIST_LIMIT, 48))
+    Math.trunc(coercedNumber(Impl.INCIDENCIAS_LIST_LIMIT, 48))
   );
 
   return !cleanText(source.cursor) && limit >= canonicalLimit;
@@ -178,7 +174,7 @@ function isMainListFirstPageQuery(query = {}) {
 
 function isFacetCountQuery(query = {}) {
   const source = safeObject(query);
-  const limit = Math.max(1, Math.trunc(finiteNumber(source.limit, 0)));
+  const limit = Math.max(1, Math.trunc(coercedNumber(source.limit, 0)));
   const hasFacetPredicate =
     Object.prototype.hasOwnProperty.call(source, "closed") ||
     Boolean(cleanText(source.priority));
@@ -348,7 +344,7 @@ function projectCompleteUniverse(query = {}) {
   const limit = Math.max(
     1,
     Math.trunc(
-      finiteNumber(
+      coercedNumber(
         source.limit,
         Impl.INCIDENCIAS_LIST_LIMIT || 48
       )

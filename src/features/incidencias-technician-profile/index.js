@@ -31,6 +31,7 @@ import {
 import { cleanText } from "../../core/presentation-text.js";
 import { safeObject, firstNonEmpty } from "../../core/objects.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { finiteNumber } from "../../core/numbers.js";
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
   "incidencias-technician-profile.v9-public-metrics-rating-ready";
@@ -160,14 +161,8 @@ function safeAvatarUrl(value = "") {
   }
 }
 
-function number(value = null, fallback = null) {
-  if (value === null || value === undefined || value === "") return fallback;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
 function nonNegativeInteger(value = null, fallback = null) {
-  const parsed = number(value, fallback);
+  const parsed = finiteNumber(value, fallback);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(0, Math.trunc(parsed));
 }

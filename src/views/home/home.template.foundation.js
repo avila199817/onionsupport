@@ -2,7 +2,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { isObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
-import { clamp } from "../../core/numbers.js";
+import { clamp, finiteNumber } from "../../core/numbers.js";
 
 export { isObject, safeArray };
 export { cleanText, escapeHtml };
@@ -121,20 +121,6 @@ const MONEY_FORMATTERS = new Map();
    BASICS
 ========================================================= */
 
-export function number(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-export function optionalNumber(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 export function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
 }
@@ -189,7 +175,7 @@ export function isGenericInvoiceTitle(value = "") {
 }
 
 export function hasAmount(value = null) {
-  return optionalNumber(value) !== null;
+  return finiteNumber(value, null) !== null;
 }
 
 /* =========================================================
@@ -198,17 +184,17 @@ export function hasAmount(value = null) {
 
 export function formatNumber(value = 0) {
   try {
-    return NUMBER_FORMATTER.format(number(value, 0));
+    return NUMBER_FORMATTER.format(finiteNumber(value, 0));
   } catch {
-    return String(number(value, 0));
+    return String(finiteNumber(value, 0));
   }
 }
 
 export function formatPercent(value = 0) {
   try {
-    return `${PERCENT_FORMATTER.format(clamp(number(value, 0), 0, 100))} %`;
+    return `${PERCENT_FORMATTER.format(clamp(finiteNumber(value, 0), 0, 100))} %`;
   } catch {
-    return `${Math.round(clamp(number(value, 0), 0, 100))} %`;
+    return `${Math.round(clamp(finiteNumber(value, 0), 0, 100))} %`;
   }
 }
 
@@ -235,7 +221,7 @@ export function getMoneyFormatter(currency = "EUR") {
 }
 
 export function formatMoney(value = 0, currency = "EUR") {
-  const amount = number(value, 0);
+  const amount = finiteNumber(value, 0);
   const { code, formatter } = getMoneyFormatter(currency);
 
   if (formatter) {

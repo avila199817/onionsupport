@@ -33,6 +33,7 @@ import { createClientesCreateController } from "./clientes.create-controller.js"
 import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage } from "../../core/errors.js";
+import { coercedNumber } from "../../core/numbers.js";
 
 export const CLIENTES_MODULE_NAME = "clientes";
 export const CLIENTES_VIEW_NAME = "ClientesView";
@@ -64,12 +65,6 @@ let controllerSequence = 0;
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
-
-function number(value = 0, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
 
 function isAbortError(error = null) {
   return (
@@ -465,7 +460,7 @@ function createClientesController(host = null, initialContext = {}) {
     if (!isBrowser() || !root) return null;
     const scrollRoot = resolveInfiniteScrollRoot();
     const baseState = {
-      scrollTop: number(scrollRoot?.scrollTop, 0),
+      scrollTop: coercedNumber(scrollRoot?.scrollTop, 0),
     };
     const active = document.activeElement;
     if (!active || !root.contains(active)) {
@@ -530,7 +525,7 @@ function createClientesController(host = null, initialContext = {}) {
     if (!state || !root) return;
 
     const scrollRoot = resolveInfiniteScrollRoot();
-    if (scrollRoot) scrollRoot.scrollTop = number(state.scrollTop, 0);
+    if (scrollRoot) scrollRoot.scrollTop = coercedNumber(state.scrollTop, 0);
 
     let target = null;
     if (state.kind === "search") {

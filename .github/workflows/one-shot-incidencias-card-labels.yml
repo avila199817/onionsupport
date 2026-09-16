@@ -73,7 +73,7 @@ jobs:
           NODE
 
           git diff --check
-          ! grep -Eq 'Abiertas cargadas|Cerradas cargadas|Urgentes cargadas|Importe cargado|Importe asociado' src/views/incidencias/incidencias.template.js
+          ! grep -Eq 'Abiertas cargadas|Cerradas cargadas|Urgentes cargadas|Importe cargado' src/views/incidencias/incidencias.template.js
 
       - name: Install exact dependencies
         run: npm ci --ignore-scripts

@@ -36,6 +36,7 @@ import {
 } from "../usuarios/usuarios.api.js";
 import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { presentError } from "../../core/error-rules.js";
 
 const CLIENTES_CREATE_CONTROLLER_VERSION =
   "clientes.create-controller.v1.single-owner";
@@ -415,6 +416,9 @@ export function createClientesCreateController({
     } catch (error) {
       if (seq !== userSearchSeq || destroyed || !createModal.open) return [];
       createModal.userSearch.loading = false;
+      // This search calls /api/users, not /api/clientes: its codes belong to the
+      // Usuarios domain and are curated in the Usuarios unit, not here. Leaving it
+      // untouched keeps one domain per unit.
       createModal.userSearch.error = errorMessage(error, "No se pudieron buscar usuarios.", ERROR_MESSAGE_POLICIES.messageFirst);
       createModal.userSearch.results = [];
       scheduleRender();
@@ -502,6 +506,25 @@ export function createClientesCreateController({
     return true;
   }
 
+// POST /api/clientes answers with a code and no message either
+// (router/clientes/create_client_admin.js sends { ok:false, error:code, code }),
+// so before this list a missing fiscal name, an inactive user and an exhausted
+// client-number allocation all read as the same sentence.
+const CREATE_CLIENTE_ERROR_RULES = Object.freeze([
+  // No offline rule here on purpose: status 0 only means "no HTTP answer", which
+  // covers the network, a timeout, an abort AND any local throw. Claiming "sin
+  // conexion" would assert a cause we have not established, so an unknown cause
+  // falls through to the domain fallback, which is what it already did.
+  { codes: ["CLIENT_USER_ID_REQUIRED"], message: "Selecciona el usuario al que pertenece el cliente." },
+  { codes: ["CLIENT_FISCAL_NAME_REQUIRED"], message: "Indica el nombre fiscal del cliente." },
+  { codes: ["CLIENT_TYPE_INVALID"], message: "El tipo de cliente no es válido." },
+  { codes: ["CLIENT_USER_NOT_FOUND"], message: "Ese usuario ya no existe." },
+  { codes: ["CLIENT_USER_INACTIVE"], message: "Ese usuario está inactivo: actívalo antes de crearle un cliente." },
+  { codes: ["CLIENT_RELATION_CONFLICT", "USER_CLIENT_LINK_CONFLICT"], message: "Ese usuario ya tiene un cliente vinculado." },
+  { codes: ["CLIENT_ID_ALLOCATION_EXHAUSTED"], message: "No se pudo asignar número de cliente. Inténtalo en unos minutos." },
+  { codes: ["CLIENT_CREATE_ERROR"], message: "No se pudo crear el cliente. Inténtalo de nuevo." },
+]);
+
   async function submit(formNode = null) {
     if (destroyed || createModal.submitting || !isAdmin()) return false;
 
@@ -569,7 +592,7 @@ export function createClientesCreateController({
     } catch (error) {
       if (seq !== createSeq || destroyed) return false;
       createModal.submitting = false;
-      createModal.serverError = errorMessage(error, "No se pudo crear el cliente.", ERROR_MESSAGE_POLICIES.messageFirst);
+      createModal.serverError = presentError(error, CREATE_CLIENTE_ERROR_RULES, "No se pudo crear el cliente.");
       scheduleRender();
       try { showToast(createModal.serverError, "error"); } catch { /* noop */ }
       return false;

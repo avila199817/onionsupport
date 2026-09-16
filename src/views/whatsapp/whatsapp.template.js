@@ -19,6 +19,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 
 
 export const WHATSAPP_TEMPLATE_VERSION =
@@ -30,13 +31,8 @@ function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
 }
 
-function dateMs(value = "") {
-  const parsed = Date.parse(cleanText(value, ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function formatDateTime(value = "") {
-  const parsed = dateMs(value);
+  const parsed = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!parsed) return "—";
   try {
     return new Intl.DateTimeFormat("es-ES", {
@@ -51,7 +47,7 @@ function formatDateTime(value = "") {
 }
 
 function formatConversationTime(value = "") {
-  const parsed = dateMs(value);
+  const parsed = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!parsed) return "";
 
   const date = new Date(parsed);

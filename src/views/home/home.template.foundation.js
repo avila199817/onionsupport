@@ -3,6 +3,7 @@ import { escapeHtml } from "../../core/escape-html.js";
 import { isObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { clamp, finiteNumber } from "../../core/numbers.js";
+import { TIMESTAMP_POLICIES, toDate } from "../../core/dates.js";
 
 export { isObject, safeArray };
 export { cleanText, escapeHtml };
@@ -235,19 +236,8 @@ export function formatMoney(value = 0, currency = "EUR") {
   return `${amount.toFixed(2).replace(".", ",")} ${code}`;
 }
 
-export function toDate(value = "") {
-  if (!value) return null;
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
-
-  const time = typeof value === "number" ? value : Date.parse(value);
-  if (!Number.isFinite(time)) return null;
-
-  const date = new Date(time);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
 export function formatDate(value = "") {
-  const date = toDate(value);
+  const date = toDate(value, TIMESTAMP_POLICIES.epoch);
   if (!date) return "Sin fecha";
 
   try {

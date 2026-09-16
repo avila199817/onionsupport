@@ -18,9 +18,9 @@ import {
   safeImageSrc,
   safeRoute,
   statusKey,
-  toDate,
   visibleStatus,
 } from "./home.template.foundation.js";
+import { TIMESTAMP_POLICIES, toDate } from "../../core/dates.js";
 
 export function avatar(user = {}) {
   const image = safeImageSrc(user.avatarUrl);
@@ -161,7 +161,7 @@ export function panelLoadingRows(type = "activity", count = 4) {
 }
 
 export function freshness(updatedAt = "") {
-  const date = toDate(updatedAt);
+  const date = toDate(updatedAt, TIMESTAMP_POLICIES.epoch);
   if (!date) return "";
 
   return `

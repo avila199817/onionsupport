@@ -19,6 +19,7 @@ import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { clamp } from "../../core/numbers.js";
 import { labelKey } from "../../core/slug-key.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 
 export const FACTURAS_TEMPLATE_VERSION =
   "facturas.template.private.v7.admin-visual-parity";
@@ -246,28 +247,6 @@ const MONEY_FORMATTERS = new Map();
 const DATE_SHORT = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
 const DATE_TIME = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
-function toTimestamp(value = null) {
-  if (!value) return 0;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? 0 : value.getTime();
-  if (typeof value === "number" && Number.isFinite(value)) return value > 9999999999 ? value : value * 1000;
-
-  const raw = cleanText(value, "");
-  if (!raw) return 0;
-
-  const numeric = Number(raw);
-  if (Number.isFinite(numeric) && numeric > 0) return numeric > 9999999999 ? numeric : numeric * 1000;
-
-  const esMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
-  if (esMatch) {
-    const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = esMatch;
-    const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(ss));
-    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
-  }
-
-  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
-}
-
 function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
   const amount = number(value, NaN);
   const code = cleanText(currency, DEFAULT_CURRENCY).toUpperCase();
@@ -291,19 +270,19 @@ function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
 }
 
 function formatDateShort(value = null) {
-  const timestamp = toTimestamp(value);
+  const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.invoiceText);
   if (!timestamp) return "—";
   try { return DATE_SHORT.format(new Date(timestamp)); } catch { return "—"; }
 }
 
 function formatDateTime(value = null) {
-  const timestamp = toTimestamp(value);
+  const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.invoiceText);
   if (!timestamp) return "—";
   try { return DATE_TIME.format(new Date(timestamp)); } catch { return "—"; }
 }
 
 function formatRelativeDate(value = null) {
-  const timestamp = toTimestamp(value);
+  const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.invoiceText);
   if (!timestamp) return "Sin fecha";
   const diffMin = Math.round((timestamp - Date.now()) / 60000);
   const absMin = Math.abs(diffMin);
@@ -536,10 +515,10 @@ function getSortTimestamp(item = {}) {
   const raw = getRaw(item);
   return number(item?.meta?.updatedAtMs, 0) || number(item?.meta?.timestampMs, 0) ||
     number(raw?.meta?.updatedAtMs, 0) || number(raw?.meta?.timestampMs, 0) ||
-    toTimestamp(getUpdatedAt(item)) || toTimestamp(getCreatedAt(item)) || toTimestamp(raw?._ts) || 0;
+    toTimestamp(getUpdatedAt(item), TIMESTAMP_POLICIES.invoiceText) || toTimestamp(getCreatedAt(item), TIMESTAMP_POLICIES.invoiceText) || toTimestamp(raw?._ts, TIMESTAMP_POLICIES.invoiceText) || 0;
 }
 
-const getEmissionTimestamp = (item = {}) => toTimestamp(getCreatedAt(item)) || getSortTimestamp(item);
+const getEmissionTimestamp = (item = {}) => toTimestamp(getCreatedAt(item), TIMESTAMP_POLICIES.invoiceText) || getSortTimestamp(item);
 
 function hasPdf(item = {}) {
   const raw = getRaw(item);

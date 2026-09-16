@@ -41,6 +41,7 @@ import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { labelKey } from "../../core/slug-key.js";
+import { TIMESTAMP_POLICIES, toDate } from "../../core/dates.js";
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
   "facturas.template.modal.productivo.v4.admin-payment";
@@ -519,46 +520,11 @@ function formatPercent(
   return `${clean}%`;
 }
 
-function normalizeDateInput(
-  value = null
-) {
-  if (!value) {
-    return null;
-  }
-
-  if (
-    typeof value === "number" &&
-    Number.isFinite(value)
-  ) {
-    return (
-      value >
-      9_999_999_999
-        ? new Date(value)
-        : new Date(
-            value * 1000
-          )
-    );
-  }
-
-  const raw =
-    cleanText(value, "");
-
-  if (!raw) {
-    return null;
-  }
-
-  return new Date(
-    raw.includes("T")
-      ? raw
-      : `${raw}T00:00:00`
-  );
-}
-
 function formatDate(
   value = null
 ) {
   const date =
-    normalizeDateInput(value);
+    toDate(value, TIMESTAMP_POLICIES.invoiceDay);
 
   if (
     !date ||
@@ -587,7 +553,7 @@ function formatDateTime(
   value = null
 ) {
   const date =
-    normalizeDateInput(value);
+    toDate(value, TIMESTAMP_POLICIES.invoiceDay);
 
   if (
     !date ||
@@ -618,7 +584,7 @@ function formatRelativeDate(
   value = null
 ) {
   const date =
-    normalizeDateInput(value);
+    toDate(value, TIMESTAMP_POLICIES.invoiceDay);
 
   if (
     !date ||

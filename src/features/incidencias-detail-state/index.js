@@ -18,6 +18,7 @@ import { synchronizeAvatars } from "../avatar-system/index.js";
 import { persistedCommentId } from "../incidencias-comment-identity/index.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { safeObject, firstNonEmpty } from "../../core/objects.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 
 export const INCIDENCIAS_DETAIL_STATE_VERSION =
   "incidencias-detail-state.v6.controller-authoritative";
@@ -134,25 +135,16 @@ const array = (value) =>
     ? value
     : [];
 
-function timestamp(value = null) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value < 100000000000 ? value * 1000 : value;
-  }
-
-  const parsed = Date.parse(String(value || ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function eventTime(entry = {}) {
   const raw = safeObject(entry);
 
   return Math.max(
-    timestamp(raw.createdAt),
-    timestamp(raw.updatedAt),
-    timestamp(raw.uploadedAt),
-    timestamp(raw.date),
-    timestamp(raw.timestamp),
-    timestamp(raw.at)
+    toTimestamp(raw.createdAt, TIMESTAMP_POLICIES.epoch),
+    toTimestamp(raw.updatedAt, TIMESTAMP_POLICIES.epoch),
+    toTimestamp(raw.uploadedAt, TIMESTAMP_POLICIES.epoch),
+    toTimestamp(raw.date, TIMESTAMP_POLICIES.epoch),
+    toTimestamp(raw.timestamp, TIMESTAMP_POLICIES.epoch),
+    toTimestamp(raw.at, TIMESTAMP_POLICIES.epoch)
   );
 }
 
@@ -553,13 +545,13 @@ export function commentsFromDetail(detail = {}) {
     .map(normalizeComment)
     .filter(Boolean)
     .sort((a, b) =>
-      timestamp(b.createdAt) - timestamp(a.createdAt) ||
+      toTimestamp(b.createdAt, TIMESTAMP_POLICIES.epoch) - toTimestamp(a.createdAt, TIMESTAMP_POLICIES.epoch) ||
       b.sourceIndex - a.sourceIndex
     );
 }
 
 function formatDate(value = null) {
-  const at = timestamp(value);
+  const at = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!at) return "Fecha no disponible";
 
   try {
@@ -578,7 +570,7 @@ function formatDate(value = null) {
 export function commentSignature(comments = []) {
   return comments
     .map((comment) =>
-      [comment.id, comment.persistedCommentId, comment.author, comment.body, timestamp(comment.createdAt)].join("::")
+      [comment.id, comment.persistedCommentId, comment.author, comment.body, toTimestamp(comment.createdAt, TIMESTAMP_POLICIES.epoch)].join("::")
     )
     .join("||");
 }
@@ -722,10 +714,10 @@ function sortAttachments(root, detail = {}) {
     files.map((file, index) => [
       attachmentId(file, index),
       Math.max(
-        timestamp(file?.uploadedAt),
-        timestamp(file?.createdAt),
-        timestamp(file?.updatedAt),
-        timestamp(file?.date)
+        toTimestamp(file?.uploadedAt, TIMESTAMP_POLICIES.epoch),
+        toTimestamp(file?.createdAt, TIMESTAMP_POLICIES.epoch),
+        toTimestamp(file?.updatedAt, TIMESTAMP_POLICIES.epoch),
+        toTimestamp(file?.date, TIMESTAMP_POLICIES.epoch)
       ),
     ])
   );

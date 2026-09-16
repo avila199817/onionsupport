@@ -34,6 +34,7 @@ import { resolveAvatarPresentation } from "../../features/avatar-system/identity
 import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 
 /* =========================================================
    META / ACTIONS
@@ -497,69 +498,9 @@ function showToast(
    DATE / FORMAT
 ========================================================= */
 
-function toTimestamp(value = null) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return 0;
-  }
-
-  if (value instanceof Date) {
-    const ms =
-      value.getTime();
-
-    return Number.isFinite(ms)
-      ? ms
-      : 0;
-  }
-
-  if (
-    typeof value === "number" &&
-    Number.isFinite(value)
-  ) {
-    if (value <= 0) {
-      return 0;
-    }
-
-    return value >
-      9_999_999_999
-      ? value
-      : value * 1000;
-  }
-
-  const raw =
-    cleanText(value, "");
-
-  if (!raw) {
-    return 0;
-  }
-
-  const numeric =
-    Number(raw);
-
-  if (
-    Number.isFinite(numeric) &&
-    numeric > 0
-  ) {
-    return numeric >
-      9_999_999_999
-      ? numeric
-      : numeric * 1000;
-  }
-
-  const parsed =
-    Date.parse(raw);
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : 0;
-}
-
 function formatDate(value = null) {
   const timestamp =
-    toTimestamp(value);
+    toTimestamp(value, TIMESTAMP_POLICIES.epoch);
 
   if (!timestamp) {
     return "—";
@@ -585,7 +526,7 @@ function formatDate(value = null) {
 
 function formatRelativeDate(value = null) {
   const timestamp =
-    toTimestamp(value);
+    toTimestamp(value, TIMESTAMP_POLICIES.epoch);
 
   if (!timestamp) {
     return "Sin acceso";
@@ -1522,7 +1463,8 @@ function renderLifecycleSection(detail = {}) {
   ].filter(
     (event) =>
       toTimestamp(
-        event.value
+        event.value,
+        TIMESTAMP_POLICIES.epoch
       ) > 0
   );
 

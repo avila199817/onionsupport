@@ -218,22 +218,6 @@ function isPdfUrl(value = "") {
   );
 }
 
-function toTimestamp(value = null) {
-  if (!value) return 0;
-  if (typeof value === "number" && Number.isFinite(value)) return value > 9999999999 ? value : value * 1000;
-
-  const raw = cleanText(value, "");
-  if (!raw) return 0;
-
-  const numeric = Number(raw);
-  if (Number.isFinite(numeric) && numeric > 0) return numeric > 9999999999 ? numeric : numeric * 1000;
-
-  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
-  const time = date.getTime();
-
-  return Number.isFinite(time) ? time : 0;
-}
-
 function stableStringify(value) {
   if (value === null || value === undefined) return "";
   if (typeof value !== "object") return String(value);

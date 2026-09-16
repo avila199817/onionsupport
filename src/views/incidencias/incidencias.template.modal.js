@@ -29,6 +29,7 @@ import {
 } from "./incidencias.template.modal.impl.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 
 export {
   DETAIL_ACTIONS,
@@ -313,15 +314,6 @@ function commentKind(item = {}) {
   );
 }
 
-function timestamp(value = null) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value < 100000000000 ? value * 1000 : value;
-  }
-
-  const parsed = Date.parse(String(value || ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function normalizeComment(item = {}, index = 0) {
   const source = safeObject(item);
   const kind = commentKind(source);
@@ -417,13 +409,13 @@ export function getIncidenciasDetailComments(input = {}) {
 
   return [...unique.values()].sort(
     (a, b) =>
-      timestamp(b.createdAt) - timestamp(a.createdAt) ||
+      toTimestamp(b.createdAt, TIMESTAMP_POLICIES.epoch) - toTimestamp(a.createdAt, TIMESTAMP_POLICIES.epoch) ||
       b.sourceIndex - a.sourceIndex
   );
 }
 
 function formatCommentDate(value = null) {
-  const at = timestamp(value);
+  const at = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!at) return "Fecha no disponible";
 
   try {
@@ -447,7 +439,7 @@ function commentSignature(comments = []) {
         oneLine(comment.persistedCommentId, ""),
         oneLine(comment.author, ""),
         text(comment.body, ""),
-        timestamp(comment.createdAt),
+        toTimestamp(comment.createdAt, TIMESTAMP_POLICIES.epoch),
       ].join("::")
     )
     .join("||");

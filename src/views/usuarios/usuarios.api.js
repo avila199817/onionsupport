@@ -45,6 +45,7 @@ import { slugKey } from "../../core/slug-key.js";
 import { clamp } from "../../core/numbers.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage, errorStatus } from "../../core/errors.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 
 /* =========================================================
    META / CONFIG
@@ -417,62 +418,6 @@ function firstEmail(...values) {
   }
 
   return "";
-}
-
-function toTimestamp(value = null) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return 0;
-  }
-
-  if (value instanceof Date) {
-    const ms =
-      value.getTime();
-
-    return Number.isFinite(ms)
-      ? ms
-      : 0;
-  }
-
-  if (
-    typeof value === "number" &&
-    Number.isFinite(value)
-  ) {
-    if (value <= 0) return 0;
-
-    return value >
-      9_999_999_999
-      ? value
-      : value * 1000;
-  }
-
-  const raw =
-    cleanText(value, "");
-
-  if (!raw) return 0;
-
-  const numeric =
-    Number(raw);
-
-  if (
-    Number.isFinite(numeric) &&
-    numeric > 0
-  ) {
-    return numeric >
-      9_999_999_999
-      ? numeric
-      : numeric * 1000;
-  }
-
-  const parsed =
-    Date.parse(raw);
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : 0;
 }
 
 /* =========================================================
@@ -1096,13 +1041,15 @@ function looksLikeNeverActivated(
       firstNonEmpty(
         raw.activatedAt,
         null
-      )
+      ),
+      TIMESTAMP_POLICIES.epoch
     ) &&
     !toTimestamp(
       firstNonEmpty(
         raw.deactivatedAt,
         null
-      )
+      ),
+      TIMESTAMP_POLICIES.epoch
     ) &&
     !raw.deleted &&
     !raw.archived
@@ -1856,7 +1803,8 @@ export function normalizeUsuarioModel(
             updatedAt,
             lastLoginAt,
             createdAt
-          )
+          ),
+          TIMESTAMP_POLICIES.epoch
         ),
     },
   };
@@ -2020,7 +1968,8 @@ function dedupeUsuarios(
             b.lastActivityAt,
             b.lastLoginAt,
             b.createdAt
-          )
+          ),
+          TIMESTAMP_POLICIES.epoch
         ) -
         toTimestamp(
           firstNonEmpty(
@@ -2028,7 +1977,8 @@ function dedupeUsuarios(
             a.lastActivityAt,
             a.lastLoginAt,
             a.createdAt
-          )
+          ),
+          TIMESTAMP_POLICIES.epoch
         );
 
       if (diff !== 0) {
@@ -3351,7 +3301,8 @@ function toCacheUsuario(
             user.updatedAt,
             user.lastLoginAt,
             user.createdAt
-          )
+          ),
+          TIMESTAMP_POLICIES.epoch
         ),
     },
   };
@@ -5438,7 +5389,8 @@ export function computeUsuariosStats(
               current.lastLoginAt,
               current.lastAccessAt,
               null
-            )
+            ),
+            TIMESTAMP_POLICIES.epoch
           )
         ) {
           acc.withAccessCount += 1;

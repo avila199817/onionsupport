@@ -12,6 +12,7 @@ import {
 import { cleanText } from "../../core/presentation-text.js";
 import { safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 
 export const INCIDENCIAS_DETAIL_LIVE_SYNC_VERSION =
   "incidencias-detail-live-sync.v4.controller-signals";
@@ -50,15 +51,6 @@ let signalRefreshCount = 0;
 
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
-
-function timestamp(value = null) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value < 100000000000 ? value * 1000 : value;
-  }
-
-  const parsed = Date.parse(String(value || ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
 
 function currentRoot() {
   return host?.querySelector?.(ROOT) || null;
@@ -261,7 +253,7 @@ function attachmentDetailSignature(detail = {}) {
         ""
       ).toLowerCase(),
       Number(file?.size || file?.sizeBytes || 0),
-      timestamp(file?.uploadedAt || file?.createdAt || file?.updatedAt),
+      toTimestamp(file?.uploadedAt || file?.createdAt || file?.updatedAt, TIMESTAMP_POLICIES.epoch),
     ].join("::"))
     .join("||");
 }
@@ -285,7 +277,7 @@ function detailSignature(detail = {}) {
       ),
       ""
     ),
-    timestamp(detail?.lastActivityAt || detail?.updatedAt),
+    toTimestamp(detail?.lastActivityAt || detail?.updatedAt, TIMESTAMP_POLICIES.epoch),
     commentSignature(comments),
     attachmentDetailSignature(detail),
   ].join("###");

@@ -29,6 +29,7 @@ import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { nowIso, nowMs } from "../../core/clock.js";
 import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage, errorStatus } from "../../core/errors.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 
 export const HOME_API_VERSION =
   "home.api.domain-aggregator.v13-domain-counts";
@@ -60,7 +61,6 @@ const cacheState = {
 /* =========================================================
    BASICS
 ========================================================= */
-
 
 function number(value, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
@@ -454,11 +454,6 @@ async function loadDomain(domain = "home", loader = null) {
    DASHBOARD BUILDERS
 ========================================================= */
 
-function dateValue(value = "") {
-  const time = Date.parse(value);
-  return Number.isFinite(time) ? time : 0;
-}
-
 function ticketDisplayId(ticket = {}) {
   return safeId(
     firstNonEmpty(
@@ -553,7 +548,7 @@ function buildActivity({ incidencias = [], facturas = [] } = {}) {
 
   return [...ticketItems, ...invoiceItems]
     .sort((a, b) => {
-      const byDate = dateValue(b.date) - dateValue(a.date);
+      const byDate = toTimestamp(b.date, TIMESTAMP_POLICIES.epoch) - toTimestamp(a.date, TIMESTAMP_POLICIES.epoch);
       if (byDate !== 0) return byDate;
       return String(b.entityId || "").localeCompare(
         String(a.entityId || ""),

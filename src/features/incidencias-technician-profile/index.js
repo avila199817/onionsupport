@@ -30,7 +30,7 @@ import {
 } from "../avatar-system/index.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { safeObject, firstNonEmpty } from "../../core/objects.js";
-import { redactSecrets } from "../../core/redact.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
   "incidencias-technician-profile.v9-public-metrics-rating-ready";
@@ -158,18 +158,6 @@ function safeAvatarUrl(value = "") {
   } catch {
     return "";
   }
-}
-
-function safeError(error = null) {
-  return redactSecrets(cleanText(
-    firstNonEmpty(
-      error?.message,
-      error?.data?.message,
-      error?.payload?.message
-    ),
-    "No se pudo cargar el perfil del técnico."
-  ))
-    .slice(0, 240);
 }
 
 function number(value = null, fallback = null) {
@@ -1052,7 +1040,7 @@ async function loadProfile(trigger = null) {
     return true;
   } catch (error) {
     if (sequence !== requestSeq) return false;
-    paint(renderError(seed, safeError(error)));
+    paint(renderError(seed, errorMessage(error, "No se pudo cargar el perfil del técnico.", ERROR_MESSAGE_POLICIES.messageFirst).slice(0, 240)));
     return false;
   }
 }

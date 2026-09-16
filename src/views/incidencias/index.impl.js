@@ -92,6 +92,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { redactSecrets } from "../../core/redact.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
   "incidencias.index.extreme.v45-single-detail-authority";
@@ -259,21 +260,6 @@ function getNextSortOrder(
     normalizeSortOrder(value) === "asc"
       ? "desc"
       : "asc"
-  );
-}
-
-function safeError(
-  error = null,
-  fallback =
-    "No se pudieron cargar las incidencias."
-) {
-  return cleanText(
-    error?.message ||
-      error?.data?.message ||
-      error?.payload?.message ||
-      error?.response?.message ||
-      fallback,
-    fallback
   );
 }
 
@@ -3753,7 +3739,7 @@ async function load(options = {}) {
         return null;
       }
 
-      error = safeError(loadError);
+      error = errorMessage(loadError, "No se pudieron cargar las incidencias.", ERROR_MESSAGE_POLICIES.messageFirst);
       loading = false;
       refreshing = false;
       listQueryPending = false;
@@ -4007,10 +3993,7 @@ async function load(options = {}) {
       createModal.userSearch.empty = false;
 
       createModal.userSearch.error =
-        safeError(
-          searchError,
-          "No se pudo buscar usuarios."
-        );
+        errorMessage(searchError, "No se pudo buscar usuarios.", ERROR_MESSAGE_POLICIES.messageFirst);
 
       renderModals({
         immediate: true,
@@ -4523,10 +4506,7 @@ async function load(options = {}) {
       createModal.submitting = false;
 
       createModal.serverError =
-        safeError(
-          createError,
-          "No se pudo crear la incidencia."
-        );
+        errorMessage(createError, "No se pudo crear la incidencia.", ERROR_MESSAGE_POLICIES.messageFirst);
 
       renderModals({
         immediate: true,
@@ -4676,16 +4656,16 @@ async function load(options = {}) {
         return mergedDetail;
       } catch (detailError) {
         if (!requestIsCurrent()) return null;
-        detailRequestError = safeError(detailError, "No se pudo actualizar el detalle.");
+        detailRequestError = errorMessage(detailError, "No se pudo actualizar el detalle.", ERROR_MESSAGE_POLICIES.messageFirst);
         openingTicketId = "";
         detailModal.loading = false;
         if (local) {
           if (!silent) {
-            detailModal.feedbackMessage = safeError(detailError, "No se pudo actualizar el detalle.");
+            detailModal.feedbackMessage = errorMessage(detailError, "No se pudo actualizar el detalle.", ERROR_MESSAGE_POLICIES.messageFirst);
             detailModal.feedbackType = "error";
           }
         } else {
-          detailModal.error = safeError(detailError, "No se pudo abrir el detalle.");
+          detailModal.error = errorMessage(detailError, "No se pudo abrir el detalle.", ERROR_MESSAGE_POLICIES.messageFirst);
         }
         render({ skipModals: true });
         renderModals({ immediate: true });
@@ -5178,10 +5158,7 @@ async function load(options = {}) {
       }
 
       detailModal.feedbackMessage =
-        safeError(
-          updateError,
-          fallback
-        );
+        errorMessage(updateError, fallback, ERROR_MESSAGE_POLICIES.messageFirst);
 
       detailModal.feedbackType =
         "error";
@@ -5390,12 +5367,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       detailModal.operation = "";
       items = upsertByTicketId(items, nextDetail);
 
-      detailModal.feedbackMessage = safeError(
-        adminUpdateError,
-        reopened
-? "La incidencia se reabrió, pero no se pudieron guardar el resto de cambios."
-: "No se pudieron guardar los cambios administrativos."
-      );
+      detailModal.feedbackMessage = errorMessage(adminUpdateError, reopened ? "La incidencia se reabrió, pero no se pudieron guardar el resto de cambios." : "No se pudieron guardar los cambios administrativos.", ERROR_MESSAGE_POLICIES.messageFirst);
       detailModal.feedbackType = "error";
 
       render({ skipModals: true });
@@ -5615,10 +5587,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       detailModal.closeConfirmOpen = false;
       detailModal.discardConfirmOpen = false;
       detailModal.feedbackMessage =
-        safeError(
-          closeError,
-          "No se pudo cerrar la incidencia."
-        );
+        errorMessage(closeError, "No se pudo cerrar la incidencia.", ERROR_MESSAGE_POLICIES.messageFirst);
       detailModal.feedbackType =
         "error";
 
@@ -5834,10 +5803,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
         "";
 
       detailModal.feedbackMessage =
-        safeError(
-          attachmentError,
-          "No se pudo abrir el adjunto."
-        );
+        errorMessage(attachmentError, "No se pudo abrir el adjunto.", ERROR_MESSAGE_POLICIES.messageFirst);
 
       detailModal.feedbackType =
         "error";
@@ -5909,10 +5875,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
         "";
 
       detailModal.feedbackMessage =
-        safeError(
-          downloadError,
-          "No se pudo descargar el adjunto."
-        );
+        errorMessage(downloadError, "No se pudo descargar el adjunto.", ERROR_MESSAGE_POLICIES.messageFirst);
 
       detailModal.feedbackType =
         "error";
@@ -6200,10 +6163,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       detailModal.operation = "";
       detailModal.deletingAttachmentId = "";
       detailModal.feedbackMessage =
-        safeError(
-          deleteError,
-          "No se pudo eliminar el adjunto."
-        );
+        errorMessage(deleteError, "No se pudo eliminar el adjunto.", ERROR_MESSAGE_POLICIES.messageFirst);
       detailModal.feedbackType =
         "error";
 
@@ -6949,10 +6909,7 @@ async function loadMore(options = {}) {
         return false;
       }
 
-      incrementalError = safeError(
-        pageError,
-        "No se pudo cargar la siguiente página de incidencias."
-      );
+      incrementalError = errorMessage(pageError, "No se pudo cargar la siguiente página de incidencias.", ERROR_MESSAGE_POLICIES.messageFirst);
       renderWithFilteredItems();
       return false;
     } finally {

@@ -41,6 +41,9 @@ import {
 import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { nowMs } from "../../core/clock.js";
 import { redactSecrets } from "../../core/redact.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+
+const ERROR_FALLBACK = "No se pudo cargar el inicio.";
 
 export const HOME_INDEX_VERSION = "home.index.v13-persisted-onboarding";
 export const HOME_VIEW_VERSION = HOME_INDEX_VERSION;
@@ -97,23 +100,6 @@ function isDomNode(value = null) {
 /* No aplanar arrays: pueden ser datos válidos completos. */
 function hasContent(value = null) {
   return isObject(value) && Object.keys(value).length > 0;
-}
-
-function safeError(error = null, fallback = "No se pudo cargar el inicio.") {
-  const message = cleanText(
-    firstNonEmpty(
-      error?.message,
-      error?.data?.message,
-      error?.payload?.message,
-      error?.response?.message,
-      error?.error,
-      error?.code,
-      fallback
-    ),
-    fallback
-  );
-
-  return redactSecrets(cleanText(message, "")) || fallback;
 }
 
 /* =========================================================
@@ -490,7 +476,7 @@ function createHomeController(host = null, context = {}) {
         renderState
       );
     } catch (renderError) {
-      const message = safeError(renderError, "No se pudo pintar el inicio.");
+      const message = errorMessage(renderError, "No se pudo pintar el inicio.", ERROR_MESSAGE_POLICIES.messageFirst);
       return renderHtml(host, renderHomeErrorState(message), renderState);
     }
   }
@@ -512,7 +498,7 @@ function createHomeController(host = null, context = {}) {
 
     loading = false;
     refreshing = false;
-    error = safeError(message, "No se pudo cargar el inicio.");
+    error = errorMessage(message, ERROR_FALLBACK, ERROR_MESSAGE_POLICIES.messageFirst);
     lastRenderAt = nowMs();
 
     setHostFlags(host, {
@@ -580,7 +566,7 @@ function createHomeController(host = null, context = {}) {
 
       loading = false;
       refreshing = false;
-      error = safeError(loadError, "No se pudo cargar el inicio.");
+      error = errorMessage(loadError, ERROR_FALLBACK, ERROR_MESSAGE_POLICIES.messageFirst);
 
       if (hasContent(dashboard)) {
         render({
@@ -665,10 +651,7 @@ function createHomeController(host = null, context = {}) {
       if (destroyed || seq !== onboardingSeq) return null;
 
       onboardingLoaded = true;
-      onboardingError = safeError(
-        loadError,
-        "No se pudo consultar el estado de la guía."
-      );
+      onboardingError = errorMessage(loadError, "No se pudo consultar el estado de la guía.", ERROR_MESSAGE_POLICIES.messageFirst);
       render();
       return null;
     }
@@ -684,7 +667,7 @@ function createHomeController(host = null, context = {}) {
       return (await router.navigate(route, { source: SOURCE })) !== false;
     } catch (navigationError) {
       if (!destroyed) {
-        error = safeError(navigationError, "No se pudo abrir la vista.");
+        error = errorMessage(navigationError, "No se pudo abrir la vista.", ERROR_MESSAGE_POLICIES.messageFirst);
         render({ error });
       }
       return false;
@@ -743,10 +726,7 @@ function createHomeController(host = null, context = {}) {
       if (destroyed) return true;
 
       onboardingSaving = false;
-      onboardingError = safeError(
-        saveError,
-        "No se pudo guardar tu elección. Inténtalo de nuevo."
-      );
+      onboardingError = errorMessage(saveError, "No se pudo guardar tu elección. Inténtalo de nuevo.", ERROR_MESSAGE_POLICIES.messageFirst);
       render();
       return true;
     }

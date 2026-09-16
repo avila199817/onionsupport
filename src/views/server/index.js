@@ -26,18 +26,14 @@ import {
   SERVER_REQUEST_TIMEOUT_MS as API_REQUEST_TIMEOUT_MS,
   SERVER_AUTO_REFRESH_DEFAULT_MS,
   SERVER_ENDPOINTS,
-
   loadServerSnapshot as loadServerSnapshotApi,
   loadServerHealth as loadServerHealthApi,
   refreshServerSnapshot as refreshServerSnapshotApi,
   refreshServerHealth as refreshServerHealthApi,
-
   fetchServerReadinessRequest,
   fetchServerLivenessRequest,
-
   hydrateServerFromCache,
   clearServerCache,
-
   getServerSnapshotStore,
   getServerStateSnapshot as getServerApiStateSnapshot,
   getServerServices,
@@ -56,6 +52,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 import { clamp } from "../../core/numbers.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 
 /* =========================================================
@@ -146,27 +143,6 @@ function number(
   return Number.isFinite(parsed)
     ? parsed
     : fallback;
-}
-
-function safeError(
-  error = null,
-  fallback =
-    "No se pudo consultar el estado del servidor."
-) {
-  return cleanText(
-    firstNonEmpty(
-      error?.data?.message,
-      error?.payload?.message,
-      error?.response?.data
-        ?.message,
-      error?.response?.message,
-      error?.message,
-      error?.error,
-      error?.code,
-      fallback
-    ),
-    fallback
-  );
 }
 
 function cloneValue(
@@ -1201,7 +1177,7 @@ function createController(
         }
 
         state.error =
-          safeError(error);
+          errorMessage(error, "No se pudo consultar el estado del servidor.", ERROR_MESSAGE_POLICIES.payloadFirst);
 
         /*
           Conserva el último snapshot válido de la API.

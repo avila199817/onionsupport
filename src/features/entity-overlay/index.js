@@ -4,7 +4,8 @@ import { getRouteByViewKey } from "../../router/routes.js";
 import { createModalLifecycle, restoreModalFocus } from "./modal-lifecycle.js";
 import { inferEntityIntent, inferEntityIntentFromElement, normalizeEntityId, normalizeEntityType } from "./intent.js";
 import { ENTITY_STYLE_PATHS } from "./styles.generated.js";
-import { cleanText, renderDetailPending, safeError } from "./pending-view.js";
+import { cleanText, renderDetailPending} from "./pending-view.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 /* One session dispatches every entity detail, from Home, lists, relations and
    deeplinks. Domain controllers own rendering, requests and close policy. */
@@ -188,7 +189,7 @@ function renderOwnerPending(session, error = null) {
   session.error = error;
   host.dataset.entitySession = String(session.sequence);
   host.hidden = false;
-  host.innerHTML = renderDetailPending({ type: session.type, id: session.id, error: error && safeError(error) });
+  host.innerHTML = renderDetailPending({ type: session.type, id: session.id, error: error && errorMessage(error, "No se pudo cargar el detalle.", ERROR_MESSAGE_POLICIES.messageFirst).slice(0, 500) });
   modalLifecycle.activate({ opener: session.opener });
   host.querySelector(PANEL_SELECTOR)?.focus({ preventScroll: true });
   return true;

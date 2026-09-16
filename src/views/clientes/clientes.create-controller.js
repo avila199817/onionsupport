@@ -35,6 +35,7 @@ import {
   normalizeUsuarioModel,
 } from "../usuarios/usuarios.api.js";
 import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 export const CLIENTES_CREATE_CONTROLLER_VERSION =
   "clientes.create-controller.v1.single-owner";
@@ -48,22 +49,6 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-
-function safeError(error = null, fallback = "No se pudo crear el cliente.") {
-  return cleanText(
-    firstNonBlank(
-      error?.message,
-      error?.data?.message,
-      error?.payload?.message,
-      error?.response?.data?.message,
-      error?.response?.message,
-      error?.error,
-      error?.code,
-      fallback
-    ),
-    fallback
-  );
-}
 
 function nextFrame(callback) {
   if (!isBrowser() || typeof callback !== "function") return 0;
@@ -430,10 +415,7 @@ export function createClientesCreateController({
     } catch (error) {
       if (seq !== userSearchSeq || destroyed || !createModal.open) return [];
       createModal.userSearch.loading = false;
-      createModal.userSearch.error = safeError(
-        error,
-        "No se pudieron buscar usuarios."
-      );
+      createModal.userSearch.error = errorMessage(error, "No se pudieron buscar usuarios.", ERROR_MESSAGE_POLICIES.messageFirst);
       createModal.userSearch.results = [];
       scheduleRender();
       return [];
@@ -587,7 +569,7 @@ export function createClientesCreateController({
     } catch (error) {
       if (seq !== createSeq || destroyed) return false;
       createModal.submitting = false;
-      createModal.serverError = safeError(error, "No se pudo crear el cliente.");
+      createModal.serverError = errorMessage(error, "No se pudo crear el cliente.", ERROR_MESSAGE_POLICIES.messageFirst);
       scheduleRender();
       try { showToast(createModal.serverError, "error"); } catch { /* noop */ }
       return false;

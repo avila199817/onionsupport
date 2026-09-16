@@ -35,6 +35,7 @@ import renderWhatsAppInbox, {
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 
 export const WHATSAPP_VIEW_VERSION =
@@ -56,18 +57,6 @@ function normalizeSearch(value = "") {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
-}
-
-function errorText(error = null, fallback = "No se pudo completar la operación de WhatsApp.") {
-  return cleanText(
-    error?.data?.message ||
-      error?.payload?.message ||
-      error?.response?.message ||
-      error?.message ||
-      error?.code ||
-      fallback,
-    fallback
-  );
 }
 
 function showToast(message, type = "info") {
@@ -363,7 +352,7 @@ export function WhatsAppView(host = null, context = {}) {
       state.errorMeta = "";
       return meta;
     } catch (error) {
-      if (!destroyed) state.errorMeta = errorText(error, "No se pudo comprobar el canal.");
+      if (!destroyed) state.errorMeta = errorMessage(error, "No se pudo comprobar el canal.", ERROR_MESSAGE_POLICIES.payloadFirst);
       return null;
     } finally {
       if (!destroyed) {
@@ -423,7 +412,7 @@ export function WhatsAppView(host = null, context = {}) {
       return detail || null;
     } catch (error) {
       if (!destroyed && epoch === identityEpoch) {
-        state.errorIdentity = errorText(error, "No se pudo resolver la identidad Onion.");
+        state.errorIdentity = errorMessage(error, "No se pudo resolver la identidad Onion.", ERROR_MESSAGE_POLICIES.payloadFirst);
       }
       return null;
     } finally {
@@ -468,7 +457,7 @@ export function WhatsAppView(host = null, context = {}) {
       return state.messages;
     } catch (error) {
       if (!destroyed && epoch === messageEpoch && state.selectedConversationId === id) {
-        state.errorMessages = errorText(error, "No se pudo cargar el historial.");
+        state.errorMessages = errorMessage(error, "No se pudo cargar el historial.", ERROR_MESSAGE_POLICIES.payloadFirst);
         if (!silent) render();
       }
       return state.messages;
@@ -546,7 +535,7 @@ export function WhatsAppView(host = null, context = {}) {
       return state.conversations;
     } catch (error) {
       if (!destroyed && epoch === conversationEpoch) {
-        state.errorConversations = errorText(error, "No se pudo cargar la bandeja.");
+        state.errorConversations = errorMessage(error, "No se pudo cargar la bandeja.", ERROR_MESSAGE_POLICIES.payloadFirst);
         if (!silent) render();
       }
       return state.conversations;
@@ -607,7 +596,7 @@ export function WhatsAppView(host = null, context = {}) {
       return true;
     } catch (error) {
       if (!destroyed && epoch === sendEpoch) {
-        state.sendError = errorText(error, "No se pudo enviar el mensaje.");
+        state.sendError = errorMessage(error, "No se pudo enviar el mensaje.", ERROR_MESSAGE_POLICIES.payloadFirst);
         showToast(state.sendError, "error");
       }
       return false;

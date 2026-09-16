@@ -34,6 +34,7 @@ import {
   renderSignatureModal,
 } from "./correo.template.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 
 export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v6-canonical-user";
@@ -171,9 +172,7 @@ function safeLower(value = "") {
   return cleanText(value, "").toLocaleLowerCase("es-ES");
 }
 
-function errorMessage(error = null, fallback = "No se pudo completar la operación.") {
-  return cleanText(error?.message || error?.data?.message || error?.response?.message || error?.code, fallback);
-}
+const ERROR_FALLBACK = "No se pudo completar la operación.";
 
 function errorCode(error = null) {
   return cleanText(error?.code || error?.data?.code || error?.data?.error, "");
@@ -750,7 +749,7 @@ function createCorreoController(host, context = {}) {
         state.status = Object.freeze({ ...state.status, healthy: false });
         renderAccount();
       }
-      toast(errorMessage(error, "No se pudo comprobar Microsoft 365."), "error");
+      toast(errorMessage(error, "No se pudo comprobar Microsoft 365.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
     } finally {
       request.finish();
     }
@@ -808,7 +807,7 @@ function createCorreoController(host, context = {}) {
           window.location.assign(connection.authorizationUrl);
         } catch (connectError) {
           if (!request.isCurrent()) return;
-          toast(errorMessage(connectError, "No se pudo renovar el permiso Microsoft."), "error", 6000);
+          toast(errorMessage(connectError, "No se pudo renovar el permiso Microsoft.", ERROR_MESSAGE_POLICIES.messageFirst), "error", 6000);
         }
         return;
       }
@@ -822,7 +821,7 @@ function createCorreoController(host, context = {}) {
         state.status = Object.freeze({ ...state.status, healthy: false });
         renderAccount();
       }
-      toast(errorMessage(error, "No se pudo sincronizar Outlook."), "error");
+      toast(errorMessage(error, "No se pudo sincronizar Outlook.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
     } finally {
       request.finish();
     }
@@ -880,7 +879,7 @@ function createCorreoController(host, context = {}) {
       state.loadingMessages = false;
       state.loadingMore = false;
       renderList();
-      toast(errorMessage(error, "No se pudieron cargar los mensajes."), "error");
+      toast(errorMessage(error, "No se pudieron cargar los mensajes.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
     } finally {
       request.finish();
     }
@@ -948,7 +947,7 @@ function createCorreoController(host, context = {}) {
       state.loadingReader = false;
       state.selectedMessage = null;
       renderReaderRegion();
-      toast(errorMessage(error, "No se pudo abrir el mensaje."), "error");
+      toast(errorMessage(error, "No se pudo abrir el mensaje.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
     } finally {
       request.finish();
     }
@@ -965,7 +964,7 @@ function createCorreoController(host, context = {}) {
     } catch (error) {
       if (!operation.isCurrent()) return;
       state.busyAction = "";
-      toast(errorMessage(error, "No se pudo iniciar Microsoft OAuth."), "error");
+      toast(errorMessage(error, "No se pudo iniciar Microsoft OAuth.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
     } finally {
       operation.finish();
     }
@@ -1001,7 +1000,7 @@ function createCorreoController(host, context = {}) {
       renderAll();
       toast("Outlook desconectado.", "success");
     } catch (error) {
-      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo desconectar Outlook."), "error");
+      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo desconectar Outlook.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
     } finally {
       operation.finish();
     }
@@ -1157,8 +1156,8 @@ function createCorreoController(host, context = {}) {
       if (!operation.isCurrent()) return;
       setBusy("", operation);
       const status = form.querySelector("[data-correo-compose-status]");
-      if (status) status.textContent = errorMessage(error);
-      toast(errorMessage(error, "No se pudo enviar el correo."), "error", 6000);
+      if (status) status.textContent = errorMessage(error, ERROR_FALLBACK, ERROR_MESSAGE_POLICIES.messageFirst);
+      toast(errorMessage(error, "No se pudo enviar el correo.", ERROR_MESSAGE_POLICIES.messageFirst), "error", 6000);
     } finally {
       // Release only this operation's busy state, even if its form disappeared.
       setBusy("", operation, { paint: operation.isCurrent() });
@@ -1196,8 +1195,8 @@ function createCorreoController(host, context = {}) {
       if (!operation.isCurrent()) return;
       setBusy("", operation);
       const status = form.querySelector("[data-correo-compose-status]");
-      if (status) status.textContent = errorMessage(error);
-      toast(errorMessage(error, "No se pudo guardar el borrador."), "error");
+      if (status) status.textContent = errorMessage(error, ERROR_FALLBACK, ERROR_MESSAGE_POLICIES.messageFirst);
+      toast(errorMessage(error, "No se pudo guardar el borrador.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
     } finally {
       // Release only this operation's busy state, even if its form disappeared.
       setBusy("", operation, { paint: operation.isCurrent() });
@@ -1222,7 +1221,7 @@ function createCorreoController(host, context = {}) {
       }
       if (successText) toast(successText, "success", 2800);
     } catch (error) {
-      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo actualizar el mensaje."), "error");
+      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo actualizar el mensaje.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
     } finally {
       operation.finish();
     }
@@ -1250,7 +1249,7 @@ function createCorreoController(host, context = {}) {
       toast("Mensaje eliminado.", "success");
       if (removedSelection && operation.sameFolder() && state.messages[0]?.id) await openMessage(state.messages[0].id);
     } catch (error) {
-      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo eliminar el mensaje."), "error");
+      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo eliminar el mensaje.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
     } finally {
       operation.finish();
     }
@@ -1279,7 +1278,7 @@ function createCorreoController(host, context = {}) {
       toast("Mensaje movido.", "success");
       if (removedSelection && operation.sameFolder()) await loadWorkspace({ initial: false });
     } catch (error) {
-      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo mover el mensaje."), "error");
+      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo mover el mensaje.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
     } finally {
       operation.finish();
     }
@@ -1295,7 +1294,7 @@ function createCorreoController(host, context = {}) {
       await CorreoApi.downloadAttachment(messageId, attachmentId, apiOptions());
       toast("Adjunto descargado.", "success", 2500);
     } catch (error) {
-      toast(errorMessage(error, "No se pudo descargar el adjunto."), "error");
+      toast(errorMessage(error, "No se pudo descargar el adjunto.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
     } finally {
       button.disabled = false;
       button.classList.remove("is-loading");
@@ -1324,7 +1323,7 @@ function createCorreoController(host, context = {}) {
       toast("Borrador enviado.", "success");
       if (removedSelection && operation.sameFolder()) await loadMessages({ openFirst: true });
     } catch (error) {
-      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo enviar el borrador."), "error");
+      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo enviar el borrador.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
     } finally {
       operation.finish();
     }

@@ -27,7 +27,7 @@ Tres desacuerdos en la misma cabecera: los dos dominios pintan identidades de di
 ### Cambio
 
 - Facturas deja su variante propia y usa la compartida (`ui-detail-modal-avatar` + `ui-detail-modal-avatar-frame`), con los mismos atributos de identidad que ya usaba. Su hoja se queda **sin una sola regla** de avatar.
-- `detail-modal.css` deja de intentar dimensionar y recortar el marco: esas reglas eran letra muerta en el producto y fueron justo las que hicieron creer a un fixture incompleto que mandaba el shell. La autoridad estructural declara **el hueco**, no el dibujo.
+- `detail-modal.css` deja de intentar dimensionar y recortar el marco: esas reglas eran letra muerta en el producto y fueron justo las que hicieron creer a un fixture incompleto que mandaba el shell. La autoridad estructural declara **el hueco**, no el dibujo. (El marco conserva sus declaraciones de caja y tipografía, que `incidencias_comment_avatar_contract` fija desde la migración del viejo motor de gradientes; lo que se retira es tamaño, radio y recorte.)
 - El hueco deriva del mismo número que pinta el sistema de avatares: `--ui-detail-modal-avatar-size: var(--avatar-size-detail, 56px)`. Desaparecen los tamaños por anchura escritos a mano (58/54/46 px) y el token de radio, que ya no tenía consumidor.
 
 ### Resultado medido en el producto

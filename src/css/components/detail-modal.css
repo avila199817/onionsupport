@@ -216,9 +216,16 @@ min-inline-size: 0;
    Lo que esta autoridad declara es el HUECO: la columna del hero y la caja que lo reserva,
    con el mismo tamaño que el sistema de avatares va a pintar, para que el espacio esté
    ocupado antes de que llegue ninguna imagen y no haya salto al cargarla. */
-.ui-detail-modal-avatar {
+.ui-detail-modal-avatar,
+.ui-detail-modal-avatar-frame {
   display: grid;
   place-items: center;
+  font-size: var(--font-lg);
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-tight);
+}
+
+.ui-detail-modal-avatar {
   inline-size: var(--ui-detail-modal-avatar-size);
   block-size: var(--ui-detail-modal-avatar-size);
 }

@@ -359,7 +359,7 @@ function renderUnavailableCosts(costs = {}) {
   `;
 }
 
-export function renderCostObservability(input = {}) {
+function renderCostObservability(input = {}) {
   const costs = costSnapshot(input);
 
   if (costs.available !== true || !isObject(costs.currentMonth)) {

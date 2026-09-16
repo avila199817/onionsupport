@@ -325,6 +325,42 @@ function blocksEntityIntentFromElement(element = null) {
     "open-usuario", "open-user", "open-client", "open-ticket", "open-invoice"].includes(action);
 }
 
+/*
+  UN CONTENEDOR QUE DECLARA SU RUTA NO ES UN DISPARADOR.
+
+  `textId` existe para un disparador cuyo PROPIO texto nombra la entidad
+  ("Ver INC-2026-0001"). Aplicado a un contenedor, lee el texto de todo su
+  subárbol: la raíz de la vista de Incidencias lleva `data-route="/incidencias"`
+  como descriptor, así que un clic en cualquier hueco de la vista --el hero, la
+  cabecera de la lista, el `thead`, la zona de filtros-- resolvía tipo por la
+  ruta e identidad rascando el primer `INC-…` del listado entero, y abría una
+  incidencia que nadie había pedido.
+
+  Un texto sólo describe una intención cuando quien lo lleva es un disparador de
+  verdad: un enlace, un botón, algo con `role="button"`, un enlace de router o un
+  elemento que el teclado puede alcanzar. Un `<section>` descriptivo no lo es.
+*/
+const TRIGGER_SELECTOR = [
+  "a[href]",
+  "button",
+  "[role='button']",
+  "[role='link']",
+  "[role='menuitem']",
+  "[role='option']",
+  "[data-router-link]",
+  "[data-spa]",
+  "summary",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+function isTriggerElement(node = null) {
+  try {
+    return Boolean(node?.matches?.(TRIGGER_SELECTOR));
+  } catch {
+    return false;
+  }
+}
+
 export function inferEntityIntentFromElement(target = null) {
   const element = target?.nodeType === 3 ? target.parentElement : target;
   if (!element || typeof element.closest !== "function") return null;
@@ -384,7 +420,7 @@ export function inferEntityIntentFromElement(target = null) {
       attribute(node, "href"),
       ""
     ),
-    text: node.textContent || "",
+    text: isTriggerElement(node) ? node.textContent || "" : "",
     source: "dom",
   });
 }

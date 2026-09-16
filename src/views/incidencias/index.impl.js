@@ -8321,9 +8321,38 @@ async function loadMore(options = {}) {
     return true;
   }
 
+  /*
+    UN CAMBIO CONFIRMADO TAMBIÉN LLEGA AL DETALLE ABIERTO.
+
+    `onDomainChanged` es la autoridad de invalidación de la aplicación y ya la
+    escuchan la lista, la Home, la barra lateral, la superior y las cachés de
+    API. Pero el detalle no: la lista aplaza su recarga mientras hay un modal
+    delante --y hace bien, no debe moverse bajo el usuario--, y esa misma puerta
+    dejaba al modal sin enterarse de nada. Una fotografía de perfil confirmada
+    emite `usuarios`, la caché se invalida, y el detalle abierto seguía pintando
+    la imagen anterior hasta cerrarlo y volverlo a abrir.
+
+    Aplazar la LISTA y refrescar el DETALLE son dos efectos distintos: el
+    segundo relee su propio endpoint autoritativo con las guardas que ya tiene
+    `refreshDetail` (no toca un envío en curso, ni una confirmación de cierre,
+    descarte o borrado). No hay caché nueva, ni bus nuevo, ni parámetro en la
+    URL de la imagen.
+  */
+  function refreshOpenDetailForDomain() {
+    if (destroyed || !detailModal.open) return false;
+
+    void refreshDetail({
+      force: true,
+      silent: true,
+    });
+
+    return true;
+  }
+
   function bindDomainRefresh() {
     unsubscribeDomain = onDomainChanged((domain) => {
       if (!["incidencias", "usuarios"].includes(domain) || destroyed) return;
+      refreshOpenDetailForDomain();
       domainRefreshPending = true;
       queueMicrotask(flushDomainRefresh);
     });
@@ -8368,8 +8397,15 @@ async function loadMore(options = {}) {
 
       if (!detailOnly) {
         bindTarget(host);
-        bindDomainRefresh();
       }
+
+      /*
+        También el detalle suelto de la capa de entidad escucha el dominio: es
+        el único modo de que una foto confirmada llegue a un modal ya abierto.
+        `flushDomainRefresh` sigue descartando la recarga de lista cuando
+        `detailOnly`, así que esta suscripción no arrastra lógica de lista.
+      */
+      bindDomainRefresh();
       ensureModalHost();
       context.signal?.addEventListener?.("abort", onContextAbort, { once: true });
 

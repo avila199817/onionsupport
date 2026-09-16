@@ -235,10 +235,10 @@ function quarantineExistingModalHosts(
   activeHost = null
 ) {
   if (!isBrowserDocument(documentLike)) {
-    return 0;
+    return [];
   }
 
-  let quarantined = 0;
+  const quarantined = [];
 
   for (
     const current
@@ -247,11 +247,59 @@ function quarantineExistingModalHosts(
     ) || []
   ) {
     if (current !== activeHost && quarantineModalHost(current)) {
-      quarantined += 1;
+      quarantined.push(current);
     }
   }
 
   return quarantined;
+}
+
+/*
+  UNA LEASE QUE SE TOMA SE DEVUELVE.
+
+  Cuando una capa de detalle se abre sobre la ruta, supersede el host de la
+  ruta: queda `superseded`, inerte y fuera de pintura. Eso es correcto mientras
+  la capa vive. Al cerrarla, sin embargo, nadie devolvía la lease, y el host de
+  la ruta se quedaba en cuarentena para siempre: `ensureModalHost()` de la
+  implementación devuelve `null` ante un host `superseded`, así que «Nueva
+  incidencia» marcaba su estado como abierto y no pintaba nada. El botón parecía
+  muerto hasta recargar o cambiar de ruta -- que es lo que remonta la vista.
+
+  Devolver la lease NO reabre nada: deja el host de la ruta como estaba al
+  montar, activo y vacío, que es el estado en el que el alta funciona.
+*/
+function hasLiveModalLayer(documentLike = null, exceptHost = null) {
+  for (
+    const candidate
+    of documentLike?.querySelectorAll?.(MODAL_HOST_CANDIDATE_SELECTOR) || []
+  ) {
+    if (candidate === exceptHost) continue;
+    if (candidate.getAttribute("data-incidencias-modal-host") === "true") return true;
+  }
+
+  return false;
+}
+
+function restoreSupersededModalHost(
+  documentLike = null,
+  superseded = []
+) {
+  // Otra capa sigue viva: la lease todavía no vuelve a nadie.
+  if (hasLiveModalLayer(documentLike, null)) return false;
+
+  /*
+    Se devuelve al ÚLTIMO que quedó superado y sigue conectado. Un host cuyo
+    controller ya terminó su limpieza no está conectado --su propia frontera lo
+    retira--, así que nunca se reactiva una capa muerta, y con capas apiladas la
+    lease vuelve a la de debajo, no a la raíz.
+  */
+  for (let index = superseded.length - 1; index >= 0; index -= 1) {
+    const candidate = superseded[index];
+    if (!candidate?.isConnected) continue;
+    return activateModalHost(candidate);
+  }
+
+  return false;
 }
 
 /*
@@ -294,7 +342,7 @@ function createDedicatedModalHost({
     handle,
     ownerId,
     mode,
-    supersededCount: 0,
+    superseded: [],
   };
 }
 
@@ -428,7 +476,9 @@ async function mountIncidenciasOwner(host = null, context = {}) {
       onDetailRendered(detail) {
         // An empty staged route never supersedes the visible modal owner.
         if (detail.open || detail.createOpen) {
-          quarantineExistingModalHosts(documentLike, lease?.modalHost);
+          for (const superado of quarantineExistingModalHosts(documentLike, lease?.modalHost)) {
+            if (lease && !lease.superseded.includes(superado)) lease.superseded.push(superado);
+          }
           activateModalHost(lease?.modalHost);
         }
         if (detail.open) {
@@ -563,6 +613,16 @@ async function mountIncidenciasOwner(host = null, context = {}) {
       la frontera sigue siendo responsable de no dejar una capa huérfana.
     */
     lease?.handle.remove();
+
+    /*
+      Esta capa se va: devuelve la lease a quien superó al abrirse. La limpieza
+      corresponde a la instancia propietaria, así que cada capa sólo levanta la
+      cuarentena que impuso ella.
+    */
+    restoreSupersededModalHost(
+      documentLike,
+      lease?.superseded || []
+    );
 
     return destroyed;
   };

@@ -17,6 +17,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { incidenciaCategoryLabel, incidenciaPriorityLabel, incidenciaStatusLabel } from "./incidencias.options.js";
 import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, currencyFormatter, dateFormatter, formatDecimal } from "../../core/format.js";
 import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
 export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v35-visible-date-minute-precision-linked-invoice-row-total";
@@ -106,11 +107,6 @@ function firstUrl(...values) {
     if (url) return url;
   }
   return "";
-}
-
-function titleCaseLabel(v = "", fb = "General") {
-  const value = cleanText(v, fb).replace(/[_-]+/g, " ").toLocaleLowerCase("es-ES");
-  return value.replace(/(^|\s)([a-záéíóúüñ])/g, (_, prefix, letter) => `${prefix}${letter.toLocaleUpperCase("es-ES")}`);
 }
 
 /* =========================================================
@@ -344,6 +340,18 @@ function getCurrency(it = {}) {
    NORMALIZATION
 ========================================================= */
 
+/* LA LISTA AGRUPA; EL DOMINIO NOMBRA.
+ *
+ * Estos mapas no son una segunda traducción de la taxonomía: son el modelo de agrupación de
+ * la lista, que necesita cinco cajones (abierta, pendiente, en proceso, resuelta, cerrada) y
+ * tres prioridades para colorear filas, contar pestañas y filtrar. Sustituirlos por
+ * incidenciaStatusLabel() degradaría lo que hoy se lee bien: `in_progress` pasaría de
+ * «En proceso» a «Abierta» y `archived` de «Cerrada» a «Archived».
+ *
+ * Lo que sí es de la autoridad de dominio es NOMBRAR: la categoría siempre, y el estado o la
+ * prioridad cuando la lista no reconoce el valor. Hasta ahora ese hueco enseñaba el token del
+ * backend tal cual —«awaiting_customer», «trivial»— en medio de una columna en castellano.
+ */
 const STATUS_MAP = Object.freeze({
   open: "open", opened: "open", abierta: "open", abierto: "open",
   pending: "pending", pendiente: "pending", new: "pending", nueva: "pending", nuevo: "pending",
@@ -371,7 +379,7 @@ function statusKey(v = "") {
 }
 function statusLabel(v = "") {
   const normalized = statusKey(v);
-  return STATUS_LABELS[normalized] || cleanText(v, "Abierta");
+  return STATUS_LABELS[normalized] || incidenciaStatusLabel(v, "Abierta");
 }
 function priorityKey(it = {}) {
   const k = slugKey(getPriorityRaw(it) || "medium");
@@ -379,7 +387,7 @@ function priorityKey(it = {}) {
 }
 function priorityLabel(it = {}) {
   const normalized = priorityKey(it);
-  return PRIORITY_LABELS[normalized] || normalized;
+  return PRIORITY_LABELS[normalized] || incidenciaPriorityLabel(getPriorityRaw(it), "Media");
 }
 const isOpen = (it = {}) => OPEN_STATUS_KEYS.has(statusKey(getStatusRaw(it)));
 const isClosed = (it = {}) => CLOSED_STATUS_KEYS.has(statusKey(getStatusRaw(it)));
@@ -463,7 +471,7 @@ function itemMatchesFilter(it = {}, filter = "all") {
 const ITEM_TEXT_CACHE = new WeakMap();
 function itemText(it = {}) {
   if (isObject(it) && ITEM_TEXT_CACHE.has(it)) return ITEM_TEXT_CACHE.get(it);
-  const value = searchKey([getId(it), getSubject(it), getDesc(it), getClientName(it), getClientEmail(it), getAssignedName(it), getAssignedEmail(it), getCategory(it), statusLabel(getStatusRaw(it)), priorityLabel(it)].join(" "));
+  const value = searchKey([getId(it), getSubject(it), getDesc(it), getClientName(it), getClientEmail(it), getAssignedName(it), getAssignedEmail(it), getCategory(it), incidenciaCategoryLabel(getCategory(it)), statusLabel(getStatusRaw(it)), priorityLabel(it)].join(" "));
   if (isObject(it)) ITEM_TEXT_CACHE.set(it, value);
   return value;
 }
@@ -755,7 +763,7 @@ function renderRow(it = {}, vm = {}) {
           <div class="incidencias-main-copy">
             <div class="incidencias-ticket-line">
               <span class="incidencias-ticket-id">${escapeHtml(id || "Sin ID")}</span>
-              <span class="incidencias-category-pill">${escapeHtml(titleCaseLabel(getCategory(it), "General"))}</span>
+              <span class="incidencias-category-pill">${escapeHtml(incidenciaCategoryLabel(getCategory(it)))}</span>
             </div>
             <div class="incidencias-ticket-subject">${escapeHtml(getSubject(it))}</div>
             <div class="incidencias-ticket-description">${escapeHtml(getDesc(it) || "Sin descripción.")}</div>

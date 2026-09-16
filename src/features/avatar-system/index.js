@@ -968,6 +968,51 @@ function avatarImagesInside(host = null) {
   });
 }
 
+/*
+  UN ENVOLTORIO NO ES UN AVATAR.
+
+  La cabecera de detalle reserva el hueco con una caja (`ui-detail-modal-avatar`)
+  y dentro pinta el host real (`…-avatar-frame`). Ambos nombres casan con el
+  patrón de clase de host, así que el envoltorio se adoptaba también como host:
+  como la imagen pertenece al marco, el envoltorio se quedaba SIN imagen y el
+  sistema le declaraba estado `fallback`. Y `fallback` en un ANTECESOR activa la
+  regla de `guardrails`
+
+      :where([data-avatar-system="true"][data-avatar-state="fallback"]
+             [data-avatar-image="true"]) { display: none }
+
+  que oculta la imagen del marco de dentro. Con `loading="lazy"`, una imagen
+  oculta con `display:none` no se descarga nunca, así que el marco se quedaba en
+  `loading` para siempre: círculo con iniciales o vacío, y la fotografía real no
+  aparecía jamás aunque la lista sí la mostrara.
+
+  Un nodo que contiene otro host gestionado no declara estado: manda el de
+  dentro. Y si el sistema ya le había puesto estado por error, se lo retira.
+*/
+function containsManagedAvatarHost(host = null) {
+  if (!isElement(host)) return false;
+
+  for (const candidate of host.querySelectorAll?.(HOST_QUERY) || []) {
+    if (candidate === host || isImage(candidate)) continue;
+    if (isOptedOut(candidate)) continue;
+    if (isLikelyAvatarHost(candidate)) return true;
+  }
+
+  return false;
+}
+
+function releaseWrapperState(host = null) {
+  if (!isElement(host)) return false;
+
+  removeAttribute(host, "data-avatar-state");
+  removeAttribute(host, "data-avatar-state-reason");
+
+  setClass(host, "is-avatar-loading", false);
+  setClass(host, "is-avatar-error", false);
+
+  return false;
+}
+
 export function synchronizeAvatarHost(host = null, preferredImage = null) {
   if (!isElement(host) || isOptedOut(host)) return false;
 
@@ -977,6 +1022,8 @@ export function synchronizeAvatarHost(host = null, preferredImage = null) {
     : images[0] || null;
 
   if (!image) {
+    if (containsManagedAvatarHost(host)) return releaseWrapperState(host);
+
     return applyHostState(host, null, "fallback", "no-image");
   }
 

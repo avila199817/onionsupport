@@ -256,20 +256,38 @@ function actionFromNode(node = null) {
   );
 }
 
+/*
+  EL TRAZO VIAJA CON EL ICONO.
+
+  Este registro nació para los nodos .fpc-*, cuya hoja les da fill, stroke y
+  grosor (style.css). El botón de reintento, en cambio, se inyecta en el pie del
+  detalle de Facturas como .facturas-detail-btn-icon, donde la única regla
+  aplicable fija tamaño y no pintura: con `svg:not([fill]) { fill: none }` del
+  reset y el stroke por defecto en `none`, el icono ocupaba sus 16×16 px sin
+  pintar un solo trazo. Los atributos de presentación ceden ante cualquier regla
+  CSS, así que la hoja .fpc-* sigue mandando donde ya mandaba y el icono se
+  pinta a sí mismo donde nadie lo pinta.
+*/
+const SVG_ATTRS =
+  `viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+
 function icon(name = "check") {
   if (name === "mail") {
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.8 5.5h16.4v13H3.8z"/><path d="m4.6 6.5 7.4 6 7.4-6"/></svg>`;
+    return `<svg ${SVG_ATTRS}><path d="M3.8 5.5h16.4v13H3.8z"/><path d="m4.6 6.5 7.4 6 7.4-6"/></svg>`;
   }
   if (name === "file") {
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.8h8l4 4V21H6z"/><path d="M14 2.8V7h4"/><path d="M9 12h6M9 16h6"/></svg>`;
+    return `<svg ${SVG_ATTRS}><path d="M6 2.8h8l4 4V21H6z"/><path d="M14 2.8V7h4"/><path d="M9 12h6M9 16h6"/></svg>`;
   }
   if (name === "close") {
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>`;
+    return `<svg ${SVG_ATTRS}><path d="m6 6 12 12M18 6 6 18"/></svg>`;
   }
   if (name === "warning") {
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.8 20h18.4z"/><path d="M12 9v4.5M12 17h.01"/></svg>`;
+    return `<svg ${SVG_ATTRS}><path d="M12 3 2.8 20h18.4z"/><path d="M12 9v4.5M12 17h.01"/></svg>`;
   }
-  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.2 4.2L19 7"/></svg>`;
+  if (name === "star") {
+    return `<svg ${SVG_ATTRS}><path d="M12 2.6 14.23 9.18 21.18 9.27 15.61 13.42 17.67 20.06 12 16.05 6.33 20.06 8.39 13.42 2.82 9.27 9.77 9.18Z"/></svg>`;
+  }
+  return `<svg ${SVG_ATTRS}><path d="m5 12.5 4.2 4.2L19 7"/></svg>`;
 }
 
 function renderSummary(factura = {}) {
@@ -602,6 +620,50 @@ async function loadReviews(request = false) {
   }
 }
 
+/*
+  UNA SOLA LECTURA DE LA FINALIZACIÓN PINTA EL BOTÓN.
+
+  El botón de reintento se creaba con una expresión y se actualizaba con otra:
+  la creación ignoraba el estado `uncertain` y la actualización sólo reescribía
+  el texto, dejando el icono y el nombre accesible del estado anterior. Una
+  factura que terminaba con el detalle abierto acababa anunciándose como
+  «Finalizar factura pagada» mientras el usuario leía «Valoraciones».
+*/
+function retryPresentation(fin = {}) {
+  if (fin.completed) {
+    return {
+      label: "Valoraciones",
+      icon: "star",
+      title: "Consultar las valoraciones del servicio",
+      ariaLabel: "Consultar valoraciones",
+    };
+  }
+
+  return {
+    label: fin.processing ? "Finalizando…" : fin.uncertain ? "Consultar envío" : "Finalizar factura",
+    icon: "check",
+    title: "Completar el PDF definitivo pagado y su envío",
+    ariaLabel: "Finalizar factura pagada",
+  };
+}
+
+function applyRetryPresentation(button = null, fin = {}) {
+  if (!button) return false;
+
+  const presentation = retryPresentation(fin);
+  const label = button.querySelector("[data-fpc-retry-label='true']");
+  const iconHost = button.querySelector("[data-fpc-retry-icon='true']");
+
+  if (label && label.textContent !== presentation.label) label.textContent = presentation.label;
+  if (iconHost && iconHost.dataset.fpcRetryIconName !== presentation.icon) {
+    iconHost.dataset.fpcRetryIconName = presentation.icon;
+    iconHost.innerHTML = icon(presentation.icon);
+  }
+  button.title = presentation.title;
+  button.setAttribute("aria-label", presentation.ariaLabel);
+  return true;
+}
+
 async function reconcileRetryAction() {
   reconcileFrame = 0;
 
@@ -647,9 +709,7 @@ async function reconcileRetryAction() {
       retry.dataset.facturaId = id;
       retry.disabled = fin.processing;
       retry.setAttribute("aria-disabled", fin.processing ? "true" : "false");
-      const label = retry.querySelector("span:last-child");
-      const retryLabel = fin.completed ? "Valoraciones" : fin.processing ? "Finalizando…" : fin.uncertain ? "Consultar envío" : "Finalizar factura";
-      if (label && label.textContent !== retryLabel) label.textContent = retryLabel;
+      applyRetryPresentation(retry, fin);
       return true;
     }
 
@@ -660,11 +720,10 @@ async function reconcileRetryAction() {
     button.dataset.facturasAction = ACTION;
     button.dataset.facturaId = id;
     button.dataset.fpcRetryAction = "true";
-    button.title = fin.completed ? "Consultar las valoraciones del servicio" : "Completar el PDF definitivo pagado y su envío";
-    button.setAttribute("aria-label", fin.completed ? "Consultar valoraciones" : "Finalizar factura pagada");
     button.disabled = fin.processing;
     button.setAttribute("aria-disabled", fin.processing ? "true" : "false");
-    button.innerHTML = `<span class="facturas-detail-btn-icon" aria-hidden="true">${icon("check")}</span><span>${fin.completed ? "Valoraciones" : fin.processing ? "Finalizando…" : "Finalizar factura"}</span>`;
+    button.innerHTML = `<span class="facturas-detail-btn-icon" data-fpc-retry-icon="true" aria-hidden="true"></span><span data-fpc-retry-label="true"></span>`;
+    applyRetryPresentation(button, fin);
 
     actions.append(button);
     return true;

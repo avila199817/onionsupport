@@ -86,12 +86,12 @@ assert.match(httpSource, /Autoridad: los códigos\s+que emite el backend en conf
 // Login: el bloqueo temporal (423 ACCOUNT_TEMPORARILY_LOCKED + lockUntil) tiene mensaje propio.
 assert.match(
   loginSource,
-  /if \(status === 423 \|\| code\.includes\("LOCKED"\)\) \{/u,
-  "authErrorMessage debe tratar 423/LOCKED antes del 401 genérico"
+  /\{ statuses: \[423\], codeIncludes: \["LOCKED"\], message: lockedMessage \}/u,
+  "authErrorMessage debe tratar 423/LOCKED como regla propia antes del 401 genérico"
 );
 assert.ok(
-  loginSource.indexOf('if (status === 423 || code.includes("LOCKED")) {') <
-    loginSource.indexOf('status === 401 ||'),
+  loginSource.indexOf('{ statuses: [423], codeIncludes: ["LOCKED"]') <
+    loginSource.indexOf('{ statuses: [401], codeIncludes: ["INVALID", "UNAUTHORIZED"]'),
   "el bloqueo temporal se evalúa antes que credenciales inválidas"
 );
 assert.match(loginSource, /error\?\.payload\?\.lockUntil/u, "el mensaje usa lockUntil del payload del backend");

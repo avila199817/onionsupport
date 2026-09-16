@@ -12,7 +12,8 @@ const sourcePaths = new Set([
   ...FEATURES.map((name) => `/src/features/${name}/index.js`),
   "/src/core/dom-mutations.js", "/src/core/async-scope.js", "/src/core/presentation-text.js", "/src/core/objects.js", "/src/core/arrays.js",
   // the error extraction authority and what it imports (redaction over config)
-  "/src/core/errors.js", "/src/core/redact.js", "/src/core/config.js",
+  "/src/core/errors.js",
+  "/src/core/error-rules.js", "/src/core/redact.js", "/src/core/config.js",
 ]);
 const mocks = new Map([
   ["/src/core/index.js", `

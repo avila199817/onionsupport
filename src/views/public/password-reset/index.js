@@ -42,6 +42,7 @@ import createPasswordResetTemplate from "./template.js";
 import { cleanText } from "../../../core/presentation-text.js";
 import { isObject, isFunction } from "../../../core/objects.js";
 import { errorCode, errorStatus } from "../../../core/errors.js";
+import { presentError } from "../../../core/error-rules.js";
 
 export const PASSWORD_RESET_VIEW_VERSION =
   "password-reset.view.public.controller.v3-production";
@@ -1658,124 +1659,37 @@ function applyErrors(
    ERROR NORMALIZATION
 ========================================================= */
 
+const RESET_TOKEN_UNAVAILABLE_CODES = Object.freeze([
+  "TOKEN_EXPIRED",
+  "TOKEN_INVALID_OR_EXPIRED",
+  "RESET_TOKEN_INVALID_OR_EXPIRED",
+  "RESET_TOKEN_ALREADY_USED_OR_STALE",
+]);
+
 function tokenIsUnavailable(error = null) {
-  const code = errorCode(error);
   const status = errorStatus(error, 0);
-  return status === 401 || status === 410 ||
-    /^(?:RESET_)?TOKEN_(?:EXPIRED|INVALID|INVALID_OR_EXPIRED|ALREADY_USED)$/.test(code);
+  return status === 401 || status === 410 || RESET_TOKEN_UNAVAILABLE_CODES.includes(errorCode(error));
 }
+
+const RESET_ERROR_RULES = Object.freeze([
+  { statuses: [410], message: "El enlace de recuperación ha caducado." },
+  { codes: ["RESET_TOKEN_ALREADY_USED_OR_STALE"], when: ({ status, code }) => status === 409 && code.includes("TOKEN"), message: "Este enlace de recuperación ya ha sido utilizado." },
+  { codes: ["ACCOUNT_NOT_ACTIVATED"], message: "Esta cuenta todavía no está activada. Usa el enlace de activación recibido por correo." },
+  { codes: ["PASSWORD_REUSED"], message: "La nueva contraseña no puede ser igual a la actual." },
+  { codes: ["WEAK_PASSWORD", "PASSWORD_TOO_LONG"], message: AUTH_PASSWORD_POLICY_HELP },
+  { codes: ["PASSWORD_MISMATCH"], message: "Las contraseñas no coinciden." },
+  { statuses: [401], codeIncludes: ["TOKEN", "EXPIRED"], message: "El enlace no es válido o ha caducado." },
+  { statuses: [403], message: "No se puede completar esta solicitud. Contacta con Onion Support si necesitas ayuda." },
+  { minStatus: 500, message: "El servidor no respondió correctamente. Inténtalo de nuevo." },
+  { statuses: [429], codeIncludes: ["RATE_LIMIT"], message: "Has realizado demasiados intentos. Espera unos minutos y vuelve a intentarlo." },
+  { offline: true, codeIncludes: ["NETWORK", "TIMEOUT"], message: "No hemos podido conectar. Comprueba tu conexión y vuelve a intentarlo." },
+]);
 
 function authErrorMessage(
   error = null,
-  fallback =
-    "No se pudo completar la operación."
+  fallback = "No se pudo completar la operación."
 ) {
-  const status =
-    errorStatus(error, 0);
-
-  const code =
-    errorCode(error);
-
-  if (
-    code ===
-    "RESET_TOKEN_EXPIRED" ||
-    status === 410
-  ) {
-    return (
-      "El enlace de recuperación ha caducado."
-    );
-  }
-
-  if (
-    code ===
-      "RESET_TOKEN_ALREADY_USED" ||
-    status === 409 &&
-      code.includes(
-        "TOKEN"
-      )
-  ) {
-    return (
-      "Este enlace de recuperación ya ha sido utilizado."
-    );
-  }
-
-  if (
-    code ===
-    "ACCOUNT_NOT_ACTIVATED"
-  ) {
-    return (
-      "Esta cuenta todavía no está activada. Usa el enlace de activación recibido por correo."
-    );
-  }
-
-  if (
-    code ===
-    "PASSWORD_REUSED"
-  ) {
-    return (
-      "La nueva contraseña no puede ser igual a la actual."
-    );
-  }
-
-  if (
-    code ===
-      "WEAK_PASSWORD" ||
-    code ===
-      "PASSWORD_TOO_LONG"
-  ) {
-    return (
-      AUTH_PASSWORD_POLICY_HELP
-    );
-  }
-
-  if (
-    code ===
-      "PASSWORD_MISMATCH"
-  ) {
-    return (
-      "Las contraseñas no coinciden."
-    );
-  }
-
-  if (
-    status === 401 ||
-    code.includes(
-      "TOKEN"
-    ) ||
-    code.includes(
-      "EXPIRED"
-    )
-  ) {
-    return (
-      "El enlace no es válido o ha caducado."
-    );
-  }
-
-  if (
-    status === 403
-  ) {
-    return (
-      "No se puede completar esta solicitud. Contacta con Onion Support si necesitas ayuda."
-    );
-  }
-
-  if (
-    status >= 500
-  ) {
-    return (
-      "El servidor no respondió correctamente. Inténtalo de nuevo."
-    );
-  }
-
-  if (status === 429 || code.includes("RATE_LIMIT")) {
-    return "Has realizado demasiados intentos. Espera unos minutos y vuelve a intentarlo.";
-  }
-
-  if (!status || code.includes("NETWORK") || code.includes("TIMEOUT")) {
-    return "No hemos podido conectar. Comprueba tu conexión y vuelve a intentarlo.";
-  }
-
-  return fallback;
+  return presentError(error, RESET_ERROR_RULES, fallback);
 }
 
 /* =========================================================

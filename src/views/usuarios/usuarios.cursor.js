@@ -25,10 +25,10 @@ import { errorCode } from "../../core/errors.js";
 export const USUARIOS_CURSOR_VERSION =
   "usuarios.cursor.v3.employee-directory-boundary";
 
-export const USUARIOS_CURSOR_ENDPOINT = "/api/users";
+const USUARIOS_CURSOR_ENDPOINT = "/api/users";
 export const USUARIOS_CURSOR_PAGE_SIZE = 50;
-export const USUARIOS_CURSOR_MAX_PAGE_SIZE = 200;
-export const USUARIOS_CURSOR_TIMEOUT = 20_000;
+const USUARIOS_CURSOR_MAX_PAGE_SIZE = 200;
+const USUARIOS_CURSOR_TIMEOUT = 20_000;
 
 /*
   Empleados reutiliza el usuario interno con rol administrativo. Hasta que el
@@ -53,7 +53,7 @@ const INTERNAL_EMPLOYEE_MARKERS = new Set([
 ]);
 
 
-export function isInternalEmployeeUsuario(item = {}) {
+function isInternalEmployeeUsuario(item = {}) {
   const source = safeObject(item);
 
   if (
@@ -96,7 +96,7 @@ export function isInternalEmployeeUsuario(item = {}) {
   return audienceMarkers.some((marker) => INTERNAL_EMPLOYEE_MARKERS.has(marker));
 }
 
-export function filterUsuariosDirectoryItems(items = []) {
+function filterUsuariosDirectoryItems(items = []) {
   return safeArray(items).filter((item) => !isInternalEmployeeUsuario(item));
 }
 
@@ -170,7 +170,7 @@ function normalizeStatusFilter(value = "all") {
     : "all";
 }
 
-export function buildUsuariosCursorQuery({
+function buildUsuariosCursorQuery({
   cursor = "",
   limit = USUARIOS_CURSOR_PAGE_SIZE,
   search = "",

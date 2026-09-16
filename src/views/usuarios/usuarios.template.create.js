@@ -57,14 +57,11 @@ import { presentError } from "../../core/error-rules.js";
    META / CONSTANTS
 ========================================================= */
 
-export const USUARIOS_CREATE_MODAL_VERSION =
+const USUARIOS_CREATE_MODAL_VERSION =
   "usuarios.create.modal.backend-contract.v3.activation-flow";
 
 export const USUARIOS_CREATE_ENDPOINT =
   API_CREATE_ENDPOINT;
-
-export const USUARIOS_CREATE_API_VERSION =
-  USUARIOS_API_VERSION;
 
 const ROOT_ID = "usuarios-create-modal-root";
 const PANEL_ID = "usuarios-create-modal-panel";
@@ -409,7 +406,7 @@ function showToast(
    VALIDATION / PAYLOAD
 ========================================================= */
 
-export function validateCreateUsuarioForm(
+function validateCreateUsuarioForm(
   form = {}
 ) {
   const current =
@@ -524,7 +521,7 @@ export function validateCreateUsuarioForm(
   };
 }
 
-export function buildCreateUsuarioPayload(
+function buildCreateUsuarioPayload(
   form = {}
 ) {
   const validation =

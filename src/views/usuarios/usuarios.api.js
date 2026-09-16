@@ -74,8 +74,8 @@ export const USUARIOS_FETCH_LIMIT = 250;
 export const USUARIOS_MAX_LIMIT = 500;
 export const USUARIOS_MAX_PAGES = 20;
 
-export const USUARIOS_DEFAULT_SORT_BY = "updatedAt";
-export const USUARIOS_DEFAULT_SORT_DIR = "DESC";
+const USUARIOS_DEFAULT_SORT_BY = "updatedAt";
+const USUARIOS_DEFAULT_SORT_DIR = "DESC";
 
 const CACHE_SCHEMA_VERSION = 5;
 
@@ -2065,7 +2065,7 @@ function statusBucket(
    ENDPOINTS / QUERY
 ========================================================= */
 
-export function normalizeUsuarioId(
+function normalizeUsuarioId(
   id = ""
 ) {
   const value =
@@ -2094,11 +2094,11 @@ export function normalizeUsuarioId(
   return value;
 }
 
-export function getUsuariosEndpoint() {
+function getUsuariosEndpoint() {
   return USUARIOS_ENDPOINT;
 }
 
-export function getUsuarioEndpoint(
+function getUsuarioEndpoint(
   id = ""
 ) {
   return (
@@ -2172,7 +2172,7 @@ function cleanQueryValue(
   return text || undefined;
 }
 
-export function buildUsuariosListQuery({
+function buildUsuariosListQuery({
   limit = USUARIOS_FETCH_LIMIT,
 
   ct = "",
@@ -5198,7 +5198,7 @@ export async function fetchUsuariosStatsRequest(
    STORE SNAPSHOTS / UTILITIES
 ========================================================= */
 
-export function unwrapUsuariosPayload(
+function unwrapUsuariosPayload(
   payload = null
 ) {
   return pickItems(

@@ -41,10 +41,10 @@ import { DATE_PRESETS, dateFormatter } from "../../core/format.js";
    META / ACTIONS
 ========================================================= */
 
-export const USUARIOS_MODAL_TEMPLATE_VERSION =
+const USUARIOS_MODAL_TEMPLATE_VERSION =
   "usuarios.template.modal.canonical.v6.stable-panel-no-flicker";
 
-export const USUARIOS_DETAIL_ACTIONS = Object.freeze({
+const USUARIOS_DETAIL_ACTIONS = Object.freeze({
   CLOSE: "close",
   REFRESH: "refresh",
   COPY_ID: "copy-id",
@@ -1999,15 +1999,9 @@ export function renderUsuariosDetailModal(input = {}) {
   });
 }
 
-export function renderUsuariosDetailModalClosed() {
+function renderUsuariosDetailModalClosed() {
   return "";
 }
-
-export const renderUsuarioDetailModal =
-  renderUsuariosDetailModal;
-
-export const renderUsuarioDetailModalClosed =
-  renderUsuariosDetailModalClosed;
 
 /* =========================================================
    HOST / ROOT
@@ -2648,7 +2642,7 @@ export function closeUsuariosModal({ notify = true, restoreFocus = true } = {}) 
   return true;
 }
 
-export function updateUsuariosModal(detail = {}) {
+function updateUsuariosModal(detail = {}) {
   const normalized =
     normalizeDetail(detail);
 
@@ -2724,11 +2718,11 @@ export function updateUsuariosModal(detail = {}) {
   return true;
 }
 
-export async function refreshUsuariosModal() {
+async function refreshUsuariosModal() {
   return handleRefresh();
 }
 
-export async function copyUsuariosModalId() {
+async function copyUsuariosModalId() {
   return handleCopyId();
 }
 
@@ -2736,7 +2730,7 @@ export async function copyUsuariosModalId() {
    STATE / SNAPSHOT
 ========================================================= */
 
-export function getUsuariosModalState() {
+function getUsuariosModalState() {
   return {
     version:
       USUARIOS_MODAL_TEMPLATE_VERSION,
@@ -2765,7 +2759,7 @@ export function getUsuariosModalState() {
   };
 }
 
-export function getUsuariosModalSnapshot() {
+function getUsuariosModalSnapshot() {
   return {
     version:
       USUARIOS_MODAL_TEMPLATE_VERSION,

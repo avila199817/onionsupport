@@ -29,6 +29,7 @@ const BASELINE = Object.freeze({
   "src/views/home": 75,
   "src/views/incidencias": 165,
   "src/views/server": 127,
+  "src/views/usuarios": 160,
   "src/views/whatsapp": 9,
 });
 const SWEPT_DIRECTORIES = Object.freeze(Object.keys(BASELINE));

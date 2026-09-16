@@ -34,11 +34,8 @@ import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 import { DATE_PRESETS, dateFormatter, formatDecimal } from "../../core/format.js";
 
 
-export const USUARIOS_TEMPLATE_VERSION =
+const USUARIOS_TEMPLATE_VERSION =
   "usuarios.template.v28.session-order-silent-refresh";
-export const USUARIOS_TABLE_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
-export const USUARIOS_VIEW_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
-
 export const USUARIOS_ACTIONS = Object.freeze({
   DETAIL: "detail",
   CREATE: "create",
@@ -51,13 +48,10 @@ export const USUARIOS_ACTIONS = Object.freeze({
   CLEAR_FILTERS: "clear-filters",
   RETRY_PAGE: "retry-page",
 });
-export const USUARIOS_TABLE_ACTIONS = USUARIOS_ACTIONS;
-
 export const USUARIOS_DEFAULT_VISIBLE_ROWS = 50;
-export const USUARIOS_DEFAULT_PAGE_SIZE = 50;
 export const USUARIOS_DEFAULT_SORT_ORDER = "desc";
 
-export const USUARIOS_TABLE_COLUMNS = Object.freeze([
+const USUARIOS_TABLE_COLUMNS = Object.freeze([
   { key: "main", label: "Usuario", colClass: "usuarios-col--main", thClass: "usuarios-th usuarios-th--main", cellClass: "usuarios-cell usuarios-cell--main" },
   { key: "status", label: "Estado", colClass: "usuarios-col--status", thClass: "usuarios-th usuarios-th--status", cellClass: "usuarios-cell usuarios-cell--status" },
   { key: "date", label: "Alta", colClass: "usuarios-col--date", thClass: "usuarios-th usuarios-th--date", cellClass: "usuarios-cell usuarios-cell--date" },
@@ -465,13 +459,13 @@ export function renderErrorState(message = "No se pudieron cargar los usuarios."
 export function renderAccessDeniedState() {
   return `<section class="usuarios-history">${renderEmptyContent({ restricted: true, admin: false })}</section>`;
 }
-export function renderEmptyUsuariosState(options = {}) {
+function renderEmptyUsuariosState(options = {}) {
   return `<section class="usuarios-history">${renderEmptyContent(options)}</section>`;
 }
 export const renderEmptyState = renderEmptyUsuariosState;
 export const renderCards = renderTable;
 
-export function getUsuariosTableTemplateSnapshot(input = {}) {
+function getUsuariosTableTemplateSnapshot(input = {}) {
   const items = itemsFrom(input);
   const state = stateFrom(input);
   return {
@@ -509,7 +503,6 @@ export function getUsuariosTableTemplateSnapshot(input = {}) {
 
 export {
   normalizeSortOrder,
-  sessionStartTimestamp,
   sortBySessionStart,
 };
 

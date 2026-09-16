@@ -33,6 +33,8 @@ Facturas consume esa variante y retira la suya; su hoja se queda **sin una sola 
 
 **No se propaga `data-modal-hero`.** Un contrato correcto rechazó añadirlo a Facturas porque rompía la simetría entre su estado de carga y su estado listo. Al mirarlo, ese marcador tiene **un productor y cero consumidores**: la unificación es de variante, no de marcador, así que se quitó en vez de relajar el contrato.
 
+**El contrato de identidad viaja con la variante.** `avatar_runtime_dom_contract.mjs` localizaba el avatar del detalle de Facturas por su clase propia, `.facturas-detail-avatar`. Al retirarla, sus cuatro casos dejaron de encontrar nodo y el contrato cayó con un `TypeError` sin atribución — lo detectó la batería local y lo repitió CI. Los cuatro pasan ahora por el marcador semántico que ya usaba Incidencias, `[data-modal-avatar-frame='true']`: misma responsabilidad, mismo marcador. Y el bucle del contrato falla **por nombre** (`«<caso>: ningún elemento coincide con <selector>»`) en lugar de reventar varias líneas más abajo. La clase `facturas-detail-identity` se retira también: no quedaba ninguna regla que la usara, la rejilla la declara `ui-detail-modal-hero`.
+
 ### Resultado medido
 
 | Anchura | Incidencias | Facturas |
@@ -111,6 +113,8 @@ Una retención sólo se acredita con datos suyos: su importe, su tipo, su propia
 - `tools/detail-header-parity-contract.mjs` (`test:browser:ui`): 7 comprobaciones sobre las dos cabeceras a 1280/900/390 px — misma variante y mismas dimensiones, hueco reservado antes de la imagen, foto válida/ausente/fallida, identidad sin nombre, nombres largos, dos entidades seguidas sin herencia, ninguna hoja de dominio dimensionando su propio avatar, y el ancho útil del cuerpo frente a su pista y a su tope.
 - `tools/factura-tax-visibility-contract.mjs` (`validate:source`): las cinco políticas como pruebas ejecutables, más el IVA canónico y la invariante de documento intacto.
 
+Batería local sobre el commit del PR: `validate` en verde (sin cota superada y sin cambio de superficie exportada), `build:repro` idéntico, y 22 de 23 contratos de navegador en verde. El que falla es el conocido de este entorno, `tools/private-domain-contracts.mjs --browser` → *«SPA document-pdf: usable viewer and explicit close: page.waitForEvent: Timeout 10000ms exceeded»*, **idéntico sobre `main` limpio** (48 PASS / 1 FAIL en ambos) y en verde dentro de CI. No se presenta como prueba local superada.
+
 Negativas verificadas por separado:
 
 | Regresión | Aserción |
@@ -119,8 +123,13 @@ Negativas verificadas por separado:
 | volver a acreditar el IRPF con la base general | *«sin ningún campo de retención: la tarjeta de IRPF no debe existir»* |
 | volver a pintar un cero real como cero negativo | *«enabled:true con importe 0: un cero real no lleva signo negativo»* |
 
+### Sobre la medida del scroll al abrir el perfil del técnico
+
+La primera pasada de la validación conjunta midió que el cuerpo del detalle pasaba de 120 px a 0 al abrir el perfil del técnico. **Era el arnés, no el producto.** El disparador vive en la parte alta del cuerpo (contenido 21–114 px): con el cuerpo desplazado 120 px queda fuera de la ventana visible, y `locator.click()` de Playwright lo arrastra a la vista *antes* de pulsar. Con un clic programático — mismo controlador delegado, sin desplazamiento automático — el scroll se conserva en 120 durante la apertura y tras el cierre; con un clic real de ratón a un desplazamiento en el que el disparador sigue visible, se conserva igual. El nodo del cuerpo es el mismo, sus ocho hijos son los mismos y sólo cambian atributos del disparador. El paso 6 de la validación conjunta mide ahora las dos formas y declara cuál es cuál.
+
 ## Alcance declarado, no resuelto
 
 - `src/views/clientes/clientes.template.modal.js` tiene una **tercera** composición de cabecera (`clientes-modal-hero`) con sus propias clases. No entra aquí.
 - `patchDetailModalDom` de Incidencias sigue existiendo junto al parcheo compartido.
+- No hay contrato permanente que fije «abrir y cerrar una capa apilada conserva el scroll del cuerpo»: hoy se mide en la validación conjunta, que no está versionada.
 - La tarjeta de IVA sigue pintándose aunque la factura no traiga dato de IVA, porque su base también cae en `baseImponible`. Es el mismo patrón que el del IRPF, pero la autorización de ocultar lo que no aplica era para el IRPF: se deja medido y sin tocar.

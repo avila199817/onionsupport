@@ -4037,7 +4037,7 @@ function renderFacturasDetailParts({
     header: `
       <div class="facturas-detail-header" data-facturas-detail-header="true">
         <div class="facturas-detail-hero">
-          <div class="facturas-detail-identity ui-detail-modal-hero">
+          <div class="ui-detail-modal-hero">
             ${renderAvatar(
               factura
             )}

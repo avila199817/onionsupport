@@ -1,7 +1,8 @@
 import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
-import { isObject } from "../../core/objects.js";
+import { isObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { clamp } from "../../core/numbers.js";
 
 export { isObject, safeArray };
 export { cleanText, escapeHtml };
@@ -120,18 +121,6 @@ const MONEY_FORMATTERS = new Map();
    BASICS
 ========================================================= */
 
-export function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
-    return value;
-  }
-
-  return null;
-}
-
 export function number(value, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
   if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
@@ -144,10 +133,6 @@ export function optionalNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-export function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
 }
 
 export function attr(value = "") {
@@ -334,7 +319,7 @@ export function safeDisplayId(value = "", fallback = "") {
 
 export function ticketDisplayId(source = {}) {
   return safeDisplayId(
-    first(
+    firstNonEmpty(
       source.displayId,
       source.ticketId,
       source.incidenciaId,
@@ -350,7 +335,7 @@ export function ticketDisplayId(source = {}) {
 
 export function invoiceDisplayId(source = {}) {
   return safeDisplayId(
-    first(
+    firstNonEmpty(
       source.displayId,
       source.numeroFacturaLegal,
       source.invoiceNumber,

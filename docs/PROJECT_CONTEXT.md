@@ -378,7 +378,7 @@ Tras fusionar, `.github/workflows/azure-static-web-apps-polite-bay-086469a1e.yml
 
 ## 13. Arrays y normalización
 
-Un helper `first(...values)` selecciona el primer valor útil y no debe aplanar arrays del dominio.
+Los selectores de primer candidato (`firstNonBlank`, `firstNonEmpty` en `src/core/objects.js`) devuelven el primer valor útil y no aplanan arrays del dominio.
 
 Quedan prohibidos dentro de ese helper `values.flat(...)` y `values.flatMap(...)`: adjuntos, permisos, historial, líneas de factura y otras colecciones son valores completos.
 
@@ -416,7 +416,7 @@ Esta revisión de fuente no demuestra una fuga entre usuarios ni certifica su au
 ### Hallazgos históricos que no se arrastran sin comprobar
 
 - Core actual (`core.minimal.v9-specialized-snapshot`) mantiene estado en memoria, snapshots saneados y puentes hacia módulos. Ya no expone un event bus `on/off/emit` genérico. Los eventos DOM de dominio que permanecen se revisan por consumidor.
-- `first(...values)` conserva arrays. Los `flat(Infinity)` todavía presentes en Core pertenecen a normalización explícita de roles/permisos, no al selector `first`; no se clasifican automáticamente como el error antiguo.
+- `firstNonBlank`/`firstNonEmpty` conservan arrays. Los `flat(Infinity)` todavía presentes en Core pertenecen a normalización explícita de roles/permisos, no al selector `first`; no se clasifican automáticamente como el error antiguo.
 - Facturas conserva `fetch` para un `blob:` local y para descargar un PDF desde una URL validada con `credentials: "omit"`. Eso no acredita un segundo cliente de API autenticada; la política de documentos sí debe entrar en la futura revisión de URLs.
 - El inventario histórico de CSS —77 hojas, 1,29 MB, 194 `!important` y 3.079 colores— no es un inventario actual ni una medida del artefacto servido. Antes de una limpieza adicional se medirá de nuevo el SHA, fuente/build, bytes transferidos y cobertura por ruta.
 - El doble motor de avatar quedó sustituido por la autoridad actual; PR #482 no se reabre para recuperar código que esa consolidación retiró.

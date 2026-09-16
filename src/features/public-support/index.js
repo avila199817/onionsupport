@@ -25,7 +25,7 @@ import Http from "../../core/http.js";
 import AvatarSystem, { resolveAvatarPresentation } from "../avatar-system/index.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { safeObject } from "../../core/objects.js";
+import { safeObject, firstNonBlank } from "../../core/objects.js";
 
 /* Trusted verifier compatibility marker: the legacy tooltip dataset is retired
    at runtime; the identity is now contained entirely by the visible card. */
@@ -62,14 +62,6 @@ let mountRoot = null;
 let installed = false;
 let destroyed = false;
 
-function first(...values) {
-  return values.find((value) =>
-    value !== undefined &&
-    value !== null &&
-    !(typeof value === "string" && !value.trim())
-  ) ?? null;
-}
-
 function state() {
   try {
     return safeObject(AppCore?.getState?.(), null) || safeObject(AppCore?.state, null) || {};
@@ -92,7 +84,7 @@ function session() {
 function fullName(user) {
   if (!user) return "";
 
-  return cleanText(first(
+  return cleanText(firstNonBlank(
     user.fullName,
     user.displayName,
     user.name,
@@ -105,41 +97,41 @@ function fullName(user) {
 }
 
 function email(user) {
-  return cleanText(first(user?.email, user?.emailLower, user?.profile?.email, "")).toLowerCase();
+  return cleanText(firstNonBlank(user?.email, user?.emailLower, user?.profile?.email, "")).toLowerCase();
 }
 
 function phone(user) {
-  return cleanText(first(user?.phone, user?.telefono, user?.mobile, user?.profile?.phone, ""));
+  return cleanText(firstNonBlank(user?.phone, user?.telefono, user?.mobile, user?.profile?.phone, ""));
 }
 
 function addressParts(user) {
-  const value = first(user?.address, user?.direccion, user?.profile?.address, "");
+  const value = firstNonBlank(user?.address, user?.direccion, user?.profile?.address, "");
 
   if (typeof value === "string") {
     return {
       address: cleanText(value),
       addressLine2: "",
-      postalCode: cleanText(first(user?.cp, user?.postalCode, "")),
-      city: cleanText(first(user?.ciudad, user?.city, "")),
-      province: cleanText(first(user?.provincia, user?.province, "")),
-      country: cleanText(first(user?.pais, user?.country, "España"), "España"),
+      postalCode: cleanText(firstNonBlank(user?.cp, user?.postalCode, "")),
+      city: cleanText(firstNonBlank(user?.ciudad, user?.city, "")),
+      province: cleanText(firstNonBlank(user?.provincia, user?.province, "")),
+      country: cleanText(firstNonBlank(user?.pais, user?.country, "España"), "España"),
     };
   }
 
   const current = safeObject(value, null) || {};
 
   return {
-    address: cleanText(first(current.street, current.line1, current.calle, user?.calle, "")),
-    addressLine2: cleanText(first(current.line2, current.linea2, user?.linea2, "")),
-    postalCode: cleanText(first(current.postalCode, current.zip, current.cp, user?.postalCode, user?.cp, "")),
-    city: cleanText(first(current.city, current.locality, current.localidad, current.ciudad, user?.city, user?.ciudad, "")),
-    province: cleanText(first(current.region, current.province, current.provincia, user?.province, user?.provincia, "")),
-    country: cleanText(first(current.country, current.pais, user?.country, user?.pais, "España"), "España"),
+    address: cleanText(firstNonBlank(current.street, current.line1, current.calle, user?.calle, "")),
+    addressLine2: cleanText(firstNonBlank(current.line2, current.linea2, user?.linea2, "")),
+    postalCode: cleanText(firstNonBlank(current.postalCode, current.zip, current.cp, user?.postalCode, user?.cp, "")),
+    city: cleanText(firstNonBlank(current.city, current.locality, current.localidad, current.ciudad, user?.city, user?.ciudad, "")),
+    province: cleanText(firstNonBlank(current.region, current.province, current.provincia, user?.province, user?.provincia, "")),
+    country: cleanText(firstNonBlank(current.country, current.pais, user?.country, user?.pais, "España"), "España"),
   };
 }
 
 function avatar(user) {
-  return sanitizeRuntimeImageUrl(first(
+  return sanitizeRuntimeImageUrl(firstNonBlank(
     user?.avatarUrl,
     user?.avatar,
     user?.picture,
@@ -173,7 +165,7 @@ function internalPanelPath(value = "") {
 }
 
 function panelHref(current, user) {
-  const fromState = internalPanelPath(first(
+  const fromState = internalPanelPath(firstNonBlank(
     current?.homePath,
     current?.defaultHome,
     current?.postLoginTarget,
@@ -182,7 +174,7 @@ function panelHref(current, user) {
 
   if (fromState) return fromState;
 
-  const slug = cleanText(first(
+  const slug = cleanText(firstNonBlank(
     current?.userSlug,
     user?.slug,
     user?.username,
@@ -708,7 +700,7 @@ function status(form, message = "", type = "info") {
 }
 
 function normalizedErrorCode(error) {
-  return cleanText(first(
+  return cleanText(firstNonBlank(
     error?.code,
     error?.payload?.code,
     error?.payload?.error,
@@ -959,7 +951,7 @@ function submitting(form, value) {
 }
 
 function ticketId(response) {
-  return cleanText(first(
+  return cleanText(firstNonBlank(
     response?.ticketId,
     response?.incidenciaId,
     response?.ticket?.ticketId,
@@ -972,7 +964,7 @@ function ticketId(response) {
 }
 
 function activation(response) {
-  const value = first(
+  const value = firstNonBlank(
     response?.activationRequired,
     response?.account?.activationRequired,
     response?.data?.activationRequired,
@@ -983,7 +975,7 @@ function activation(response) {
 }
 
 function neutralAccepted(response) {
-  const accepted = first(
+  const accepted = firstNonBlank(
     response?.accepted,
     response?.data?.accepted,
     false

@@ -23,7 +23,7 @@ import {
   INCIDENCIA_CATEGORY_OPTIONS,
   INCIDENCIA_PRIORITY_OPTIONS,
 } from "./incidencias.options.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 
@@ -91,17 +91,6 @@ function cleanMultiline(value = "", fallback = "") {
     .trim();
 
   return text || fallback;
-}
-
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
-    return value;
-  }
-  return null;
 }
 
 function number(value = 0, fallback = 0) {
@@ -234,7 +223,7 @@ function normalizeUserResult(user = {}) {
   const raw = safeObject(user);
   const nested = safeObject(raw.raw);
 
-  const userId = cleanText(first(
+  const userId = cleanText(firstNonEmpty(
     raw.userId, raw.id, raw.uid, raw.sub, raw.usuarioId,
     raw.lookup?.userId, raw.lookup?.id,
     raw.profile?.userId, raw.auth?.userId,
@@ -242,7 +231,7 @@ function normalizeUserResult(user = {}) {
     ""
   ), "");
 
-  const clienteId = cleanText(first(
+  const clienteId = cleanText(firstNonEmpty(
     raw.targetClienteId, raw.clienteId, raw.clientId, raw.customerId,
     raw.lookup?.clienteId, raw.lookup?.clientId,
     raw.cliente?.clienteId, raw.cliente?.id,
@@ -250,7 +239,7 @@ function normalizeUserResult(user = {}) {
     ""
   ), "");
 
-  const name = cleanText(first(
+  const name = cleanText(firstNonEmpty(
     raw.displayName, raw.fullName, raw.name, raw.nombre, raw.publicName,
     raw.profile?.displayName, raw.profile?.name,
     [raw.firstName, raw.lastName].filter(Boolean).join(" "),
@@ -258,14 +247,14 @@ function normalizeUserResult(user = {}) {
     raw.username, userId
   ), "Usuario");
 
-  const email = normalizeEmail(first(
+  const email = normalizeEmail(firstNonEmpty(
     raw.email, raw.emailLower, raw.userEmail, raw.clienteEmail,
     raw.profile?.email, raw.lookup?.email,
     nested.email, nested.emailLower,
     ""
   ));
 
-  const phone = cleanText(first(
+  const phone = cleanText(firstNonEmpty(
     raw.phone, raw.telefono, raw.phoneE164, raw.mobile, raw.movil,
     raw.contacto?.phone, raw.contacto?.telefono, raw.contacto?.phoneE164,
     raw.contact?.phone, raw.contact?.telefono, raw.contact?.phoneE164,
@@ -279,7 +268,7 @@ function normalizeUserResult(user = {}) {
     ""
   ), "");
 
-  const username = cleanText(first(
+  const username = cleanText(firstNonEmpty(
     raw.username, raw.usernameLower, raw.userName,
     raw.profile?.username, nested.username, nested.usernameLower,
     ""
@@ -308,7 +297,7 @@ function normalizeUserResult(user = {}) {
     phone,
     telefono: phone,
     username,
-    role: cleanText(first(raw.role, raw.rol, nested.role, nested.rol, "user"), "user"),
+    role: cleanText(firstNonEmpty(raw.role, raw.rol, nested.role, nested.rol, "user"), "user"),
     avatarUrl,
     avatar: avatarUrl || null,
     initials: presentation.initials,
@@ -324,13 +313,13 @@ function normalizeForm(form = {}) {
   };
 
   return {
-    targetUserId: cleanText(first(input.targetUserId, input.userId, input.usuarioId, input.uid, ""), ""),
-    targetClienteId: cleanText(first(input.targetClienteId, input.clienteId, input.clientId, input.customerId, ""), ""),
-    targetUserName: cleanText(first(input.targetUserName, input.userName, input.clienteNombre, input.clientName, input.name, input.nombre, ""), ""),
-    targetUserEmail: normalizeEmail(first(input.targetUserEmail, input.userEmail, input.clienteEmail, input.email, "")),
+    targetUserId: cleanText(firstNonEmpty(input.targetUserId, input.userId, input.usuarioId, input.uid, ""), ""),
+    targetClienteId: cleanText(firstNonEmpty(input.targetClienteId, input.clienteId, input.clientId, input.customerId, ""), ""),
+    targetUserName: cleanText(firstNonEmpty(input.targetUserName, input.userName, input.clienteNombre, input.clientName, input.name, input.nombre, ""), ""),
+    targetUserEmail: normalizeEmail(firstNonEmpty(input.targetUserEmail, input.userEmail, input.clienteEmail, input.email, "")),
     targetUserAvatar: firstImageSrc(input.targetUserAvatar, input.userAvatar, input.userAvatarUrl, input.avatar, input.avatarUrl),
-    subject: cleanText(first(input.subject, input.asunto, input.title), ""),
-    description: cleanMultiline(first(input.description, input.descripcion, input.message, input.body), ""),
+    subject: cleanText(firstNonEmpty(input.subject, input.asunto, input.title), ""),
+    description: cleanMultiline(firstNonEmpty(input.description, input.descripcion, input.message, input.body), ""),
     priority: slugKey(input.priority) || "medium",
     status: slugKey(input.status) || "open",
     category: slugKey(input.category) || "general",
@@ -345,11 +334,11 @@ function buildSelectedUser(form = {}, userSearch = {}) {
 
   return normalizeUserResult({
     ...selected,
-    userId: first(selected.userId, selected.id, form.targetUserId),
-    targetClienteId: first(selected.targetClienteId, selected.clienteId, form.targetClienteId),
-    displayName: first(selected.displayName, selected.name, form.targetUserName),
-    email: first(selected.email, form.targetUserEmail),
-    avatarUrl: first(selected.avatarUrl, selected.avatar, form.targetUserAvatar),
+    userId: firstNonEmpty(selected.userId, selected.id, form.targetUserId),
+    targetClienteId: firstNonEmpty(selected.targetClienteId, selected.clienteId, form.targetClienteId),
+    displayName: firstNonEmpty(selected.displayName, selected.name, form.targetUserName),
+    email: firstNonEmpty(selected.email, form.targetUserEmail),
+    avatarUrl: firstNonEmpty(selected.avatarUrl, selected.avatar, form.targetUserAvatar),
   });
 }
 

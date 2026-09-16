@@ -15,8 +15,9 @@ import { resolveAvatarPresentation, synchronizeAvatars } from "../../features/av
 import { renderFacturasCreateModal } from "./facturas.template.create.js";
 import { renderFacturasDetailModal } from "./facturas.template.modal.js";
 import { selectFacturasStats } from "./facturas.stats.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { clamp } from "../../core/numbers.js";
 
 export const FACTURAS_TEMPLATE_VERSION =
   "facturas.template.private.v7.admin-visual-parity";
@@ -64,17 +65,6 @@ const SORT_OPTIONS = Object.freeze([
 /* =========================================================
    BASICS
 ========================================================= */
-
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
-    return value;
-  }
-  return null;
-}
 
 function number(value = 0, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
@@ -174,8 +164,6 @@ function bool(value, fallback = false) {
   return fallback;
 }
 
-const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
-
 function readPath(source = {}, path = "") {
   const parts = cleanText(path, "").split(".").filter(Boolean);
   let current = source;
@@ -216,7 +204,7 @@ function safeImageSrc(value = "") {
 
 function getInputItems(input = {}) {
   const data = safeObject(input);
-  return safeArray(first(
+  return safeArray(firstNonEmpty(
     data.items,
     data.rows,
     data.facturas,
@@ -231,13 +219,13 @@ function getInputItems(input = {}) {
 
 function getRuntimeState(input = {}) {
   const data = safeObject(input);
-  return safeObject(first(data.state, data.viewState, data.runtime, data.meta?.state, {}));
+  return safeObject(firstNonEmpty(data.state, data.viewState, data.runtime, data.meta?.state, {}));
 }
 
 function isAdmin(input = {}) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
-  const role = normalizeKey(first(
+  const role = normalizeKey(firstNonEmpty(
     data.role,
     data.rol,
     runtime.role,
@@ -368,7 +356,7 @@ const getRaw = (item = {}) => safeObject(item?.raw);
 
 function fromItem(item = {}, paths = [], fallback = "") {
   const raw = getRaw(item);
-  return cleanText(first(firstPath(item, paths), firstPath(raw, paths)), fallback);
+  return cleanText(firstNonEmpty(firstPath(item, paths), firstPath(raw, paths)), fallback);
 }
 
 function getFacturaId(item = {}) {
@@ -398,7 +386,7 @@ function getContactName(item = {}) {
   ], "");
 }
 
-const getClientName = (item = {}) => cleanText(first(getCompanyName(item), getContactName(item)), "Cliente");
+const getClientName = (item = {}) => cleanText(firstNonEmpty(getCompanyName(item), getContactName(item)), "Cliente");
 
 function getClientSecondaryName(item = {}) {
   const company = getCompanyName(item);
@@ -439,7 +427,7 @@ function getAvatarPresentation(item = {}) {
 }
 
 function getPaymentRaw(item = {}) {
-  return first(
+  return firstNonEmpty(
     item.estadoPago,
     item.paymentStatus,
     item.payment?.status,
@@ -488,7 +476,7 @@ function getIncidenciaId(item = {}) {
     for (const entry of safeArray(list)) {
       if (typeof entry === "string" && entry.trim()) return cleanText(entry, "");
       if (isObject(entry)) {
-        const id = cleanText(first(entry.ticketId, entry.incidenciaId, entry.id, entry.code, entry.numero), "");
+        const id = cleanText(firstNonEmpty(entry.ticketId, entry.incidenciaId, entry.id, entry.code, entry.numero), "");
         if (id) return id;
       }
     }
@@ -503,7 +491,7 @@ const getIncidenciaSubject = (item = {}) => fromItem(item, [
 ], "");
 
 function getTotalRaw(item = {}) {
-  return first(
+  return firstNonEmpty(
     item.total, item.amount, item.importe, item.importeTotal, item.totalFactura,
     item.facturaTotal, item.invoiceAmount, item.totales?.total,
     getRaw(item).total, getRaw(item).amount, getRaw(item).importe,
@@ -517,7 +505,7 @@ const getTotalLabel = (item = {}) => formatMoney(getTotalRaw(item), getCurrency(
 
 function getTotalCaption(item = {}) {
   const raw = getRaw(item);
-  const taxIncluded = first(item.taxIncluded, item.impuestosIncluidos, item.ivaIncluido, raw.taxIncluded, raw.impuestosIncluidos, raw.ivaIncluido);
+  const taxIncluded = firstNonEmpty(item.taxIncluded, item.impuestosIncluidos, item.ivaIncluido, raw.taxIncluded, raw.impuestosIncluidos, raw.ivaIncluido);
   return taxIncluded === false ? "Impuestos no incl." : "Impuestos incl.";
 }
 
@@ -525,7 +513,7 @@ const getFormaPago = (item = {}) => fromItem(item, ["formaPago", "metodoPago", "
 
 function getCreatedAt(item = {}) {
   const raw = getRaw(item);
-  return first(
+  return firstNonEmpty(
     item.fechaFactura, item.fechaFacturaISO, item.lifecycle?.issuedAt, item.issueDate,
     item.issuedAt, item.fecha, item.createdAt, item.lifecycle?.createdAt, item.fechaCreacion,
     raw.fechaFactura, raw.fechaFacturaISO, raw.lifecycle?.issuedAt, raw.issueDate,
@@ -535,7 +523,7 @@ function getCreatedAt(item = {}) {
 
 function getUpdatedAt(item = {}) {
   const raw = getRaw(item);
-  return first(
+  return firstNonEmpty(
     item.updatedAt, item.lifecycle?.updatedAt, item.lastActivityAt, item.lifecycle?.lastActivityAt,
     item.fechaEnvio, item.delivery?.lastSentAt, item.sentAt, item.mailSentAt,
     item.fechaActualizacion, item.lastUpdateAt,
@@ -547,7 +535,7 @@ function getUpdatedAt(item = {}) {
 
 function getSentAt(item = {}) {
   const raw = getRaw(item);
-  return first(item.fechaEnvio, item.sentAt, item.mailSentAt, item.email?.sentAt, item.delivery?.lastSentAt, item.lifecycle?.sentAt, item.meta?.lastSentAt, raw.fechaEnvio, raw.sentAt, raw.email?.sentAt);
+  return firstNonEmpty(item.fechaEnvio, item.sentAt, item.mailSentAt, item.email?.sentAt, item.delivery?.lastSentAt, item.lifecycle?.sentAt, item.meta?.lastSentAt, raw.fechaEnvio, raw.sentAt, raw.email?.sentAt);
 }
 
 function getSortTimestamp(item = {}) {
@@ -561,8 +549,8 @@ const getEmissionTimestamp = (item = {}) => toTimestamp(getCreatedAt(item)) || g
 
 function hasPdf(item = {}) {
   const raw = getRaw(item);
-  if (bool(first(item.pdfAvailable, item.hasPdf, item.document?.available, item.meta?.hasPdf, raw.pdfAvailable, raw.hasPdf), false)) return true;
-  return Boolean(first(
+  if (bool(firstNonEmpty(item.pdfAvailable, item.hasPdf, item.document?.available, item.meta?.hasPdf, raw.pdfAvailable, raw.hasPdf), false)) return true;
+  return Boolean(firstNonEmpty(
     item.blobPath, item.blobName, item.pdfPath, item.pdfUrl, item.downloadUrl, item.viewUrl,
     item.pdf, item.document?.blobPath, item.document?.fileName,
     raw.blobPath, raw.blobName, raw.pdfPath, raw.pdfUrl, raw.downloadUrl, raw.viewUrl, raw.document?.blobPath
@@ -572,7 +560,7 @@ function hasPdf(item = {}) {
 function isFacturaSent(item = {}) {
   const raw = getRaw(item);
   if (getSentAt(item)) return true;
-  return bool(first(item.email?.sent, item.delivery?.sent, item.lifecycle?.sent, item.meta?.isSent, item.meta?.hasEmailSent, raw.email?.sent, raw.delivery?.sent, raw.meta?.isSent), false);
+  return bool(firstNonEmpty(item.email?.sent, item.delivery?.sent, item.lifecycle?.sent, item.meta?.isSent, item.meta?.hasEmailSent, raw.email?.sent, raw.delivery?.sent, raw.meta?.isSent), false);
 }
 
 const isValidEmail = (value = "") => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanText(value, "").toLowerCase());
@@ -595,7 +583,7 @@ function getRuntimeValue(input = {}, keys = [], fallback = "") {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
   for (const key of safeArray(keys)) {
-    const value = first(data[key], runtime[key]);
+    const value = firstNonEmpty(data[key], runtime[key]);
     if (value !== null && value !== undefined && !(typeof value === "string" && !value.trim())) return value;
   }
   return fallback;
@@ -711,7 +699,7 @@ function resolveHeaderStats(input = {}, rows = []) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
   const source = safeObject(data.stats);
-  const authoritative = Boolean(first(data.statsAuthoritative, runtime.statsAuthoritative, false));
+  const authoritative = Boolean(firstNonEmpty(data.statsAuthoritative, runtime.statsAuthoritative, false));
 
   return authoritative
     ? { ...selectFacturasStats(source), authoritative: true }
@@ -721,7 +709,7 @@ function resolveHeaderStats(input = {}, rows = []) {
 function getRemoteTotal(input = {}, fallback = 0) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
-  return Math.max(number(first(
+  return Math.max(number(firstNonEmpty(
     data.totalCount, data.remoteCount, data.totalMatched, data.total,
     runtime.totalCount, runtime.remoteCount, runtime.totalMatched, runtime.total,
     fallback
@@ -731,7 +719,7 @@ function getRemoteTotal(input = {}, fallback = 0) {
 function getBatchSize(input = {}) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
-  return clamp(number(first(data.batchSize, data.limit, data.pageSize, runtime.batchSize, runtime.limit, runtime.pageSize, DEFAULT_BATCH_SIZE), DEFAULT_BATCH_SIZE), 1, 200);
+  return clamp(number(firstNonEmpty(data.batchSize, data.limit, data.pageSize, runtime.batchSize, runtime.limit, runtime.pageSize, DEFAULT_BATCH_SIZE), DEFAULT_BATCH_SIZE), 1, 200);
 }
 
 function getListState(items = [], input = {}) {
@@ -744,12 +732,12 @@ function getListState(items = [], input = {}) {
   const remoteTotal = getRemoteTotal(data, loadedCount);
   const batchSize = getBatchSize(data);
   const filtering = isFilterActive(data);
-  const currentPage = Math.max(1, number(first(data.page, runtime.page, runtime.currentPage, runtime.facturasPage, 1), 1));
-  const nextPage = Math.max(1, number(first(data.nextPage, runtime.nextPage, currentPage + 1), currentPage + 1));
-  const explicitHasMore = first(data.hasMore, data.more, data.canLoadMore, runtime.hasMore, runtime.more, runtime.canLoadMore, null);
+  const currentPage = Math.max(1, number(firstNonEmpty(data.page, runtime.page, runtime.currentPage, runtime.facturasPage, 1), 1));
+  const nextPage = Math.max(1, number(firstNonEmpty(data.nextPage, runtime.nextPage, currentPage + 1), currentPage + 1));
+  const explicitHasMore = firstNonEmpty(data.hasMore, data.more, data.canLoadMore, runtime.hasMore, runtime.more, runtime.canLoadMore, null);
   const hasMore = explicitHasMore === null ? loadedCount < remoteTotal : bool(explicitHasMore, false);
-  const loadingMore = Boolean(first(data.loadingMore, data.loadingNextPage, runtime.loadingMore, runtime.loadingNextPage, false));
-  const loadMoreError = cleanText(first(data.loadMoreError, runtime.loadMoreError, ""), "");
+  const loadingMore = Boolean(firstNonEmpty(data.loadingMore, data.loadingNextPage, runtime.loadingMore, runtime.loadingNextPage, false));
+  const loadMoreError = cleanText(firstNonEmpty(data.loadMoreError, runtime.loadMoreError, ""), "");
   const sortMode = getSortMode(data);
 
   return {
@@ -965,12 +953,12 @@ function renderEmptyState({ hasError = false, filtering = false, searchQuery = "
 
 function renderInfiniteScrollFooter(listState = {}, state = {}) {
   const runtime = safeObject(state);
-  const loadingMore = Boolean(first(listState.loadingMore, runtime.loadingMore, runtime.loadingNextPage));
+  const loadingMore = Boolean(firstNonEmpty(listState.loadingMore, runtime.loadingMore, runtime.loadingNextPage));
   const refreshing = Boolean(runtime.refreshing);
   const hasMore = Boolean(listState.hasMore);
   const hasRows = number(listState.visibleCount, 0) > 0;
   const listError = cleanText(runtime.error, "");
-  const loadMoreError = cleanText(first(listState.loadMoreError, runtime.loadMoreError, ""), "");
+  const loadMoreError = cleanText(firstNonEmpty(listState.loadMoreError, runtime.loadMoreError, ""), "");
   if (listError) {
     return `<div class="facturas-infinite" data-facturas-infinite="true" data-has-more="false" tabindex="-1"><div class="facturas-infinite-status is-error"><span class="facturas-infinite-error-icon" aria-hidden="true">${icon("alert")}</span><span>Actualización detenida.</span><button type="button" class="facturas-btn facturas-infinite-retry" data-facturas-action="${FACTURAS_ACTIONS.REFRESH}" data-action="${FACTURAS_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button></div></div>`;
   }
@@ -997,13 +985,13 @@ export function renderHeader(input = {}, stats = resolveHeaderStats(input, getIn
   const rows = sortFacturas(getInputItems(data), { sort: "date_desc" });
   const runtime = getRuntimeState(data);
   const canCreateFactura = isAdmin(data);
-  const updatedAt = first(data.lastUpdatedAt, runtime.lastSyncAt, data.updatedAt, runtime.updatedAt, ...rows.map(getUpdatedAt));
+  const updatedAt = firstNonEmpty(data.lastUpdatedAt, runtime.lastSyncAt, data.updatedAt, runtime.updatedAt, ...rows.map(getUpdatedAt));
   const remoteCount = getRemoteTotal(data, stats.total);
   const exportIsPartial = remoteCount > rows.length;
   const exportLabel = exportIsPartial ? "Exportar cargadas" : "Exportar CSV";
-  const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
-  const loading = Boolean(first(runtime.loading, data.loading));
-  const creating = Boolean(first(runtime.creating, runtime.creatingFactura, data.creating));
+  const refreshing = Boolean(firstNonEmpty(runtime.refreshing, data.refreshing));
+  const loading = Boolean(firstNonEmpty(runtime.loading, data.loading));
+  const creating = Boolean(firstNonEmpty(runtime.creating, runtime.creatingFactura, data.creating));
   const metricCount = (value) => value === null ? "—" : String(value);
   const metricMoney = stats.totalImporte === null ? "—" : formatMoney(stats.totalImporte, DEFAULT_CURRENCY);
 
@@ -1051,9 +1039,9 @@ export function renderCards(input = {}, stats = resolveHeaderStats(input, getInp
   const items = getInputItems(data);
   const runtime = getRuntimeState(data);
   const listState = getListState(items, data);
-  const loading = Boolean(first(runtime.loading, data.loading));
-  const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
-  const hasError = Boolean(cleanText(first(runtime.error, data.error), ""));
+  const loading = Boolean(firstNonEmpty(runtime.loading, data.loading));
+  const refreshing = Boolean(firstNonEmpty(runtime.refreshing, data.refreshing));
+  const hasError = Boolean(cleanText(firstNonEmpty(runtime.error, data.error), ""));
   const showInitialLoading = loading && !listState.visibleItems.length;
   const showRefreshOverlay = refreshing && listState.visibleItems.length;
   const activeFilterLabel = getFilterLabel(listState.activeFilter);
@@ -1093,8 +1081,8 @@ export function renderFacturasTemplate(input = {}) {
 
   const payload = { ...data, items, state: runtime };
   const stats = resolveHeaderStats(payload, items);
-  return `<section class="facturas-view-root" data-facturas-scope="true" data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}" data-total="${attr(String(first(data.total, data.remoteCount, items.length)))}" data-count="${attr(String(items.length))}" aria-busy="${payload.loading || runtime.loading || runtime.refreshing || runtime.loadingMore ? "true" : "false"}">
-    ${cleanText(first(data.error, runtime.error), "") ? `<div class="facturas-alert facturas-alert--error" role="alert">${icon("lock")}<span>${escapeHtml(cleanText(first(data.error, runtime.error), ""))}</span></div>` : ""}
+  return `<section class="facturas-view-root" data-facturas-scope="true" data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}" data-total="${attr(String(firstNonEmpty(data.total, data.remoteCount, items.length)))}" data-count="${attr(String(items.length))}" aria-busy="${payload.loading || runtime.loading || runtime.refreshing || runtime.loadingMore ? "true" : "false"}">
+    ${cleanText(firstNonEmpty(data.error, runtime.error), "") ? `<div class="facturas-alert facturas-alert--error" role="alert">${icon("lock")}<span>${escapeHtml(cleanText(firstNonEmpty(data.error, runtime.error), ""))}</span></div>` : ""}
     ${renderHeader(payload, stats)}${renderCards(payload, stats)}${renderFacturasCreateModal(data.createModal || {})}${renderFacturasDetailModal(data.detailModal || {})}
   </section>`;
 }

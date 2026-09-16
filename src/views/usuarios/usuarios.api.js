@@ -39,9 +39,10 @@ import {
 import { notifyDomainChanged } from "../../core/domain-events.js";
 import { exactTotal } from "../../core/statistics.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject, isFunction } from "../../core/objects.js";
+import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { clamp } from "../../core/numbers.js";
 
 /* =========================================================
    META / CONFIG
@@ -230,42 +231,6 @@ function isBrowser() {
   varios campos del dominio (roles, permissions, etc.)
   necesitan conservar su identidad como colección.
 */
-function first(...values) {
-  for (const value of values) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
 function number(value = 0, fallback = 0) {
   if (
     value === null ||
@@ -280,16 +245,6 @@ function number(value = 0, fallback = 0) {
   return Number.isFinite(parsed)
     ? parsed
     : fallback;
-}
-
-function clamp(value = 0, min = 0, max = 1) {
-  return Math.min(
-    Math.max(
-      number(value, min),
-      min
-    ),
-    max
-  );
 }
 
 function hasOwn(source = {}, key = "") {
@@ -577,7 +532,7 @@ function safeError(
   fallback = "Error de API de usuarios."
 ) {
   return cleanText(
-    first(
+    firstNonEmpty(
       error?.message,
       error?.data?.message,
       error?.payload?.message,
@@ -596,7 +551,7 @@ function getErrorCode(
   fallback = ""
 ) {
   return cleanText(
-    first(
+    firstNonEmpty(
       source?.code,
       source?.error,
       source?.data?.code,
@@ -616,7 +571,7 @@ function getErrorStatus(
   fallback = 400
 ) {
   const status = number(
-    first(
+    firstNonEmpty(
       source?.status,
       source?.statusCode,
       source?.data?.status,
@@ -627,11 +582,7 @@ function getErrorStatus(
     fallback
   );
 
-  return clamp(
-    status,
-    100,
-    599
-  );
+  return clamp(number(status, 100), 100, 599);
 }
 
 function createContractError(
@@ -699,7 +650,7 @@ function createResponseError(
     {
       requestId:
         cleanText(
-          first(
+          firstNonEmpty(
             source.requestId,
             source.meta?.requestId,
             ""
@@ -1115,7 +1066,7 @@ function normalizeDireccion(
   return {
     calle:
       cleanText(
-        first(
+        firstNonEmpty(
           source.calle,
           source.street,
           source.line1,
@@ -1129,7 +1080,7 @@ function normalizeDireccion(
 
     cp:
       cleanText(
-        first(
+        firstNonEmpty(
           source.cp,
           source.postalCode,
           source.zip,
@@ -1143,7 +1094,7 @@ function normalizeDireccion(
 
     ciudad:
       cleanText(
-        first(
+        firstNonEmpty(
           source.ciudad,
           source.city,
           ""
@@ -1156,7 +1107,7 @@ function normalizeDireccion(
 
     provincia:
       cleanText(
-        first(
+        firstNonEmpty(
           source.provincia,
           source.province,
           source.region,
@@ -1170,7 +1121,7 @@ function normalizeDireccion(
 
     pais:
       cleanText(
-        first(
+        firstNonEmpty(
           source.pais,
           source.country,
           ""
@@ -1222,13 +1173,13 @@ function looksLikeNeverActivated(
     raw.enabled !== true &&
     raw.emailVerified !== true &&
     !toTimestamp(
-      first(
+      firstNonEmpty(
         raw.activatedAt,
         null
       )
     ) &&
     !toTimestamp(
-      first(
+      firstNonEmpty(
         raw.deactivatedAt,
         null
       )
@@ -1247,7 +1198,7 @@ function normalizeStatusValue(
 
   const explicit =
     slugKey(
-      first(
+      firstNonEmpty(
         value,
         raw.status,
         raw.estado,
@@ -1344,7 +1295,7 @@ function normalizeSecurity(
   return {
     twofaEnabled:
       parseBoolean(
-        first(
+        firstNonEmpty(
           raw.twofaEnabled,
           raw.twofa_enabled,
           false
@@ -1354,7 +1305,7 @@ function normalizeSecurity(
 
     twofaMethod:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.twofaMethod,
           raw.twofa_method,
           ""
@@ -1363,14 +1314,14 @@ function normalizeSecurity(
       ) || null,
 
     twofaCreatedAt:
-      first(
+      firstNonEmpty(
         raw.twofaCreatedAt,
         raw.twofa_createdAt,
         null
       ),
 
     lastPasswordChangeAt:
-      first(
+      firstNonEmpty(
         raw.lastPasswordChangeAt,
         null
       ),
@@ -1410,7 +1361,7 @@ export function normalizeUsuarioModel(
 
   const profile =
     safeObject(
-      first(
+      firstNonEmpty(
         raw.profile,
         raw.usuario,
         raw.user,
@@ -1420,7 +1371,7 @@ export function normalizeUsuarioModel(
 
   const direccion =
     normalizeDireccion(
-      first(
+      firstNonEmpty(
         raw.direccion,
         raw.address,
         raw.location,
@@ -1432,7 +1383,7 @@ export function normalizeUsuarioModel(
 
   const userId =
     cleanText(
-      first(
+      firstNonEmpty(
         raw.userId,
         raw.usuarioId,
         raw.id,
@@ -1449,7 +1400,7 @@ export function normalizeUsuarioModel(
 
   const firstName =
     cleanText(
-      first(
+      firstNonEmpty(
         raw.firstName,
         profile.firstName,
         ""
@@ -1459,7 +1410,7 @@ export function normalizeUsuarioModel(
 
   const lastName =
     cleanText(
-      first(
+      firstNonEmpty(
         raw.lastName,
         raw.apellidos,
         profile.lastName,
@@ -1471,7 +1422,7 @@ export function normalizeUsuarioModel(
 
   const name = userNameFromIdentity(
     { ...raw, profile },
-    first(raw.username, raw.email, userId, "Usuario")
+    firstNonEmpty(raw.username, raw.email, userId, "Usuario")
   ).slice(0, 160);
 
   const email =
@@ -1486,7 +1437,7 @@ export function normalizeUsuarioModel(
 
   const username =
     cleanText(
-      first(
+      firstNonEmpty(
         raw.username,
         raw.userName,
         raw.usernameLower,
@@ -1502,7 +1453,7 @@ export function normalizeUsuarioModel(
 
   const role =
     normalizeRoleValue(
-      first(
+      firstNonEmpty(
         raw.role,
         raw.rol,
         raw.roles,
@@ -1514,7 +1465,7 @@ export function normalizeUsuarioModel(
 
   const status =
     normalizeStatusValue(
-      first(
+      firstNonEmpty(
         raw.status,
         raw.estado,
         raw.state,
@@ -1525,7 +1476,7 @@ export function normalizeUsuarioModel(
 
   const phone =
     cleanText(
-      first(
+      firstNonEmpty(
         raw.phone,
         raw.telefono,
         raw.mobile,
@@ -1542,7 +1493,7 @@ export function normalizeUsuarioModel(
 
   const tipo =
     normalizeTypeValue(
-      first(
+      firstNonEmpty(
         raw.tipo,
         raw.clienteTipo,
         profile.tipo,
@@ -1550,7 +1501,7 @@ export function normalizeUsuarioModel(
       )
     ) ||
     cleanText(
-      first(
+      firstNonEmpty(
         raw.tipo,
         profile.tipo,
         ""
@@ -1560,7 +1511,7 @@ export function normalizeUsuarioModel(
 
   const nif =
     cleanText(
-      first(
+      firstNonEmpty(
         raw.nif,
         raw.NIF,
         raw.cif,
@@ -1577,7 +1528,7 @@ export function normalizeUsuarioModel(
 
   const avatar = raw.hasAvatar === false ? "" :
     safeAvatarUrl(
-      first(
+      firstNonEmpty(
         raw.avatarUrl,
         raw.avatar,
         raw.photoUrl,
@@ -1591,7 +1542,7 @@ export function normalizeUsuarioModel(
     );
 
   const createdAt =
-    first(
+    firstNonEmpty(
       raw.createdAt,
       raw.created_at,
       raw.fechaCreacion,
@@ -1600,7 +1551,7 @@ export function normalizeUsuarioModel(
     );
 
   const updatedAt =
-    first(
+    firstNonEmpty(
       raw.updatedAt,
       raw.updated_at,
       raw.modifiedAt,
@@ -1610,7 +1561,7 @@ export function normalizeUsuarioModel(
     );
 
   const lastLoginAt =
-    first(
+    firstNonEmpty(
       raw.lastLoginAt,
       raw.last_login_at,
       raw.lastAccessAt,
@@ -1627,7 +1578,7 @@ export function normalizeUsuarioModel(
     ),
 
     twofaEnabled:
-      first(
+      firstNonEmpty(
         raw.security?.twofaEnabled,
         raw.twofa_enabled,
         raw.has2FA,
@@ -1635,7 +1586,7 @@ export function normalizeUsuarioModel(
       ),
 
     twofaMethod:
-      first(
+      firstNonEmpty(
         raw.security?.twofaMethod,
         raw.twofa_method,
         raw.twofaMethod,
@@ -1643,7 +1594,7 @@ export function normalizeUsuarioModel(
       ),
 
     twofaCreatedAt:
-      first(
+      firstNonEmpty(
         raw.security?.twofaCreatedAt,
         raw.twofa_createdAt,
         raw.twofaCreatedAt,
@@ -1651,7 +1602,7 @@ export function normalizeUsuarioModel(
       ),
 
     lastPasswordChangeAt:
-      first(
+      firstNonEmpty(
         raw.security?.lastPasswordChangeAt,
         raw.lastPasswordChangeAt,
         null
@@ -1660,7 +1611,7 @@ export function normalizeUsuarioModel(
 
   const permissions =
     normalizePermissions(
-      first(
+      firstNonEmpty(
         raw.permissions,
         []
       )
@@ -1668,7 +1619,7 @@ export function normalizeUsuarioModel(
 
   const roles =
     uniqueStrings(
-      first(
+      firstNonEmpty(
         raw.roles,
         [
           role,
@@ -1690,7 +1641,7 @@ export function normalizeUsuarioModel(
 
     uid:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.uid,
           userId
         ),
@@ -1699,7 +1650,7 @@ export function normalizeUsuarioModel(
 
     code:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.code,
           raw.username,
           userId,
@@ -1710,7 +1661,7 @@ export function normalizeUsuarioModel(
 
     clienteId:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.clienteId,
           raw.clientId,
           ""
@@ -1720,7 +1671,7 @@ export function normalizeUsuarioModel(
 
     clientId:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.clientId,
           raw.clienteId,
           ""
@@ -1748,7 +1699,7 @@ export function normalizeUsuarioModel(
 
     slug:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.slug,
           username
         ),
@@ -1784,7 +1735,7 @@ export function normalizeUsuarioModel(
 
     mobile:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.mobile,
           raw.movil,
           phone
@@ -1844,14 +1795,14 @@ export function normalizeUsuarioModel(
       ),
 
     avatarUpdatedAt:
-      first(
+      firstNonEmpty(
         raw.avatarUpdatedAt,
         null
       ),
 
     emailVerified:
       parseBoolean(
-        first(
+        firstNonEmpty(
           raw.emailVerified,
           raw.meta?.emailVerified,
           false
@@ -1883,14 +1834,14 @@ export function normalizeUsuarioModel(
     lastLoginAt,
 
     lastAccessAt:
-      first(
+      firstNonEmpty(
         raw.lastAccessAt,
         lastLoginAt,
         null
       ),
 
     lastActivityAt:
-      first(
+      firstNonEmpty(
         raw.lastActivityAt,
         updatedAt,
         lastLoginAt,
@@ -1899,14 +1850,14 @@ export function normalizeUsuarioModel(
       ),
 
     activatedAt:
-      first(
+      firstNonEmpty(
         raw.activatedAt,
         null
       ),
 
     activatedBy:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.activatedBy,
           ""
         ),
@@ -1915,7 +1866,7 @@ export function normalizeUsuarioModel(
 
     activatedByRole:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.activatedByRole,
           ""
         ),
@@ -1923,14 +1874,14 @@ export function normalizeUsuarioModel(
       ) || null,
 
     deactivatedAt:
-      first(
+      firstNonEmpty(
         raw.deactivatedAt,
         null
       ),
 
     deactivatedBy:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.deactivatedBy,
           ""
         ),
@@ -1939,7 +1890,7 @@ export function normalizeUsuarioModel(
 
     deactivatedByRole:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.deactivatedByRole,
           ""
         ),
@@ -1948,7 +1899,7 @@ export function normalizeUsuarioModel(
 
     deactivationReason:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.deactivationReason,
           ""
         ),
@@ -1957,7 +1908,7 @@ export function normalizeUsuarioModel(
 
     updatedBy:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.updatedBy,
           ""
         ),
@@ -1981,7 +1932,7 @@ export function normalizeUsuarioModel(
 
       timestampMs:
         toTimestamp(
-          first(
+          firstNonEmpty(
             updatedAt,
             lastLoginAt,
             createdAt
@@ -2000,7 +1951,7 @@ function getUsuarioStableId(
     safeObject(item);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       source.userId,
       source.usuarioId,
       source.id,
@@ -2144,7 +2095,7 @@ function dedupeUsuarios(
     .sort((a, b) => {
       const diff =
         toTimestamp(
-          first(
+          firstNonEmpty(
             b.updatedAt,
             b.lastActivityAt,
             b.lastLoginAt,
@@ -2152,7 +2103,7 @@ function dedupeUsuarios(
           )
         ) -
         toTimestamp(
-          first(
+          firstNonEmpty(
             a.updatedAt,
             a.lastActivityAt,
             a.lastLoginAt,
@@ -2404,11 +2355,7 @@ export function buildUsuariosListQuery({
 } = {}) {
   const query = {
     limit:
-      clamp(
-        limit,
-        1,
-        USUARIOS_MAX_LIMIT
-      ),
+      clamp(number(limit, 1), 1, USUARIOS_MAX_LIMIT),
 
     includeTotal:
       Boolean(
@@ -2428,7 +2375,7 @@ export function buildUsuariosListQuery({
 
   const token =
     cleanText(
-      first(
+      firstNonEmpty(
         ct,
         continuationToken,
         nextToken,
@@ -2439,7 +2386,7 @@ export function buildUsuariosListQuery({
 
   const finalRole =
     normalizeRoleValue(
-      first(
+      firstNonEmpty(
         role,
         rol,
         ""
@@ -2448,7 +2395,7 @@ export function buildUsuariosListQuery({
 
   const rawRole =
     cleanText(
-      first(
+      firstNonEmpty(
         role,
         rol,
         ""
@@ -2458,7 +2405,7 @@ export function buildUsuariosListQuery({
 
   const finalType =
     normalizeTypeValue(
-      first(
+      firstNonEmpty(
         tipo,
         clienteTipo,
         type,
@@ -2468,7 +2415,7 @@ export function buildUsuariosListQuery({
 
   const finalSearch =
     cleanText(
-      first(
+      firstNonEmpty(
         search,
         q,
         ""
@@ -2968,7 +2915,7 @@ function pickContinuationToken(
   ) {
     const token =
       cleanText(
-        first(
+        firstNonEmpty(
           source.continuationToken,
           source.nextContinuationToken,
           source.nextToken,
@@ -2997,7 +2944,7 @@ function pickHasMore(
     of envelopeObjects(payload)
   ) {
     const value =
-      first(
+      firstNonEmpty(
         source.hasMore,
         source.more,
         source.pagination?.hasMore
@@ -3480,7 +3427,7 @@ function toCacheUsuario(
         user.role,
       timestampMs:
         toTimestamp(
-          first(
+          firstNonEmpty(
             user.updatedAt,
             user.lastLoginAt,
             user.createdAt
@@ -3562,7 +3509,7 @@ function hydrateStateFromCache({
 
   const cachedAt =
     number(
-      first(
+      firstNonEmpty(
         payload.cachedAt,
         payload.lastSyncAt,
         0
@@ -4039,7 +3986,7 @@ function buildCreateUsuarioBody(
 
   const phone =
     cleanText(
-      first(
+      firstNonEmpty(
         source.phone,
         source.telefono,
         source.mobile,
@@ -4053,7 +4000,7 @@ function buildCreateUsuarioBody(
 
   const tipo =
     normalizeTypeValue(
-      first(
+      firstNonEmpty(
         source.tipo,
         source.clienteTipo,
         source.type,
@@ -4064,7 +4011,7 @@ function buildCreateUsuarioBody(
 
   const nif =
     cleanText(
-      first(
+      firstNonEmpty(
         source.nif,
         source.cif,
         source.taxId,
@@ -4080,7 +4027,7 @@ function buildCreateUsuarioBody(
 
   const direccion =
     normalizeDireccion(
-      first(
+      firstNonEmpty(
         source.direccion,
         source.address,
         {}
@@ -4191,7 +4138,7 @@ function buildUpdateUsuarioBody(
   ) {
     const username =
       cleanText(
-        first(
+        firstNonEmpty(
           source.username,
           source.userName,
           ""
@@ -4220,7 +4167,7 @@ function buildUpdateUsuarioBody(
   ) {
     body.phone =
       cleanText(
-        first(
+        firstNonEmpty(
           source.phone,
           source.telefono,
           source.mobile,
@@ -4240,7 +4187,7 @@ function buildUpdateUsuarioBody(
   ) {
     body.nif =
       cleanText(
-        first(
+        firstNonEmpty(
           source.nif,
           source.cif,
           source.taxId,
@@ -4262,7 +4209,7 @@ function buildUpdateUsuarioBody(
   ) {
     const tipo =
       normalizeTypeValue(
-        first(
+        firstNonEmpty(
           source.tipo,
           source.clienteTipo,
           source.type,
@@ -4290,7 +4237,7 @@ function buildUpdateUsuarioBody(
   ) {
     const role =
       slugKey(
-        first(
+        firstNonEmpty(
           source.role,
           source.rol,
           ""
@@ -4329,7 +4276,7 @@ function buildUpdateUsuarioBody(
   ) {
     const status =
       slugKey(
-        first(
+        firstNonEmpty(
           source.status,
           source.estado,
           source.state,
@@ -4393,7 +4340,7 @@ function buildUpdateUsuarioBody(
   ) {
     body.twofa_enabled =
       parseStrictBoolean(
-        first(
+        firstNonEmpty(
           source.twofa_enabled,
           source.twofaEnabled
         ),
@@ -4407,7 +4354,7 @@ function buildUpdateUsuarioBody(
   ) {
     body.direccion =
       normalizeDireccion(
-        first(
+        firstNonEmpty(
           source.direccion,
           source.address,
           {}
@@ -4589,7 +4536,7 @@ export async function fetchUsuariosRequest(
 
   let continuationToken =
     cleanText(
-      first(
+      firstNonEmpty(
         options.ct,
         options.continuationToken,
         options.nextToken,
@@ -4601,12 +4548,7 @@ export async function fetchUsuariosRequest(
   let page = 0;
 
   const maxPages =
-    clamp(
-      options.maxPages ||
-      USUARIOS_MAX_PAGES,
-      1,
-      USUARIOS_MAX_PAGES
-    );
+    clamp(number(options.maxPages || USUARIOS_MAX_PAGES, 1), 1, USUARIOS_MAX_PAGES);
 
   do {
     if (continuationToken) {
@@ -4754,7 +4696,7 @@ export async function getUsuarioByIdRequest(
       // Reject access failures and foreign DTOs before applying a newer local
       // revision. A confirmed write is not permission to conceal a failed read.
       const source = pickDetail(response);
-      const returnedId = cleanText(first(source?.userId, source?.usuarioId, source?.id, source?.uid), "");
+      const returnedId = cleanText(firstNonEmpty(source?.userId, source?.usuarioId, source?.id, source?.uid), "");
       const detail = normalizeDetailResponse(response);
 
       if (
@@ -4953,7 +4895,7 @@ export async function updateUsuarioRequest(
     }
 
     const source = pickDetail(response);
-    const returnedId = cleanText(first(source?.userId, source?.usuarioId, source?.id, source?.uid), "");
+    const returnedId = cleanText(firstNonEmpty(source?.userId, source?.usuarioId, source?.id, source?.uid), "");
     if (!source || !returnedId || returnedId.toLowerCase() !== userId.toLowerCase() ||
         (hasOwn(source, "name") && source.name !== undefined &&
           (typeof source.name !== "string" || !cleanText(source.name)))) {
@@ -5393,7 +5335,7 @@ export async function fetchUsuariosStatsRequest(
       ),
 
     timestamp:
-      first(
+      firstNonEmpty(
         source.timestamp,
         null
       ),
@@ -5489,11 +5431,7 @@ export function paginateUsuarios(
     arrayFrom(items);
 
   const size =
-    clamp(
-      pageSize,
-      1,
-      500
-    );
+    clamp(number(pageSize, 1), 1, 500);
 
   const totalPages =
     Math.max(
@@ -5505,11 +5443,7 @@ export function paginateUsuarios(
     );
 
   const currentPage =
-    clamp(
-      page,
-      1,
-      totalPages
-    );
+    clamp(number(page, 1), 1, totalPages);
 
   const start =
     (currentPage - 1) *
@@ -5585,7 +5519,7 @@ export function computeUsuariosStats(
 
         if (
           toTimestamp(
-            first(
+            firstNonEmpty(
               current.lastLoginAt,
               current.lastAccessAt,
               null

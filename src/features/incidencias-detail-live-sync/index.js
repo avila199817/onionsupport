@@ -10,7 +10,7 @@ import {
   commentSignature,
 } from "../incidencias-detail-state/index.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { safeObject } from "../../core/objects.js";
+import { safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 
 export const INCIDENCIAS_DETAIL_LIVE_SYNC_VERSION =
@@ -50,24 +50,6 @@ let signalRefreshCount = 0;
 
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
-
-function first(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      !Object.keys(value).length
-    ) {
-      continue;
-    }
-    return value;
-  }
-  return null;
-}
 
 function timestamp(value = null) {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -246,10 +228,10 @@ function finishIndicator(root, { changed = false, error = false } = {}) {
 }
 
 function attachmentsFromDetail(detail = {}) {
-  const raw = safeObject(first(detail?.raw, detail));
+  const raw = safeObject(firstNonEmpty(detail?.raw, detail));
 
   return safeArray(
-    first(
+    firstNonEmpty(
       detail?.attachments,
       detail?.files,
       detail?.adjuntos,
@@ -285,7 +267,7 @@ function attachmentDetailSignature(detail = {}) {
 }
 
 function detailSignature(detail = {}) {
-  const raw = safeObject(first(detail?.raw, detail));
+  const raw = safeObject(firstNonEmpty(detail?.raw, detail));
   const comments = commentsFromDetail(detail);
 
   return [
@@ -293,7 +275,7 @@ function detailSignature(detail = {}) {
     cleanText(detail?.priority || detail?.prioridad, ""),
     cleanText(detail?.category || detail?.categoria || detail?.type, ""),
     cleanText(
-      first(
+      firstNonEmpty(
         detail?.assignedToName,
         detail?.technicianName,
         detail?.tecnicoName,

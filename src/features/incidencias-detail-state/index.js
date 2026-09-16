@@ -17,7 +17,7 @@
 import { synchronizeAvatars } from "../avatar-system/index.js";
 import { persistedCommentId } from "../incidencias-comment-identity/index.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { safeObject } from "../../core/objects.js";
+import { safeObject, firstNonEmpty } from "../../core/objects.js";
 
 export const INCIDENCIAS_DETAIL_STATE_VERSION =
   "incidencias-detail-state.v6.controller-authoritative";
@@ -134,25 +134,6 @@ const array = (value) =>
     ? value
     : [];
 
-function first(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      !Object.keys(value).length
-    ) {
-      continue;
-    }
-    return value;
-  }
-
-  return null;
-}
-
 function timestamp(value = null) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value < 100000000000 ? value * 1000 : value;
@@ -187,7 +168,7 @@ function currentRoot() {
 
 function ticketId(root = currentRoot()) {
   return cleanText(
-    first(
+    firstNonEmpty(
       root?.dataset?.ticketId,
       root?.dataset?.incidenciaId
     ),
@@ -200,7 +181,7 @@ function ownMutation(callback) {
 }
 
 function supportIdentity(detail = {}) {
-  const raw = safeObject(first(detail?.raw, detail));
+  const raw = safeObject(firstNonEmpty(detail?.raw, detail));
   const assignment = safeObject(raw.assignment);
   const technician = safeObject(assignment.technician);
   const assignedTo = safeObject(raw.assignedTo);
@@ -238,7 +219,7 @@ function supportIdentity(detail = {}) {
 }
 
 function requesterIdentity(detail = {}) {
-  const raw = safeObject(first(detail?.raw, detail));
+  const raw = safeObject(firstNonEmpty(detail?.raw, detail));
   const createdBy = safeObject(raw.createdBy);
   const receptor = safeObject(raw.receptor);
   const requester = safeObject(raw.requesterSnapshot);
@@ -392,9 +373,9 @@ function updateConversationClock(
 }
 
 export function resolveConversationPolicy(detail = {}) {
-  const raw = safeObject(first(detail?.raw, detail));
+  const raw = safeObject(firstNonEmpty(detail?.raw, detail));
   const explicit = safeObject(
-    first(
+    firstNonEmpty(
       detail?.userUpdatePolicy,
       detail?.meta?.userUpdatePolicy,
       raw.userUpdatePolicy,
@@ -435,11 +416,11 @@ export function resolveConversationPolicy(detail = {}) {
     support: 0,
   };
 
-  for (const comment of array(first(detail?.comments, raw.comments, []))) {
+  for (const comment of array(firstNonEmpty(detail?.comments, raw.comments, []))) {
     updateConversationClock(clocks, comment, raw);
   }
 
-  for (const entry of array(first(detail?.history, raw.history, []))) {
+  for (const entry of array(firstNonEmpty(detail?.history, raw.history, []))) {
     updateConversationClock(
       clocks,
       entry,
@@ -453,7 +434,7 @@ export function resolveConversationPolicy(detail = {}) {
     en timeline[]. No depender de que comments/history se dupliquen evita que
     una nueva navegación pueda inferir falsamente que el turno está libre.
   */
-  for (const entry of array(first(detail?.timeline, raw.timeline, []))) {
+  for (const entry of array(firstNonEmpty(detail?.timeline, raw.timeline, []))) {
     updateConversationClock(
       clocks,
       entry,
@@ -485,7 +466,7 @@ export function resolveConversationPolicy(detail = {}) {
 function normalizeComment(item = {}, index = 0) {
   const raw = safeObject(item);
   const type = lower(
-    first(raw.kind, raw.type, raw.action, raw.event, "comment")
+    firstNonEmpty(raw.kind, raw.type, raw.action, raw.event, "comment")
   );
 
   if (type && !["comment", "comentario"].includes(type)) {
@@ -493,7 +474,7 @@ function normalizeComment(item = {}, index = 0) {
   }
 
   const body = multiline(
-    first(
+    firstNonEmpty(
       raw.body,
       raw.message,
       raw.text,
@@ -509,13 +490,13 @@ function normalizeComment(item = {}, index = 0) {
 
   return {
     id: cleanText(
-      first(raw.id, raw.commentId, raw.eventId, `comment_${index}`),
+      firstNonEmpty(raw.id, raw.commentId, raw.eventId, `comment_${index}`),
       `comment_${index}`
     ),
     persistedCommentId: persistedCommentId(raw),
     body,
     author: cleanText(
-      first(
+      firstNonEmpty(
         raw.author,
         raw.byName,
         raw.createdByName,
@@ -527,7 +508,7 @@ function normalizeComment(item = {}, index = 0) {
       ),
       "Usuario"
     ),
-    createdAt: first(
+    createdAt: firstNonEmpty(
       raw.createdAt,
       raw.date,
       raw.timestamp,
@@ -539,14 +520,14 @@ function normalizeComment(item = {}, index = 0) {
 }
 
 export function commentsFromDetail(detail = {}) {
-  const raw = safeObject(first(detail?.raw, detail?.data, detail?.item, detail));
-  const timeline = array(first(detail?.timeline, raw.timeline, []));
+  const raw = safeObject(firstNonEmpty(detail?.raw, detail?.data, detail?.item, detail));
+  const timeline = array(firstNonEmpty(detail?.timeline, raw.timeline, []));
 
   const source = timeline.length
     ? timeline.filter((entry) =>
         ["comment", "comentario"].includes(
           lower(
-            first(
+            firstNonEmpty(
               entry?.kind,
               entry?.type,
               entry?.action,
@@ -557,7 +538,7 @@ export function commentsFromDetail(detail = {}) {
         )
       )
     : array(
-        first(
+        firstNonEmpty(
           detail?.comments,
           detail?.notes,
           detail?.messages,
@@ -701,7 +682,7 @@ function renderComments(root, detail = {}) {
 
 function attachmentId(file = {}, index = 0) {
   return cleanText(
-    first(
+    firstNonEmpty(
       file?.id,
       file?.attachmentId,
       file?.fileId,
@@ -724,9 +705,9 @@ function sortAttachments(root, detail = {}) {
   );
   if (cards.length < 2) return true;
 
-  const raw = safeObject(first(detail?.raw, detail));
+  const raw = safeObject(firstNonEmpty(detail?.raw, detail));
   const files = array(
-    first(
+    firstNonEmpty(
       detail?.attachments,
       detail?.files,
       detail?.adjuntos,
@@ -1033,7 +1014,7 @@ function refreshAfterBlockedError(root) {
   const id = ticketId(root);
   const currentDetail = safeObject(hydration?.detail, {});
   const currentPolicy = safeObject(
-    first(
+    firstNonEmpty(
       currentDetail.userUpdatePolicy,
       currentDetail.meta?.userUpdatePolicy,
       {}

@@ -30,7 +30,7 @@ import {
   closeClientesDetailModal,
 } from "./clientes.template.modal.js";
 import { createClientesCreateController } from "./clientes.create-controller.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 
 export const CLIENTES_MODULE_NAME = "clientes";
@@ -70,18 +70,9 @@ function number(value = 0, fallback = 0) {
 }
 
 
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    return value;
-  }
-  return null;
-}
-
 function safeError(error = null, fallback = "No se pudieron cargar los clientes.") {
   return cleanText(
-    first(
+    firstNonBlank(
       error?.message,
       error?.data?.message,
       error?.payload?.message,
@@ -97,7 +88,7 @@ function safeError(error = null, fallback = "No se pudieron cargar los clientes.
 
 function errorCode(error = null) {
   return cleanText(
-    first(
+    firstNonBlank(
       error?.code,
       error?.data?.code,
       error?.payload?.code,
@@ -182,7 +173,7 @@ function getCurrentRole(context = {}) {
   try {
     return (
       AppCore.normalizeRole(
-        first(
+        firstNonBlank(
           context.role,
           context.rol,
           context.user?.role,
@@ -199,7 +190,7 @@ function getCurrentRole(context = {}) {
       ) || "user"
     );
   } catch {
-    return slugKey(first(context.role, state.role, user.role, "user")) === "admin"
+    return slugKey(firstNonBlank(context.role, state.role, user.role, "user")) === "admin"
       ? "admin"
       : "user";
   }
@@ -245,7 +236,7 @@ function currentPath(context = {}) {
     }
   }
   return normalizePath(
-    first(
+    firstNonBlank(
       context.canonicalPath,
       context.routePath,
       context.route?.path,
@@ -319,7 +310,7 @@ function emitEvent(name = "", payload = {}) {
 function getClienteId(item = {}) {
   const current = normalizeClienteModel(safeObject(item));
   return cleanText(
-    first(
+    firstNonBlank(
       current.clienteId,
       current.clientId,
       current.customerId,
@@ -531,7 +522,7 @@ function createClientesController(host = null, initialContext = {}) {
     const row = active.closest?.("[data-client-id], [data-cliente-id]");
     const action = active.closest?.("[data-clientes-action], [data-action]");
     const clientId = cleanText(
-      first(
+      firstNonBlank(
         row?.getAttribute?.("data-client-id"),
         row?.getAttribute?.("data-cliente-id"),
         ""
@@ -544,7 +535,7 @@ function createClientesController(host = null, initialContext = {}) {
       kind: "control",
       clientId,
       action: cleanText(
-        first(
+        firstNonBlank(
           action?.getAttribute?.("data-clientes-action"),
           action?.getAttribute?.("data-action"),
           ""
@@ -610,7 +601,7 @@ function createClientesController(host = null, initialContext = {}) {
         );
         target = controls.find((control) => {
           const action = cleanText(
-            first(
+            firstNonBlank(
               control.getAttribute?.("data-clientes-action"),
               control.getAttribute?.("data-action"),
               ""
@@ -877,7 +868,7 @@ function createClientesController(host = null, initialContext = {}) {
     const seq = ++requestSeq;
     const version = queryVersion;
     const cursor = append
-      ? cleanText(first(cursorOverride, nextCursor, ""), "")
+      ? cleanText(firstNonBlank(cursorOverride, nextCursor, ""), "")
       : "";
 
     if (append) {
@@ -1272,15 +1263,15 @@ function createClientesController(host = null, initialContext = {}) {
       header,
       ...rows.map((item) => [
         getClienteId(item),
-        first(item.code, item.codigo, ""),
-        first(item.nombreFiscal, item.razonSocial, item.displayName, ""),
+        firstNonBlank(item.code, item.codigo, ""),
+        firstNonBlank(item.nombreFiscal, item.razonSocial, item.displayName, ""),
         item.email || "",
-        first(item.phone, item.telefono, ""),
-        first(item.city, item.ciudad, ""),
-        first(item.nif, item.cif, ""),
-        first(item.status, item.estado, ""),
-        first(item.tipo, item.type, ""),
-        String(first(item.totalAmount, item.totalImporte, 0)).replace(".", ","),
+        firstNonBlank(item.phone, item.telefono, ""),
+        firstNonBlank(item.city, item.ciudad, ""),
+        firstNonBlank(item.nif, item.cif, ""),
+        firstNonBlank(item.status, item.estado, ""),
+        firstNonBlank(item.tipo, item.type, ""),
+        String(firstNonBlank(item.totalAmount, item.totalImporte, 0)).replace(".", ","),
       ]),
     ];
     const csv = lines

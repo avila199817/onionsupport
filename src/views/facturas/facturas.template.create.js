@@ -20,7 +20,7 @@ import { normalizeClienteModel } from "../clientes/clientes.model.js";
 
 
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 export const FACTURAS_CREATE_TEMPLATE_VERSION =
@@ -124,17 +124,6 @@ const DEFAULT_FORM = Object.freeze({
 /* =========================================================
    BASICS
 ========================================================= */
-
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (isObject(value) && !Object.keys(value).length) continue;
-    return value;
-  }
-  return null;
-}
 
 function number(value = 0, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
@@ -269,7 +258,7 @@ export function getFacturaCreateTaxProfile(source = {}) {
   const raw = safeObject(source);
 
   const type = slugKey(
-    first(
+    firstNonEmpty(
       raw.clienteTipo,
       raw.tipo,
       raw.type,
@@ -282,7 +271,7 @@ export function getFacturaCreateTaxProfile(source = {}) {
   );
 
   const nif = cleanText(
-    first(raw.clienteNif, raw.nif, raw.cif, raw.taxId, raw.vatId, ""),
+    firstNonEmpty(raw.clienteNif, raw.nif, raw.cif, raw.taxId, raw.vatId, ""),
     ""
   ).toUpperCase();
 
@@ -318,7 +307,7 @@ export function getFacturaCreateTaxProfile(source = {}) {
   }
 
   const explicitIrpf = parseOptionalBoolean(
-    first(raw.aplicaIrpf, raw.applyIrpf, raw.retencionIrpf, raw.withholdingIrpf, null)
+    firstNonEmpty(raw.aplicaIrpf, raw.applyIrpf, raw.retencionIrpf, raw.withholdingIrpf, null)
   );
 
   if (explicitIrpf !== null) {
@@ -339,7 +328,7 @@ export function getFacturaCreateTaxProfile(source = {}) {
   }
 
   const explicitBusiness = parseOptionalBoolean(
-    first(raw.clienteEsEmpresa, raw.esEmpresa, raw.isCompany, raw.business, null)
+    firstNonEmpty(raw.clienteEsEmpresa, raw.esEmpresa, raw.isCompany, raw.business, null)
   );
 
   if (explicitBusiness !== null) {
@@ -397,12 +386,12 @@ function normalizeClient(item = {}) {
   const raw = normalizeClienteModel(item);
 
   const id = cleanText(
-    first(raw.clienteId, raw.id),
+    firstNonEmpty(raw.clienteId, raw.id),
     ""
   );
 
   const name = cleanText(
-    first(
+    firstNonEmpty(
       raw.nombreFiscal,
       raw.name,
       raw.nombre,
@@ -417,17 +406,17 @@ function normalizeClient(item = {}) {
   );
 
   const email = cleanText(
-    first(raw.email, raw.mail, raw.emailCliente, raw.clienteEmail, raw.clientEmail, raw.emailLower),
+    firstNonEmpty(raw.email, raw.mail, raw.emailCliente, raw.clienteEmail, raw.clientEmail, raw.emailLower),
     ""
   ).toLowerCase();
 
-  const userId = cleanText(first(raw.userId, raw.usuarioId), "");
-  const clienteId = cleanText(first(raw.clienteId, raw.clientId, raw.customerId, id), id);
-  const tipo = cleanText(first(raw.clienteTipo, raw.tipo, raw.type, raw.clienteType, raw.segmento), "");
-  const nif = cleanText(first(raw.nif, raw.cif, raw.taxId, raw.vatId), "").toUpperCase();
+  const userId = cleanText(firstNonEmpty(raw.userId, raw.usuarioId), "");
+  const clienteId = cleanText(firstNonEmpty(raw.clienteId, raw.clientId, raw.customerId, id), id);
+  const tipo = cleanText(firstNonEmpty(raw.clienteTipo, raw.tipo, raw.type, raw.clienteType, raw.segmento), "");
+  const nif = cleanText(firstNonEmpty(raw.nif, raw.cif, raw.taxId, raw.vatId), "").toUpperCase();
 
   const avatarUrl = safeImageSrc(
-    first(
+    firstNonEmpty(
       raw.avatarUrl,
       raw.avatar,
       raw.logoUrl,
@@ -449,16 +438,16 @@ function normalizeClient(item = {}) {
     name,
     nombre: name,
     displayName: name,
-    nombreContacto: cleanText(first(raw.nombreContacto, raw.contactName, name), name),
-    razonSocial: cleanText(first(raw.razonSocial, raw.companyName, raw.empresa, name), name),
+    nombreContacto: cleanText(firstNonEmpty(raw.nombreContacto, raw.contactName, name), name),
+    razonSocial: cleanText(firstNonEmpty(raw.razonSocial, raw.companyName, raw.empresa, name), name),
     email,
-    telefono: cleanText(first(raw.telefono, raw.phone, raw.mobile, raw.movil), ""),
+    telefono: cleanText(firstNonEmpty(raw.telefono, raw.phone, raw.mobile, raw.movil), ""),
     nif,
-    cif: cleanText(first(raw.cif, nif), nif),
+    cif: cleanText(firstNonEmpty(raw.cif, nif), nif),
     tipo,
     type: tipo,
     clienteTipo: tipo,
-    username: cleanText(first(raw.username, raw.slug, email ? email.split("@")[0] : ""), ""),
+    username: cleanText(firstNonEmpty(raw.username, raw.slug, email ? email.split("@")[0] : ""), ""),
     avatarUrl,
     avatar: avatarUrl,
   };
@@ -471,7 +460,7 @@ function normalizeClient(item = {}) {
     aplicaIrpf: taxProfile.aplicaIrpf,
     taxProfile,
     subtitle: cleanText(
-      first(
+      firstNonEmpty(
         email,
         raw.razonSocial && raw.razonSocial !== name ? raw.razonSocial : "",
         nif,
@@ -484,13 +473,13 @@ function normalizeClient(item = {}) {
 
 function normalizeTicket(item = {}) {
   const raw = safeObject(item);
-  const id = cleanText(first(raw.ticketId, raw.incidenciaId, raw.id, raw.code, raw.numero), "");
+  const id = cleanText(firstNonEmpty(raw.ticketId, raw.incidenciaId, raw.id, raw.code, raw.numero), "");
   const subject = cleanText(
-    first(raw.subject, raw.asunto, raw.title, raw.name, raw.preview, raw.description),
+    firstNonEmpty(raw.subject, raw.asunto, raw.title, raw.name, raw.preview, raw.description),
     id || "Incidencia"
   );
-  const status = cleanText(first(raw.status, raw.estado, raw.state), "");
-  const category = cleanText(first(raw.category, raw.categoria, raw.tipo), "");
+  const status = cleanText(firstNonEmpty(raw.status, raw.estado, raw.state), "");
+  const category = cleanText(firstNonEmpty(raw.category, raw.categoria, raw.tipo), "");
 
   return {
     ...raw,
@@ -500,8 +489,8 @@ function normalizeTicket(item = {}) {
     subject,
     asunto: subject,
     title: subject,
-    clienteId: cleanText(first(raw.clienteId, raw.clientId, raw.cliente?.clienteId), ""),
-    userId: cleanText(first(raw.userId, raw.usuarioId, raw.userRef?.userId), ""),
+    clienteId: cleanText(firstNonEmpty(raw.clienteId, raw.clientId, raw.cliente?.clienteId), ""),
+    userId: cleanText(firstNonEmpty(raw.userId, raw.usuarioId, raw.userRef?.userId), ""),
     status,
     estado: status,
     category,
@@ -530,13 +519,13 @@ function enrichFormWithPrimaryClient(form = {}, selectedClientes = []) {
 
   return {
     ...safeObject(form),
-    clienteId: cleanText(first(primary.clienteId, primary.id, form.clienteId), ""),
-    clienteUserId: cleanText(first(primary.userId, form.clienteUserId), ""),
-    clienteNombre: cleanText(first(primary.name, form.clienteNombre), ""),
-    clienteEmail: cleanText(first(primary.email, form.clienteEmail), ""),
-    clienteAvatar: safeImageSrc(first(primary.avatarUrl, primary.avatar, form.clienteAvatar)),
-    clienteTipo: cleanText(first(primary.clienteTipo, primary.tipo, primary.type, form.clienteTipo), ""),
-    clienteNif: cleanText(first(primary.nif, primary.cif, primary.taxId, form.clienteNif), "").toUpperCase(),
+    clienteId: cleanText(firstNonEmpty(primary.clienteId, primary.id, form.clienteId), ""),
+    clienteUserId: cleanText(firstNonEmpty(primary.userId, form.clienteUserId), ""),
+    clienteNombre: cleanText(firstNonEmpty(primary.name, form.clienteNombre), ""),
+    clienteEmail: cleanText(firstNonEmpty(primary.email, form.clienteEmail), ""),
+    clienteAvatar: safeImageSrc(firstNonEmpty(primary.avatarUrl, primary.avatar, form.clienteAvatar)),
+    clienteTipo: cleanText(firstNonEmpty(primary.clienteTipo, primary.tipo, primary.type, form.clienteTipo), ""),
+    clienteNif: cleanText(firstNonEmpty(primary.nif, primary.cif, primary.taxId, form.clienteNif), "").toUpperCase(),
     clienteEsEmpresa: primary.taxProfile.isBusiness,
     aplicaIrpf: primary.taxProfile.aplicaIrpf,
   };
@@ -545,18 +534,18 @@ function enrichFormWithPrimaryClient(form = {}, selectedClientes = []) {
 function normalizeLineItem(linea = {}, index = 0) {
   const raw = safeObject(linea);
   const defaultConcept = index === 0 ? DEFAULT_FORM.concepto : "";
-  const cantidad = Math.max(0, number(first(raw.cantidad, raw.horas, raw.qty, raw.quantity), index === 0 ? DEFAULT_FORM.cantidad : 1));
-  const precioUnitario = Math.max(0, number(first(raw.precioUnitario, raw.precio, raw.rate, raw.unitPrice), index === 0 ? DEFAULT_FORM.precioUnitario : 0));
+  const cantidad = Math.max(0, number(firstNonEmpty(raw.cantidad, raw.horas, raw.qty, raw.quantity), index === 0 ? DEFAULT_FORM.cantidad : 1));
+  const precioUnitario = Math.max(0, number(firstNonEmpty(raw.precioUnitario, raw.precio, raw.rate, raw.unitPrice), index === 0 ? DEFAULT_FORM.precioUnitario : 0));
 
   return {
-    id: cleanText(first(raw.id, raw.lineaId), `linea-${index + 1}`),
-    concepto: cleanText(first(raw.concepto, raw.title), defaultConcept),
-    descripcion: String(first(raw.descripcion, raw.description, raw.detalle, "") ?? "")
+    id: cleanText(firstNonEmpty(raw.id, raw.lineaId), `linea-${index + 1}`),
+    concepto: cleanText(firstNonEmpty(raw.concepto, raw.title), defaultConcept),
+    descripcion: String(firstNonEmpty(raw.descripcion, raw.description, raw.detalle, "") ?? "")
       .split("\r\n").join("\n")
       .split("\r").join("\n")
       .trim(),
     cantidad,
-    unidad: cleanText(first(raw.unidad, raw.unit), index === 0 ? "h" : "ud"),
+    unidad: cleanText(firstNonEmpty(raw.unidad, raw.unit), index === 0 ? "h" : "ud"),
     precioUnitario,
   };
 }
@@ -575,7 +564,7 @@ function normalizeForm(form = {}) {
     concepto: input.concepto,
     descripcion: input.descripcion,
     cantidad: input.cantidad,
-    unidad: first(input.unidad, "h"),
+    unidad: firstNonEmpty(input.unidad, "h"),
     precioUnitario: input.precioUnitario,
   };
   const lineas = (rawLineas.length ? rawLineas : [fallbackLine])
@@ -583,11 +572,11 @@ function normalizeForm(form = {}) {
   const firstLine = lineas[0] || normalizeLineItem(fallbackLine, 0);
 
   const clienteTipo = cleanText(
-    first(input.clienteTipo, input.tipoCliente, input.tipo, input.type),
+    firstNonEmpty(input.clienteTipo, input.tipoCliente, input.tipo, input.type),
     ""
   );
   const clienteNif = cleanText(
-    first(input.clienteNif, input.nif, input.cif, input.taxId),
+    firstNonEmpty(input.clienteNif, input.nif, input.cif, input.taxId),
     ""
   ).toUpperCase();
 
@@ -788,12 +777,12 @@ function renderTicketSearchResults(vm = {}) {
   if (search.empty) return `<div class="fac-create-search-state">No hay incidencias disponibles para este cliente.</div>`;
   if (!search.results.length) return `<div class="fac-create-search-state">No hay incidencias que mostrar para este cliente.</div>`;
 
-  const selectedIds = new Set(vm.selectedTickets.map((item) => cleanText(first(item.ticketId, item.incidenciaId, item.id), "")));
+  const selectedIds = new Set(vm.selectedTickets.map((item) => cleanText(firstNonEmpty(item.ticketId, item.incidenciaId, item.id), "")));
 
   return `
     <div class="fac-create-search-results" role="listbox" aria-label="Incidencias del cliente">
       ${search.results.map((ticket, index) => {
-        const id = cleanText(first(ticket.ticketId, ticket.incidenciaId, ticket.id), "");
+        const id = cleanText(firstNonEmpty(ticket.ticketId, ticket.incidenciaId, ticket.id), "");
         const selected = selectedIds.has(id);
         return `
           <button

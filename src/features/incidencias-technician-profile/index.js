@@ -29,7 +29,7 @@ import {
   synchronizeAvatars,
 } from "../avatar-system/index.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { safeObject } from "../../core/objects.js";
+import { safeObject, firstNonEmpty } from "../../core/objects.js";
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
   "incidencias-technician-profile.v9-public-metrics-rating-ready";
@@ -98,22 +98,6 @@ const modalLifecycle = createModalLifecycle({
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
 
-function first(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      !Object.keys(value).length
-    ) continue;
-    return value;
-  }
-  return null;
-}
-
 // Missing fields may inherit a snapshot. Null/empty values are explicit clears.
 function firstDefined(...values) {
   return values.find((value) => value !== undefined);
@@ -177,7 +161,7 @@ function safeAvatarUrl(value = "") {
 
 function safeError(error = null) {
   return cleanText(
-    first(
+    firstNonEmpty(
       error?.message,
       error?.data?.message,
       error?.payload?.message
@@ -223,7 +207,7 @@ function ratingLabel(value = 0) {
 function technicianFromTicket(ticket = {}) {
   const raw = safeObject(ticket);
   const assignment = safeObject(raw.assignment);
-  const nested = safeObject(first(
+  const nested = safeObject(firstNonEmpty(
     raw.assignedTo,
     raw.technician,
     raw.tecnico,
@@ -273,7 +257,7 @@ function technicianFromTicket(ticket = {}) {
   );
 
   return {
-    userId: cleanText(first(
+    userId: cleanText(firstNonEmpty(
       raw.assignedToUserId,
       raw.technicianUserId,
       raw.tecnicoUserId,
@@ -282,7 +266,7 @@ function technicianFromTicket(ticket = {}) {
       nested.userId,
       nested.id
     ), ""),
-    name: cleanText(first(
+    name: cleanText(firstNonEmpty(
       raw.assignedToName,
       raw.technicianName,
       raw.tecnicoName,
@@ -294,7 +278,7 @@ function technicianFromTicket(ticket = {}) {
       nested.nombre
     ), ""),
     email: email === undefined ? undefined : normalizeEmail(email),
-    phone: cleanText(first(
+    phone: cleanText(firstNonEmpty(
       raw.assignedToPhone,
       raw.technicianPhone,
       raw.tecnicoPhone,
@@ -308,14 +292,14 @@ function technicianFromTicket(ticket = {}) {
     ), ""),
     avatar: hasAvatar === false ? "" : avatar === undefined ? undefined : safeAvatarUrl(avatar),
     username: username === undefined ? undefined : cleanText(username, ""),
-    role: cleanText(first(
+    role: cleanText(firstNonEmpty(
       nested.profile?.position,
       nested.position,
       nested.role,
       nested.rol,
       assignment.role
     ), ""),
-    status: cleanText(first(
+    status: cleanText(firstNonEmpty(
       nested.status,
       nested.estado,
       nested.active === false ? "inactive" : "active"
@@ -355,7 +339,7 @@ export function publicTechnicianProfileFor(tech = {}) {
 
 function mergeTechnician(snapshot = {}, user = {}) {
   const candidate = safeObject(user);
-  const candidateId = cleanText(first(
+  const candidateId = cleanText(firstNonEmpty(
     candidate.userId,
     candidate.usuarioId,
     candidate.id,
@@ -382,7 +366,7 @@ function mergeTechnician(snapshot = {}, user = {}) {
   const hasAvatar = firstDefined(source.hasAvatar, source.profile?.hasAvatar, raw.hasAvatar);
   const merged = {
     lookupUserId: cleanText(snapshot.lookupUserId, ""),
-    userId: cleanText(first(
+    userId: cleanText(firstNonEmpty(
       source.userId,
       source.usuarioId,
       source.id,
@@ -390,7 +374,7 @@ function mergeTechnician(snapshot = {}, user = {}) {
       raw.id,
       snapshot.userId
     ), ""),
-    name: cleanText(first(
+    name: cleanText(firstNonEmpty(
       source.displayName,
       source.fullName,
       source.name,
@@ -406,7 +390,7 @@ function mergeTechnician(snapshot = {}, user = {}) {
       raw.emailLower,
       snapshot.email
     )),
-    phone: cleanText(first(
+    phone: cleanText(firstNonEmpty(
       source.phone,
       source.telefono,
       source.phoneE164,
@@ -425,7 +409,7 @@ function mergeTechnician(snapshot = {}, user = {}) {
       raw.username,
       snapshot.username
     ), ""),
-    role: cleanText(first(
+    role: cleanText(firstNonEmpty(
       source.profile?.position,
       source.position,
       source.cargo,
@@ -436,7 +420,7 @@ function mergeTechnician(snapshot = {}, user = {}) {
       snapshot.role
     ), ""),
     avatar: hasAvatar === false ? "" : safeAvatarUrl(avatar === undefined ? snapshot.avatar : avatar),
-    status: cleanText(first(
+    status: cleanText(firstNonEmpty(
       source.status,
       source.estado,
       raw.status,
@@ -489,7 +473,7 @@ function aggregateScopeIsPublic(response = {}) {
 function resolvedCountFromSummary(response = {}) {
   const summary = safeObject(response.summary);
   const meta = safeObject(response.meta);
-  const technicianSummary = safeObject(first(
+  const technicianSummary = safeObject(firstNonEmpty(
     summary.technician,
     summary.technicianStats,
     meta.technician,
@@ -521,7 +505,7 @@ export function normalizePublicTechnicianMetrics(response = null) {
   const publicScope = aggregateScopeIsPublic(source);
   const explicitResolved = resolvedCountFromSummary(source);
   const responseTotal = nonNegativeInteger(
-    first(
+    firstNonEmpty(
       source.total,
       source.totalCount,
       source.count,
@@ -549,7 +533,7 @@ export function normalizePublicTechnicianMetrics(response = null) {
 }
 
 function metricSearchTerm(tech = {}) {
-  return cleanText(first(
+  return cleanText(firstNonEmpty(
     tech.lookupUserId,
     tech.email,
     tech.username,
@@ -738,7 +722,7 @@ function renderProfile(tech = {}, metrics = {}) {
   const email = normalizeEmail(tech.email);
   const phone = cleanText(tech.phone, "");
   const dialPhone = phone.replace(/[^+\d]/g, "");
-  const roleLabel = cleanText(first(
+  const roleLabel = cleanText(firstNonEmpty(
     tech.publicRole,
     profile?.role,
     tech.role,
@@ -773,7 +757,7 @@ function renderProfile(tech = {}, metrics = {}) {
 function renderShell({ tech = {}, body = "", summary = "" } = {}) {
   const name = cleanText(tech.name, "Técnico");
   const profile = publicTechnicianProfileFor(tech);
-  const role = cleanText(first(
+  const role = cleanText(firstNonEmpty(
     tech.publicRole,
     profile?.role,
     tech.role,
@@ -852,7 +836,7 @@ function technicianTriggerName(trigger = null) {
   if (avatar?.hasAttribute("data-avatar-name")) {
     return cleanText(avatar.dataset.avatarName, "Técnico");
   }
-  return cleanText(first(
+  return cleanText(firstNonEmpty(
     trigger?.querySelector?.(".incidencias-assigned-name")?.textContent,
     trigger?.querySelector?.(".incidencias-modal-technician-copy strong")?.textContent,
     trigger?.querySelector?.("strong")?.textContent,
@@ -866,14 +850,14 @@ function technicianTriggerEmail(trigger = null) {
     return normalizeEmail(avatar.dataset.avatarEmail);
   }
   const node = trigger?.querySelector?.(".incidencias-modal-technician-email");
-  return normalizeEmail(first(
+  return normalizeEmail(firstNonEmpty(
     node?.textContent,
     node?.getAttribute?.("href")?.replace(/^mailto:/i, "")
   ));
 }
 
 function technicianTriggerLookupUserId(trigger = null) {
-  return cleanText(first(
+  return cleanText(firstNonEmpty(
     trigger?.dataset?.technicianUserId,
     trigger?.querySelector?.("[data-technician-user-id]")?.dataset?.technicianUserId
   ), "");
@@ -897,7 +881,7 @@ function technicianTriggerUsername(trigger = null) {
 function ticketIdFromTrigger(trigger = null) {
   const row = trigger?.closest?.(ROW);
   const detailRoot = trigger?.closest?.(DETAIL_ROOT);
-  return cleanText(first(
+  return cleanText(firstNonEmpty(
     trigger?.dataset?.ticketId,
     row?.dataset?.ticketId,
     row?.dataset?.incidenciaId,

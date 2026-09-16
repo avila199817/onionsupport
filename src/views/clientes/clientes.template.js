@@ -11,7 +11,7 @@ import {
   normalizeClientesCollection,
   computeClientesStats,
 } from "./clientes.model.js";
-import { safeObject } from "../../core/objects.js";
+import { safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 
 export {
@@ -58,15 +58,6 @@ const FILTERS = Object.freeze([
   { key: "blocked", label: "Bloqueados" },
 ]);
 
-
-function first(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    return value;
-  }
-  return null;
-}
 
 function number(value = 0, fallback = 0) {
   const parsed = Number(value);
@@ -175,7 +166,7 @@ function formatRelativeDate(value = null) {
 
 function statusBucket(item = {}) {
   const current = normalizeClienteModel(item);
-  const status = slugKey(first(current.status, current.estado, "active"));
+  const status = slugKey(firstNonBlank(current.status, current.estado, "active"));
   if (["pending", "pendiente", "new", "nuevo", "invited"].includes(status)) {
     return "pending";
   }
@@ -198,7 +189,7 @@ function statusLabel(item = {}) {
 }
 
 function typeLabel(item = {}) {
-  const type = slugKey(first(item?.tipo, item?.type, ""));
+  const type = slugKey(firstNonBlank(item?.tipo, item?.type, ""));
   if (type === "empresa") return "Empresa";
   if (type === "particular") return "Particular";
   return "Cliente";
@@ -257,8 +248,8 @@ function safeAvatarUrl(value = "") {
 
 function renderAvatar(item = {}) {
   const current = normalizeClienteModel(item);
-  const label = cleanText(first(current.contactoNombre, current.nombreFiscal, "Cliente"), "Cliente");
-  const src = safeAvatarUrl(first(current.avatar, current.avatarUrl, ""));
+  const label = cleanText(firstNonBlank(current.contactoNombre, current.nombreFiscal, "Cliente"), "Cliente");
+  const src = safeAvatarUrl(firstNonBlank(current.avatar, current.avatarUrl, ""));
   const presentation = avatarPresentation(current, label);
   return `
     <span class="clientes-avatar${src ? " has-image" : " is-fallback"}" aria-hidden="true"
@@ -274,7 +265,7 @@ function renderAvatar(item = {}) {
 function renderContact(item = {}) {
   const current = normalizeClienteModel(item);
   const email = cleanText(current.email, "");
-  const phone = cleanText(first(current.phone, current.telefono, ""), "");
+  const phone = cleanText(firstNonBlank(current.phone, current.telefono, ""), "");
   if (!email && !phone) return '<span class="clientes-contact-empty">Sin contacto</span>';
   return `
     <div class="clientes-contact-stack">
@@ -286,10 +277,10 @@ function renderContact(item = {}) {
 
 function renderRow(item = {}, vm = {}) {
   const current = normalizeClienteModel(item);
-  const id = cleanText(first(current.clienteId, current.id, ""), "");
+  const id = cleanText(firstNonBlank(current.clienteId, current.id, ""), "");
   const opening = Boolean(id && vm.openingClienteId === id);
-  const code = cleanText(first(current.code, current.codigo, id, "CLI-SIN-ID"), "CLI-SIN-ID");
-  const name = cleanText(first(current.nombreFiscal, current.razonSocial, current.displayName, "Cliente"), "Cliente");
+  const code = cleanText(firstNonBlank(current.code, current.codigo, id, "CLI-SIN-ID"), "CLI-SIN-ID");
+  const name = cleanText(firstNonBlank(current.nombreFiscal, current.razonSocial, current.displayName, "Cliente"), "Cliente");
   const secondary = [current.email, current.nif].filter(Boolean).join(" · ") || "Sin datos fiscales";
   const createdDate = formatDateShort(current.createdAt);
   const createdTime = formatTimeShort(current.createdAt);
@@ -318,7 +309,7 @@ function renderRow(item = {}, vm = {}) {
             <div class="clientes-client-name">${escapeHtml(name)}</div>
             <div class="clientes-client-description">${escapeHtml(secondary)}</div>
             <div class="clientes-client-meta">
-              <span>${escapeHtml(cleanText(first(current.city, current.ciudad, "Sin ciudad"), "Sin ciudad"))}</span>
+              <span>${escapeHtml(cleanText(firstNonBlank(current.city, current.ciudad, "Sin ciudad"), "Sin ciudad"))}</span>
               ${current.nif ? `<span class="clientes-mini-badge">${escapeHtml(current.nif)}</span>` : ""}
             </div>
           </div>
@@ -339,7 +330,7 @@ function renderRow(item = {}, vm = {}) {
       <td class="clientes-cell clientes-cell--contact">${renderContact(current)}</td>
       <td class="clientes-cell clientes-cell--amount">
         <div class="clientes-total-stack">
-          <span class="clientes-total-value">${escapeHtml(formatMoney(first(current.totalAmount, current.totalImporte, 0)))}</span>
+          <span class="clientes-total-value">${escapeHtml(formatMoney(firstNonBlank(current.totalAmount, current.totalImporte, 0)))}</span>
           <span class="clientes-total-caption">Facturación cargada</span>
         </div>
       </td>

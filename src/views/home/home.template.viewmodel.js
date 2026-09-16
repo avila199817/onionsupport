@@ -4,28 +4,19 @@
 ========================================================= */
 
 import { userNameFromIdentity } from "../../core/user-identity.js";
-import {
-  DEFAULT_ROUTES,
-  clamp,
-  cleanText,
-  first,
-  initialsFrom,
-  isObject,
-  normalizeKey,
-  optionalNumber,
-  safeArray,
-  safeImageSrc,
-} from "./home.template.foundation.js";
+import { DEFAULT_ROUTES, cleanText, initialsFrom, isObject, normalizeKey, optionalNumber, safeArray, safeImageSrc } from "./home.template.foundation.js";
+import { clamp } from "../../core/numbers.js";
+import { firstNonEmpty } from "../../core/objects.js";
 
 export function buildVm(input = {}) {
   const data = isObject(input) ? input : {};
   const dashboard = isObject(data.dashboard) ? data.dashboard : data;
   const summary = isObject(dashboard.summary) ? dashboard.summary : {};
-  const userCandidate = first(data.user, dashboard.user, {});
+  const userCandidate = firstNonEmpty(data.user, dashboard.user, {});
   const user = isObject(userCandidate) ? userCandidate : {};
 
   const role = cleanText(
-    first(data.role, dashboard.role, user.role, user.rol, "user"),
+    firstNonEmpty(data.role, dashboard.role, user.role, user.rol, "user"),
     "user"
   ).toLowerCase();
 
@@ -39,11 +30,11 @@ export function buildVm(input = {}) {
     ...(isObject(data.routes) ? data.routes : {}),
   };
 
-  const incidencias = safeArray(first(dashboard.incidencias, dashboard.tickets, []));
-  const facturas = safeArray(first(dashboard.facturas, dashboard.invoices, []));
-  const activity = safeArray(first(dashboard.activity, dashboard.actividad, dashboard.movimientos, []));
+  const incidencias = safeArray(firstNonEmpty(dashboard.incidencias, dashboard.tickets, []));
+  const facturas = safeArray(firstNonEmpty(dashboard.facturas, dashboard.invoices, []));
+  const activity = safeArray(firstNonEmpty(dashboard.activity, dashboard.actividad, dashboard.movimientos, []));
 
-  const displayName = userNameFromIdentity(user, first(user.username, data.displayName, "Usuario"));
+  const displayName = userNameFromIdentity(user, firstNonEmpty(user.username, data.displayName, "Usuario"));
 
   function summaryCount(...keys) {
     for (const key of keys) {
@@ -55,7 +46,7 @@ export function buildVm(input = {}) {
   }
 
   const totalInvoiced = optionalNumber(
-    first(
+    firstNonEmpty(
       summary.totalInvoiced,
       summary.totalAmount,
       summary.grossAmount,
@@ -65,7 +56,7 @@ export function buildVm(input = {}) {
   );
 
   let paidTotal = optionalNumber(
-    first(
+    firstNonEmpty(
       summary.paidTotal,
       summary.paidAmount,
       summary.totalPagado,
@@ -74,7 +65,7 @@ export function buildVm(input = {}) {
   );
 
   let outstandingAmount = optionalNumber(
-    first(
+    firstNonEmpty(
       summary.outstandingAmount,
       summary.pendingAmount,
       summary.totalPendiente,
@@ -100,7 +91,7 @@ export function buildVm(input = {}) {
       : null;
 
   const currency = cleanText(
-    first(
+    firstNonEmpty(
       summary.currency,
       summary.moneda,
       facturas[0]?.currency,
@@ -110,7 +101,7 @@ export function buildVm(input = {}) {
     "EUR"
   ).toUpperCase();
 
-  const updatedAt = first(
+  const updatedAt = firstNonEmpty(
     dashboard.updatedAt,
     dashboard.loadedAt,
     dashboard.cache?.loadedAt,
@@ -122,7 +113,7 @@ export function buildVm(input = {}) {
     summary.invoiceStatsAvailable === true &&
     totalInvoiced !== null;
 
-  const onboardingCandidate = first(
+  const onboardingCandidate = firstNonEmpty(
     data.onboarding,
     dashboard.onboarding,
     user.onboarding,
@@ -140,7 +131,7 @@ export function buildVm(input = {}) {
       displayName,
       initials: cleanText(user.initials, initialsFrom(displayName)),
       avatarUrl: safeImageSrc(
-        first(
+        firstNonEmpty(
           user.avatarUrl,
           user.avatar,
           user.picture,
@@ -160,7 +151,7 @@ export function buildVm(input = {}) {
     updatedAt,
     loading: data.loading === true,
     refreshing: data.refreshing === true,
-    error: cleanText(first(data.error, dashboard.error, ""), ""),
+    error: cleanText(firstNonEmpty(data.error, dashboard.error, ""), ""),
     stale: dashboard.stale === true,
     partial: dashboard.partial === true,
     warnings: safeArray(dashboard.warnings),

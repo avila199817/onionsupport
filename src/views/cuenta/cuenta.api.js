@@ -37,7 +37,7 @@ import {
   validateAuthPassword,
 } from "../../features/auth/password-policy.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject, isFunction } from "../../core/objects.js";
+import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 
@@ -91,17 +91,6 @@ function safeLower(value = "", fallback = "") {
   return cleanText(value, fallback).toLowerCase();
 }
 
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
-    return value;
-  }
-  return null;
-}
-
 function normalizeBoolean(value, fallback = false) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
@@ -132,7 +121,7 @@ function normalizeStatus(source = {}) {
     return "disabled";
   }
 
-  const status = slugKey(first(object.status, object.estado, "active"));
+  const status = slugKey(firstNonEmpty(object.status, object.estado, "active"));
   if (["disabled", "inactive", "blocked", "suspended", "deleted", "archived"].includes(status)) {
     return "disabled";
   }
@@ -143,11 +132,11 @@ function normalizeStatus(source = {}) {
 function normalizeDireccion(value = {}) {
   const source = safeObject(value);
   return {
-    calle: cleanText(first(source.calle, source.line1, source.street, ""), ""),
-    cp: cleanText(first(source.cp, source.postalCode, source.zip, ""), ""),
-    ciudad: cleanText(first(source.ciudad, source.city, ""), ""),
-    provincia: cleanText(first(source.provincia, source.province, source.state, ""), ""),
-    pais: cleanText(first(source.pais, source.country, ""), ""),
+    calle: cleanText(firstNonEmpty(source.calle, source.line1, source.street, ""), ""),
+    cp: cleanText(firstNonEmpty(source.cp, source.postalCode, source.zip, ""), ""),
+    ciudad: cleanText(firstNonEmpty(source.ciudad, source.city, ""), ""),
+    provincia: cleanText(firstNonEmpty(source.provincia, source.province, source.state, ""), ""),
+    pais: cleanText(firstNonEmpty(source.pais, source.country, ""), ""),
   };
 }
 
@@ -175,7 +164,7 @@ function isActiveLoadToken(token) {
 }
 
 function getErrorStatus(error = null) {
-  return Number(first(
+  return Number(firstNonEmpty(
     error?.status,
     error?.statusCode,
     error?.response?.status,
@@ -186,7 +175,7 @@ function getErrorStatus(error = null) {
 }
 
 function getErrorCode(error = null) {
-  return cleanText(first(
+  return cleanText(firstNonEmpty(
     error?.code,
     error?.error,
     error?.payload?.code,
@@ -200,7 +189,7 @@ function getErrorCode(error = null) {
 }
 
 function normalizeErrorMessage(error = null, fallback = "Error de cuenta.") {
-  return cleanText(first(
+  return cleanText(firstNonEmpty(
     error?.payload?.message,
     error?.data?.message,
     error?.response?.data?.message,
@@ -231,14 +220,14 @@ function getCoreState() {
 
 function getCurrentCoreUser() {
   try {
-    return safeObject(first(
+    return safeObject(firstNonEmpty(
       AppCore?.getCurrentUser?.(),
       getCoreState().user,
       getCoreState().currentUser,
       {}
     ), {});
   } catch {
-    return safeObject(first(getCoreState().user, getCoreState().currentUser, {}), {});
+    return safeObject(firstNonEmpty(getCoreState().user, getCoreState().currentUser, {}), {});
   }
 }
 
@@ -255,7 +244,7 @@ function extractUser(payload = null) {
   const data = safeObject(root.data);
   const auth = safeObject(root.auth);
 
-  return safeObject(first(
+  return safeObject(firstNonEmpty(
     root.user,
     root.me,
     root.account,
@@ -276,7 +265,7 @@ function extractPreferences(payload = null, user = {}) {
   const auth = safeObject(root.auth);
   return {
     ...safeObject(user.preferences),
-    ...safeObject(first(root.preferences, data.preferences, auth.preferences, {})),
+    ...safeObject(firstNonEmpty(root.preferences, data.preferences, auth.preferences, {})),
   };
 }
 
@@ -284,13 +273,13 @@ function extractRouting(payload = null) {
   const root = safeObject(payload);
   const data = safeObject(root.data);
   const auth = safeObject(root.auth);
-  return safeObject(first(root.routing, data.routing, auth.routing, {}), {});
+  return safeObject(firstNonEmpty(root.routing, data.routing, auth.routing, {}), {});
 }
 
 function extractCliente(payload = null) {
   const root = safeObject(payload);
   const data = safeObject(root.data);
-  return safeObject(first(
+  return safeObject(firstNonEmpty(
     root.cliente,
     root.client,
     root.customer,
@@ -315,19 +304,19 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
   const routing = { ...extractRouting(fallback), ...extractRouting(payload) };
   const cliente = { ...extractCliente(fallback), ...extractCliente(payload) };
 
-  const userId = cleanText(first(source.userId, source.id, source.uid, source.sub, ""), "");
-  const id = cleanText(first(source.id, userId, ""), "");
-  const email = safeLower(first(source.email, source.emailLower, ""), "");
-  const username = cleanText(first(source.username, source.usernameLower, ""), "");
-  const slug = safeLower(first(routing.slug, source.slug, username, ""), "").replace(/^@+/, "");
+  const userId = cleanText(firstNonEmpty(source.userId, source.id, source.uid, source.sub, ""), "");
+  const id = cleanText(firstNonEmpty(source.id, userId, ""), "");
+  const email = safeLower(firstNonEmpty(source.email, source.emailLower, ""), "");
+  const username = cleanText(firstNonEmpty(source.username, source.usernameLower, ""), "");
+  const slug = safeLower(firstNonEmpty(routing.slug, source.slug, username, ""), "").replace(/^@+/, "");
   const name = userNameFromIdentity(source, username || email || "Usuario Onion");
-  const phone = cleanText(first(source.phone, source.telefono, ""), "");
-  const role = AppCore.normalizeRole(first(source.role, source.rol, safeArray(source.roles)[0], DEFAULT_ROLE)) || DEFAULT_ROLE;
+  const phone = cleanText(firstNonEmpty(source.phone, source.telefono, ""), "");
+  const role = AppCore.normalizeRole(firstNonEmpty(source.role, source.rol, safeArray(source.roles)[0], DEFAULT_ROLE)) || DEFAULT_ROLE;
   const status = normalizeStatus(source);
   const active = status === "active";
   const tipo = slugKey(source.tipo) === "empresa" ? "empresa" : "particular";
-  const nif = cleanText(first(source.nif, source.cif, ""), "").toUpperCase();
-  const clienteId = cleanText(first(
+  const nif = cleanText(firstNonEmpty(source.nif, source.cif, ""), "").toUpperCase();
+  const clienteId = cleanText(firstNonEmpty(
     source.clienteId,
     source.clientId,
     source.customerId,
@@ -338,11 +327,11 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     ""
   ), "");
   const avatarUrl = source.hasAvatar === false ? "" :
-    sanitizeRuntimeImageUrl(first(source.avatarUrl, source.avatar, source.photoUrl, source.picture, ""));
+    sanitizeRuntimeImageUrl(firstNonEmpty(source.avatarUrl, source.avatar, source.photoUrl, source.picture, ""));
 
-  const darkMode = normalizeBoolean(first(preferences.darkMode, source.darkMode, false), false);
-  const privacyMode = normalizeBoolean(first(preferences.privacyMode, source.privacyMode, false), false);
-  const themeKey = slugKey(first(
+  const darkMode = normalizeBoolean(firstNonEmpty(preferences.darkMode, source.darkMode, false), false);
+  const privacyMode = normalizeBoolean(firstNonEmpty(preferences.privacyMode, source.privacyMode, false), false);
+  const themeKey = slugKey(firstNonEmpty(
     preferences.theme,
     source.theme,
     source.mode,
@@ -350,7 +339,7 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     darkMode ? "dark" : DEFAULT_THEME
   ));
   const theme = themeKey === "dark" ? "dark" : "light";
-  const lang = normalizeLang(first(
+  const lang = normalizeLang(firstNonEmpty(
     preferences.lang,
     preferences.language,
     preferences.locale,
@@ -359,8 +348,8 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     source.locale,
     DEFAULT_LANG
   ));
-  const direccion = normalizeDireccion(first(source.direccion, source.address, {}));
-  const permissions = sanitizePermissions(first(source.permissions, source.permisos, []));
+  const direccion = normalizeDireccion(firstNonEmpty(source.direccion, source.address, {}));
+  const permissions = sanitizePermissions(firstNonEmpty(source.permissions, source.permisos, []));
 
   const canonicalPreferences = {
     darkMode,
@@ -371,7 +360,7 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     lang,
     language: lang,
     locale: lang,
-    timezone: cleanText(first(preferences.timezone, source.timezone, "Europe/Madrid"), "Europe/Madrid"),
+    timezone: cleanText(firstNonEmpty(preferences.timezone, source.timezone, "Europe/Madrid"), "Europe/Madrid"),
     dateFormat: cleanText(preferences.dateFormat, "dd/MM/yyyy"),
     timeFormat: cleanText(preferences.timeFormat, "24h"),
     currency: cleanText(preferences.currency, "EUR"),
@@ -379,7 +368,7 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     compactMode: normalizeBoolean(preferences.compactMode, false),
     reducedMotion: normalizeBoolean(preferences.reducedMotion, false),
     notifications: safeObject(preferences.notifications),
-    updatedAt: first(preferences.updatedAt, source.preferencesUpdatedAt, source.updatedAt, null),
+    updatedAt: firstNonEmpty(preferences.updatedAt, source.preferencesUpdatedAt, source.updatedAt, null),
   };
 
   const safeProfile = {
@@ -396,9 +385,9 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
 
   const safeCliente = Object.keys(cliente).length
     ? {
-        id: cleanText(first(cliente.id, clienteId, ""), ""),
+        id: cleanText(firstNonEmpty(cliente.id, clienteId, ""), ""),
         clienteId,
-        nombreFiscal: cleanText(first(cliente.nombreFiscal, cliente.name, ""), ""),
+        nombreFiscal: cleanText(firstNonEmpty(cliente.nombreFiscal, cliente.name, ""), ""),
         tipo: slugKey(cliente.tipo) === "empresa"
           ? "empresa"
           : slugKey(cliente.tipo) === "particular" ? "particular" : "",
@@ -436,7 +425,7 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     email,
     emailLower: email,
     username,
-    usernameLower: safeLower(first(source.usernameLower, username), ""),
+    usernameLower: safeLower(firstNonEmpty(source.usernameLower, username), ""),
     slug,
     name,
     nombre: name,
@@ -467,7 +456,7 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     avatar: avatarUrl,
     avatarUrl,
     picture: avatarUrl,
-    avatarUpdatedAt: first(source.avatarUpdatedAt, null),
+    avatarUpdatedAt: firstNonEmpty(source.avatarUpdatedAt, null),
     darkMode,
     privacyMode,
     theme,
@@ -479,17 +468,17 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     idioma: lang,
     timezone: canonicalPreferences.timezone,
     emailVerified: source.emailVerified === true,
-    createdAt: first(source.createdAt, null),
-    updatedAt: first(source.updatedAt, source.updated_at, null),
-    lastLoginAt: first(source.lastLoginAt, null),
-    lastSeenAt: first(source.lastSeenAt, null),
-    lastPasswordChangeAt: first(source.lastPasswordChangeAt, null),
+    createdAt: firstNonEmpty(source.createdAt, null),
+    updatedAt: firstNonEmpty(source.updatedAt, source.updated_at, null),
+    lastLoginAt: firstNonEmpty(source.lastLoginAt, null),
+    lastSeenAt: firstNonEmpty(source.lastSeenAt, null),
+    lastPasswordChangeAt: firstNonEmpty(source.lastPasswordChangeAt, null),
     preferences: canonicalPreferences,
     settings: canonicalPreferences,
     routing: {
       slug,
-      homePath: cleanText(first(routing.homePath, routing.publicPath, ""), ""),
-      canonicalPath: cleanText(first(routing.canonicalPath, routing.publicPath, ""), ""),
+      homePath: cleanText(firstNonEmpty(routing.homePath, routing.publicPath, ""), ""),
+      canonicalPath: cleanText(firstNonEmpty(routing.canonicalPath, routing.publicPath, ""), ""),
       publicPath: cleanText(routing.publicPath, ""),
     },
     cliente: safeCliente,
@@ -508,7 +497,7 @@ function checkedCuentaUser(response, scope) {
     throw createCuentaError(response, "El backend rechazó la operación de cuenta.");
   }
   const user = extractUser(response);
-  const id = safeLower(first(user.userId, user.id, user.uid, user.sub, ""));
+  const id = safeLower(firstNonEmpty(user.userId, user.id, user.uid, user.sub, ""));
   if (id && id !== scope.userId) {
     throw createCuentaError({ code: "CUENTA_IDENTITY_MISMATCH", status: 502,
       message: "La respuesta no corresponde a la cuenta actual." });
@@ -556,21 +545,21 @@ async function requestJson(method = "GET", endpoint = "", {
 export function validateCuentaPasswordPayload(payload = {}) {
   const body = safeObject(payload);
   const normalized = {
-    currentPassword: String(first(
+    currentPassword: String(firstNonEmpty(
       body.currentPassword,
       body.current_password,
       body.oldPassword,
       body.old_password,
       ""
     ) ?? ""),
-    newPassword: String(first(
+    newPassword: String(firstNonEmpty(
       body.newPassword,
       body.new_password,
       body.password,
       body.pass,
       ""
     ) ?? ""),
-    confirmPassword: String(first(
+    confirmPassword: String(firstNonEmpty(
       body.confirmPassword,
       body.passwordConfirm,
       body.repeatPassword,

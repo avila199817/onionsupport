@@ -25,8 +25,9 @@ import IncidenciasApi from "../incidencias/incidencias.api.js";
 import FacturasApi from "../facturas/facturas.api.js";
 import { fetchClientesStatsRequest } from "../clientes/clientes.api.js";
 import { fetchUsuariosStatsRequest } from "../usuarios/usuarios.api.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { nowIso, nowMs } from "../../core/clock.js";
 
 export const HOME_API_VERSION =
   "home.api.domain-aggregator.v13-domain-counts";
@@ -59,18 +60,6 @@ const cacheState = {
    BASICS
 ========================================================= */
 
-
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
-    return value;
-  }
-
-  return null;
-}
 
 function number(value, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
@@ -105,14 +94,6 @@ function number(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function now() {
-  return Date.now();
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
 function safeId(value = "") {
   return cleanText(value, "")
     .replace(/[\r\n\t]/g, "")
@@ -131,7 +112,7 @@ function redact(value = "") {
 
 function errorStatus(error = null) {
   return number(
-    first(
+    firstNonEmpty(
       error?.status,
       error?.statusCode,
       error?.response?.status,
@@ -183,7 +164,7 @@ function getCurrentUser(state = getCoreState()) {
 
 function getCurrentRole(state = getCoreState(), user = getCurrentUser(state)) {
   return AppCore.normalizeRole(
-    first(
+    firstNonEmpty(
       state.role,
       state.rol,
       state.roles,
@@ -197,7 +178,7 @@ function getCurrentRole(state = getCoreState(), user = getCurrentUser(state)) {
 
 function getCurrentUserId(state = getCoreState(), user = getCurrentUser(state)) {
   return safeId(
-    first(
+    firstNonEmpty(
       user?.userId,
       user?.uid,
       user?.sub,
@@ -228,7 +209,7 @@ function currentContext() {
 
 function cacheAgeMs() {
   return cacheState.loadedAtMs
-    ? Math.max(0, now() - cacheState.loadedAtMs)
+    ? Math.max(0, nowMs() - cacheState.loadedAtMs)
     : Number.POSITIVE_INFINITY;
 }
 
@@ -276,7 +257,7 @@ function commitCache(dashboard = null, context = currentContext()) {
 
   cacheState.dashboard = dashboard;
   cacheState.key = context.key;
-  cacheState.loadedAtMs = now();
+  cacheState.loadedAtMs = nowMs();
   return dashboard;
 }
 
@@ -318,7 +299,7 @@ function unwrapList(value = null, depth = 0) {
 
 function collectionFromResponse(response = null) {
   const object = safeObject(response);
-  const totalKnown = first(
+  const totalKnown = firstNonEmpty(
     object.totalKnown, object.meta?.totalKnown, object.pagination?.totalKnown
   ) === true;
   const lowerBound = [object, object.meta, object.pagination]
@@ -336,7 +317,7 @@ function collectionFromResponse(response = null) {
 
 function currencyFromStats(stats = {}, invoices = []) {
   return cleanText(
-    first(
+    firstNonEmpty(
       stats.currency,
       stats.moneda,
       safeArray(stats.byCurrency)[0]?.currency,
@@ -503,7 +484,7 @@ function dateValue(value = "") {
 
 function ticketDisplayId(ticket = {}) {
   return safeId(
-    first(
+    firstNonEmpty(
       ticket.ticketId,
       ticket.incidenciaId,
       ticket.code,
@@ -516,7 +497,7 @@ function ticketDisplayId(ticket = {}) {
 
 function invoiceDisplayId(invoice = {}) {
   return safeId(
-    first(
+    firstNonEmpty(
       invoice.numeroFacturaLegal,
       invoice.invoiceNumber,
       invoice.number,
@@ -534,15 +515,15 @@ function buildActivity({ incidencias = [], facturas = [] } = {}) {
     entityId: getIncidenciaEntityId(ticket),
     displayId: ticketDisplayId(ticket),
     title: cleanText(
-      first(ticket.subject, ticket.asunto, ticket.title),
+      firstNonEmpty(ticket.subject, ticket.asunto, ticket.title),
       "Incidencia"
     ),
-    status: cleanText(first(ticket.status, ticket.estado, ""), ""),
+    status: cleanText(firstNonEmpty(ticket.status, ticket.estado, ""), ""),
     text: cleanText(
-      first(ticket.status, ticket.estado, ticket.priority, ticket.prioridad),
+      firstNonEmpty(ticket.status, ticket.estado, ticket.priority, ticket.prioridad),
       "Actualizada"
     ),
-    date: first(
+    date: firstNonEmpty(
       ticket.lastActivityAt,
       ticket.updatedAt,
       ticket.createdAt,
@@ -555,7 +536,7 @@ function buildActivity({ incidencias = [], facturas = [] } = {}) {
     entityId: getFacturaEntityId(invoice),
     displayId: invoiceDisplayId(invoice),
     title: cleanText(
-      first(
+      firstNonEmpty(
         invoice.numeroFacturaLegal,
         invoice.invoiceNumber,
         invoice.number,
@@ -566,7 +547,7 @@ function buildActivity({ incidencias = [], facturas = [] } = {}) {
       "Factura"
     ),
     status: cleanText(
-      first(
+      firstNonEmpty(
         invoice.paymentStatus,
         invoice.estadoPago,
         invoice.status,
@@ -576,7 +557,7 @@ function buildActivity({ incidencias = [], facturas = [] } = {}) {
       "issued"
     ),
     text: cleanText(
-      first(
+      firstNonEmpty(
         invoice.paymentStatus,
         invoice.estadoPago,
         invoice.status,
@@ -584,7 +565,7 @@ function buildActivity({ incidencias = [], facturas = [] } = {}) {
       ),
       "Factura"
     ),
-    date: first(
+    date: firstNonEmpty(
       invoice.updatedAt,
       invoice.issuedAt,
       invoice.fechaEmision,

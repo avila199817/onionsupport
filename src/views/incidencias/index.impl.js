@@ -22,7 +22,7 @@ import { createModalLifecycle, restoreModalFocus } from "../../features/entity-o
    - Preserva comentarios multilínea mientras se escribe.
    - Evita re-subir adjuntos si una actualización falla después del upload.
    - Advierte ante refresh/cierre de pestaña con borrador sin enviar.
-   - No aplana arrays de dominio con first().
+   - No aplana arrays de dominio con firstNonEmpty().
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -89,7 +89,7 @@ import {
   reconcileIncidenciasFilterFacetPresentation,
 } from "./incidencias.filter-facets.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
@@ -225,42 +225,6 @@ function escapeCssAttribute(
    NO usar flat(Infinity) aquí.
    Arrays de adjuntos/historial/comentarios son valores completos.
 */
-function first(...values) {
-  for (const value of values) {
-    if (
-      value === undefined ||
-      value === null
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
 function redact(value = "") {
   return cleanText(value, "")
     .replace(
@@ -421,7 +385,7 @@ function ticketSortTime(
 
   const timestamp =
     Date.parse(
-      first(
+      firstNonEmpty(
         raw.lastActivityAt,
         raw.updatedAt,
         raw.modifiedAt,
@@ -793,7 +757,7 @@ function getCurrentRole() {
 
   return (
     AppCore.normalizeRole(
-      first(
+      firstNonEmpty(
         AppCore.getCurrentRole?.(),
         state.role,
         state.rol,
@@ -2101,7 +2065,7 @@ export function createIncidenciasController(
       null;
 
     return cleanText(
-      first(
+      firstNonEmpty(
         ticketNode?.dataset?.ticketId,
         ticketNode?.dataset?.incidenciaId
       ),
@@ -5285,15 +5249,15 @@ async function load(options = {}) {
 
     return {
       status: normalizeIncidenciaStatus(
-        first(detail.status, detail.estado, detail.statusKey, detail.lifecycle?.status, "open"),
+        firstNonEmpty(detail.status, detail.estado, detail.statusKey, detail.lifecycle?.status, "open"),
         "open"
       ),
       priority: normalizeIncidenciaPriority(
-        first(detail.priority, detail.prioridad, detail.severity, "medium"),
+        firstNonEmpty(detail.priority, detail.prioridad, detail.severity, "medium"),
         "medium"
       ),
       category: normalizeIncidenciaCategory(
-        first(detail.category, detail.categoria, detail.tipo, detail.type, "general"),
+        firstNonEmpty(detail.category, detail.categoria, detail.tipo, detail.type, "general"),
         "general"
       ),
     };
@@ -5522,7 +5486,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
   function ticketIsAlreadyClosed() {
     const status =
       cleanText(
-        first(
+        firstNonEmpty(
           detailModal.detail?.status,
           detailModal.detail?.estado,
           detailModal.detail?.statusKey,
@@ -5698,7 +5662,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
     const attachments =
       arrayFrom(
-        first(
+        firstNonEmpty(
           detailModal.detail?.attachments,
           detailModal.detail?.files,
           detailModal.detail?.adjuntos,
@@ -5710,7 +5674,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       attachments.find(
         (file) =>
           cleanText(
-            first(
+            firstNonEmpty(
               file.id,
               file.attachmentId,
               file.fileId
@@ -5792,7 +5756,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
       const previewUrl =
         cleanText(
-          first(
+          firstNonEmpty(
             normalizedFile.viewUrl,
             normalizedFile.openUrl,
             normalizedFile.signedUrl,
@@ -5939,7 +5903,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
         filename:
           cleanText(
-            first(
+            firstNonEmpty(
               attachment?.name,
               attachment?.filename
             ),
@@ -6023,7 +5987,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
     const filename =
       cleanText(
-        first(
+        firstNonEmpty(
           attachment.name,
           attachment.filename,
           attachment.fileName,
@@ -6168,7 +6132,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
     const filename =
       cleanText(
-        first(
+        firstNonEmpty(
           detailModal.attachmentDeleteConfirmName,
           attachment.name,
           attachment.filename,
@@ -6211,7 +6175,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
       if (
         cleanText(
-          first(
+          firstNonEmpty(
             detailModal.previewFile?.id,
             detailModal.previewFile?.attachmentId,
             ""
@@ -6299,7 +6263,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
     return downloadAttachment(
       cleanText(
-        first(
+        firstNonEmpty(
           file.id,
           file.attachmentId
         ),

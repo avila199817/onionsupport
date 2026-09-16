@@ -11,7 +11,7 @@
    - No hacer HTTP, DOM, Router, Auth, cache ni navegación.
 ========================================================= */
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 
@@ -36,15 +36,6 @@ const SAFE_ARRAY_LIMIT = 10_000;
 const SENSITIVE_KEY_RE =
   /^(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|pwd|secret|authorization|cookie|jwt|api[_-]?key|connection[_-]?string|sas|sig|signature|activation[_-]?token|reset[_-]?token|activationUrl|resetUrl|signedUrl|sasUrl)$/i;
 const PROTOTYPE_KEY_RE = /^(?:__proto__|prototype|constructor)$/i;
-
-function first(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    return value;
-  }
-  return null;
-}
 
 function number(value = 0, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
@@ -179,7 +170,7 @@ function normalizeClienteType(value = "") {
 
 function normalizeStatusValue(value = "", source = {}) {
   const raw = safeObject(source);
-  const explicit = slugKey(first(value, raw.status, raw.estado, raw.state, ""));
+  const explicit = slugKey(firstNonBlank(value, raw.status, raw.estado, raw.state, ""));
 
   if (["blocked", "bloqueado", "suspended", "locked"].includes(explicit)) return "blocked";
   if (["inactive", "inactivo", "disabled", "archived", "deleted"].includes(explicit)) return "inactive";
@@ -189,7 +180,7 @@ function normalizeStatusValue(value = "", source = {}) {
 
   const blocked = parseBoolean(raw.blocked, null);
   const disabled = parseBoolean(raw.disabled, null);
-  const active = parseBoolean(first(raw.active, raw.isActive, raw.enabled, null), null);
+  const active = parseBoolean(firstNonBlank(raw.active, raw.isActive, raw.enabled, null), null);
   if (blocked === true) return "blocked";
   if (disabled === true || active === false) return "inactive";
   return "active";
@@ -198,10 +189,10 @@ function normalizeStatusValue(value = "", source = {}) {
 export function normalizeClienteModel(item = {}) {
   const original = safeObject(item);
   const raw = safeObject(sanitizeDomainValue(original), {});
-  const contacto = safeObject(first(raw.contacto, raw.contact, raw.profile, {}), {});
-  const direccion = safeObject(first(raw.direccion, raw.address, raw.location, {}), {});
+  const contacto = safeObject(firstNonBlank(raw.contacto, raw.contact, raw.profile, {}), {});
+  const direccion = safeObject(firstNonBlank(raw.direccion, raw.address, raw.location, {}), {});
 
-  const clienteId = cleanText(first(
+  const clienteId = cleanText(firstNonBlank(
     raw.clienteId,
     raw.clientId,
     raw.customerId,
@@ -211,7 +202,7 @@ export function normalizeClienteModel(item = {}) {
     ""
   ), "").slice(0, CLIENTE_ID_MAX_LENGTH);
 
-  const userId = cleanText(first(
+  const userId = cleanText(firstNonBlank(
     raw.userId,
     raw.usuarioId,
     raw.ownerUserId,
@@ -220,8 +211,8 @@ export function normalizeClienteModel(item = {}) {
     ""
   ), "").slice(0, USER_ID_MAX_LENGTH);
 
-  const tipo = normalizeClienteType(first(raw.tipo, raw.type, raw.clienteTipo, raw.segmento, ""));
-  const nombreFiscal = cleanText(first(
+  const tipo = normalizeClienteType(firstNonBlank(raw.tipo, raw.type, raw.clienteTipo, raw.segmento, ""));
+  const nombreFiscal = cleanText(firstNonBlank(
     raw.nombreFiscal,
     raw.razonSocial,
     raw.businessName,
@@ -234,7 +225,7 @@ export function normalizeClienteModel(item = {}) {
     "Cliente"
   ), "Cliente").slice(0, NAME_MAX_LENGTH);
 
-  const nombreContacto = cleanText(first(
+  const nombreContacto = cleanText(firstNonBlank(
     raw.nombreContacto,
     raw.contactoNombre,
     contacto.nombre,
@@ -253,7 +244,7 @@ export function normalizeClienteModel(item = {}) {
     contacto.emailLower,
     ""
   );
-  const phone = normalizePhone(first(
+  const phone = normalizePhone(firstNonBlank(
     raw.phone,
     raw.telefono,
     raw.contactoPhone,
@@ -261,28 +252,28 @@ export function normalizeClienteModel(item = {}) {
     contacto.telefono,
     ""
   ));
-  const nif = cleanText(first(raw.nif, raw.cif, raw.taxId, raw.vatNumber, ""), "")
+  const nif = cleanText(firstNonBlank(raw.nif, raw.cif, raw.taxId, raw.vatNumber, ""), "")
     .toUpperCase()
     .slice(0, NIF_MAX_LENGTH);
-  const city = cleanText(first(raw.city, raw.ciudad, direccion.ciudad, direccion.city, ""), "")
+  const city = cleanText(firstNonBlank(raw.city, raw.ciudad, direccion.ciudad, direccion.city, ""), "")
     .slice(0, CITY_MAX_LENGTH);
-  const avatar = safeAvatarUrl(first(raw.avatar, raw.avatarUrl, raw.photoUrl, raw.picture, ""));
-  const status = normalizeStatusValue(first(raw.status, raw.estado, raw.state, ""), raw);
+  const avatar = safeAvatarUrl(firstNonBlank(raw.avatar, raw.avatarUrl, raw.photoUrl, raw.picture, ""));
+  const status = normalizeStatusValue(firstNonBlank(raw.status, raw.estado, raw.state, ""), raw);
   const active = status === "active" || status === "vip";
-  const createdAt = first(raw.createdAt, raw.created_at, raw.fechaCreacion, null);
-  const updatedAt = first(raw.updatedAt, raw.updated_at, raw.modifiedAt, createdAt, null);
-  const invoicesCount = Math.max(0, number(first(raw.invoicesCount, raw.facturasCount, raw.invoiceCount, raw.stats?.facturasCount, 0), 0));
-  const ticketsCount = Math.max(0, number(first(raw.ticketsCount, raw.incidenciasCount, raw.ticketCount, raw.stats?.ticketsCount, 0), 0));
-  const totalAmount = number(first(raw.totalAmount, raw.totalImporte, raw.facturasTotal, raw.stats?.totalFacturado, 0), 0);
+  const createdAt = firstNonBlank(raw.createdAt, raw.created_at, raw.fechaCreacion, null);
+  const updatedAt = firstNonBlank(raw.updatedAt, raw.updated_at, raw.modifiedAt, createdAt, null);
+  const invoicesCount = Math.max(0, number(firstNonBlank(raw.invoicesCount, raw.facturasCount, raw.invoiceCount, raw.stats?.facturasCount, 0), 0));
+  const ticketsCount = Math.max(0, number(firstNonBlank(raw.ticketsCount, raw.incidenciasCount, raw.ticketCount, raw.stats?.ticketsCount, 0), 0));
+  const totalAmount = number(firstNonBlank(raw.totalAmount, raw.totalImporte, raw.facturasTotal, raw.stats?.totalFacturado, 0), 0);
 
   const normalizedAddress = {
     ...direccion,
-    calle: cleanText(first(direccion.calle, direccion.street, raw.calle, ""), "").slice(0, STREET_MAX_LENGTH),
-    cp: cleanText(first(direccion.cp, direccion.postalCode, raw.cp, ""), "").slice(0, POSTAL_CODE_MAX_LENGTH),
+    calle: cleanText(firstNonBlank(direccion.calle, direccion.street, raw.calle, ""), "").slice(0, STREET_MAX_LENGTH),
+    cp: cleanText(firstNonBlank(direccion.cp, direccion.postalCode, raw.cp, ""), "").slice(0, POSTAL_CODE_MAX_LENGTH),
     ciudad: city,
     city,
-    provincia: cleanText(first(direccion.provincia, direccion.province, raw.provincia, ""), "").slice(0, PROVINCE_MAX_LENGTH),
-    pais: cleanText(first(direccion.pais, direccion.country, raw.pais, ""), "").slice(0, COUNTRY_MAX_LENGTH),
+    provincia: cleanText(firstNonBlank(direccion.provincia, direccion.province, raw.provincia, ""), "").slice(0, PROVINCE_MAX_LENGTH),
+    pais: cleanText(firstNonBlank(direccion.pais, direccion.country, raw.pais, ""), "").slice(0, COUNTRY_MAX_LENGTH),
   };
 
   const normalizedContact = {
@@ -299,26 +290,26 @@ export function normalizeClienteModel(item = {}) {
     ...raw,
     raw,
     id: clienteId,
-    _id: cleanText(first(raw._id, clienteId), clienteId).slice(0, CLIENTE_ID_MAX_LENGTH),
-    uid: cleanText(first(raw.uid, clienteId), clienteId).slice(0, CLIENTE_ID_MAX_LENGTH),
+    _id: cleanText(firstNonBlank(raw._id, clienteId), clienteId).slice(0, CLIENTE_ID_MAX_LENGTH),
+    uid: cleanText(firstNonBlank(raw.uid, clienteId), clienteId).slice(0, CLIENTE_ID_MAX_LENGTH),
     clienteId,
-    clientId: cleanText(first(raw.clientId, clienteId), clienteId).slice(0, CLIENTE_ID_MAX_LENGTH),
-    customerId: cleanText(first(raw.customerId, clienteId), clienteId).slice(0, CLIENTE_ID_MAX_LENGTH),
+    clientId: cleanText(firstNonBlank(raw.clientId, clienteId), clienteId).slice(0, CLIENTE_ID_MAX_LENGTH),
+    customerId: cleanText(firstNonBlank(raw.customerId, clienteId), clienteId).slice(0, CLIENTE_ID_MAX_LENGTH),
     userId,
-    code: cleanText(first(raw.code, raw.codigo, clienteId, nif, email), "CLI-SIN-ID").slice(0, CLIENTE_ID_MAX_LENGTH),
-    codigo: cleanText(first(raw.codigo, raw.code, clienteId, nif, email), "CLI-SIN-ID").slice(0, CLIENTE_ID_MAX_LENGTH),
+    code: cleanText(firstNonBlank(raw.code, raw.codigo, clienteId, nif, email), "CLI-SIN-ID").slice(0, CLIENTE_ID_MAX_LENGTH),
+    codigo: cleanText(firstNonBlank(raw.codigo, raw.code, clienteId, nif, email), "CLI-SIN-ID").slice(0, CLIENTE_ID_MAX_LENGTH),
     tipo,
     type: tipo,
     clienteTipo: tipo,
     segment: tipo,
     nombreFiscal,
-    razonSocial: cleanText(first(raw.razonSocial, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
-    businessName: cleanText(first(raw.businessName, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
-    companyName: cleanText(first(raw.companyName, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
-    displayName: cleanText(first(raw.displayName, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
-    fullName: cleanText(first(raw.fullName, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
-    name: cleanText(first(raw.name, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
-    nombre: cleanText(first(raw.nombre, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
+    razonSocial: cleanText(firstNonBlank(raw.razonSocial, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
+    businessName: cleanText(firstNonBlank(raw.businessName, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
+    companyName: cleanText(firstNonBlank(raw.companyName, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
+    displayName: cleanText(firstNonBlank(raw.displayName, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
+    fullName: cleanText(firstNonBlank(raw.fullName, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
+    name: cleanText(firstNonBlank(raw.name, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
+    nombre: cleanText(firstNonBlank(raw.nombre, nombreFiscal), nombreFiscal).slice(0, NAME_MAX_LENGTH),
     nombreContacto,
     contactoNombre: nombreContacto,
     contacto: normalizedContact,
@@ -329,10 +320,10 @@ export function normalizeClienteModel(item = {}) {
     billingEmail: firstEmail(raw.billingEmail, raw.emailFacturacion, email),
     phone,
     telefono: phone,
-    mobile: normalizePhone(first(raw.mobile, raw.movil, phone)),
+    mobile: normalizePhone(firstNonBlank(raw.mobile, raw.movil, phone)),
     nif,
-    cif: cleanText(first(raw.cif, nif), nif).toUpperCase().slice(0, NIF_MAX_LENGTH),
-    taxId: cleanText(first(raw.taxId, nif), nif).toUpperCase().slice(0, NIF_MAX_LENGTH),
+    cif: cleanText(firstNonBlank(raw.cif, nif), nif).toUpperCase().slice(0, NIF_MAX_LENGTH),
+    taxId: cleanText(firstNonBlank(raw.taxId, nif), nif).toUpperCase().slice(0, NIF_MAX_LENGTH),
     direccion: normalizedAddress,
     address: normalizedAddress,
     city,
@@ -353,10 +344,10 @@ export function normalizeClienteModel(item = {}) {
     isVip: status === "vip",
     createdAt,
     updatedAt,
-    lastActivityAt: first(raw.lastActivityAt, updatedAt, createdAt, null),
-    lastContactAt: first(raw.lastContactAt, null),
-    lastInvoiceAt: first(raw.lastInvoiceAt, null),
-    lastTicketAt: first(raw.lastTicketAt, null),
+    lastActivityAt: firstNonBlank(raw.lastActivityAt, updatedAt, createdAt, null),
+    lastContactAt: firstNonBlank(raw.lastContactAt, null),
+    lastInvoiceAt: firstNonBlank(raw.lastInvoiceAt, null),
+    lastTicketAt: firstNonBlank(raw.lastTicketAt, null),
     invoicesCount,
     facturasCount: invoicesCount,
     invoiceCount: invoicesCount,
@@ -372,7 +363,7 @@ export function normalizeClienteModel(item = {}) {
 export function getClienteStableId(item = {}) {
   const current = safeObject(item);
   const raw = safeObject(current.raw);
-  return cleanText(first(
+  return cleanText(firstNonBlank(
     current.clienteId,
     current.clientId,
     current.customerId,
@@ -391,7 +382,7 @@ export function getClienteStableId(item = {}) {
 
 function sortTimestamp(item = {}) {
   const current = normalizeClienteModel(item);
-  const value = first(current.lastActivityAt, current.updatedAt, current.createdAt, 0);
+  const value = firstNonBlank(current.lastActivityAt, current.updatedAt, current.createdAt, 0);
   if (typeof value === "number" && Number.isFinite(value)) {
     return value > 9_999_999_999 ? value : value * 1000;
   }

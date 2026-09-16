@@ -43,7 +43,7 @@ import {
   setTopbarSearchActiveIndex,
 } from "./template.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, isFunction } from "../../core/objects.js";
+import { isObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 
 
@@ -370,47 +370,6 @@ function isBrowser() {
 }
 
 
-
-function first(...values) {
-  for (
-    const value
-    of values
-  ) {
-    if (
-      value === undefined ||
-      value === null
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value ===
-        "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      !value.length
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      !Object.keys(value)
-        .length
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
 
 function normalizeText(
   value = ""
@@ -825,7 +784,7 @@ function getCurrentUserId(
     getCurrentUser(state)
 ) {
   return cleanText(
-    first(
+    firstNonEmpty(
       user?.userId,
       user?.uid,
       user?.id,
@@ -1762,7 +1721,7 @@ function resolveSearchEndpoint(
 
   const endpoint =
     cleanText(
-      first(
+      firstNonEmpty(
         options.searchEndpoint,
         options.searchUrl,
         options.searchApiUrl,
@@ -2760,7 +2719,7 @@ function extractBackendResults(
       : {};
 
   return safeArray(
-    first(
+    firstNonEmpty(
       data.results,
       data.items,
       data.resources,
@@ -2782,7 +2741,7 @@ function getResultId(
   item = {}
 ) {
   return cleanText(
-    first(
+    firstNonEmpty(
       item.entityId,
       item.facturaId,
       item.invoiceId,
@@ -2835,7 +2794,7 @@ function routeFromBackendResult(
 ) {
   const type =
     normalizeResultType(
-      first(
+      firstNonEmpty(
         item.type,
         item.entity,
         item.kind,
@@ -2845,7 +2804,7 @@ function routeFromBackendResult(
 
   const direct =
     safeInternalPath(
-      first(
+      firstNonEmpty(
         item.route,
         item.href,
         item.url,
@@ -2909,7 +2868,7 @@ function routeFromBackendResult(
 
   const facturaId =
     cleanText(
-      first(
+      firstNonEmpty(
         item.facturaId,
         item.invoiceId,
         raw.facturaId,
@@ -2923,7 +2882,7 @@ function routeFromBackendResult(
 
   const ticketId =
     cleanText(
-      first(
+      firstNonEmpty(
         item.ticketId,
         item.incidenciaId,
         raw.ticketId,
@@ -2937,7 +2896,7 @@ function routeFromBackendResult(
 
   const clienteId =
     cleanText(
-      first(
+      firstNonEmpty(
         item.clienteId,
         item.clientId,
         raw.clienteId,
@@ -2951,7 +2910,7 @@ function routeFromBackendResult(
 
   const userId =
     cleanText(
-      first(
+      firstNonEmpty(
         item.userId,
         item.usuarioId,
         raw.userId,
@@ -3082,7 +3041,7 @@ function normalizeBackendResult(
 
   const type =
     normalizeResultType(
-      first(
+      firstNonEmpty(
         source.type,
         source.entity,
         source.kind,
@@ -3099,7 +3058,7 @@ function normalizeBackendResult(
 
   const label =
     cleanText(
-      first(
+      firstNonEmpty(
         type === RESULT_TYPES.USER ? userNameFromIdentity(source) || userNameFromIdentity(raw) : "",
         source.label,
         source.title,
@@ -3116,7 +3075,7 @@ function normalizeBackendResult(
   const description =
     truncate(
       cleanText(
-        first(
+        firstNonEmpty(
           source.description,
           source.subtitle,
           source.text,
@@ -3142,7 +3101,7 @@ function normalizeBackendResult(
 
   const id =
     cleanText(
-      first(
+      firstNonEmpty(
         source.id,
         source.key,
         `${type}:${entityId || label}:${order}`

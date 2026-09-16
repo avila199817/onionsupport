@@ -14,7 +14,7 @@
 
 import * as Boundary from "./facturas.api.boundary.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 
 export * from "./facturas.api.boundary.js";
 
@@ -33,18 +33,6 @@ function key(value = "") {
     .replace(/[\s.-]+/g, "_")
     .replace(/[^\w:]+/g, "_")
     .replace(/^_+|_+$/g, "");
-}
-
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (isObject(value) && !Object.keys(value).length) continue;
-    return value;
-  }
-
-  return null;
 }
 
 function numberOrNull(value) {
@@ -257,7 +245,7 @@ function taxesFromLines(value = {}) {
     const item = safeObject(raw, null);
     if (!item) continue;
 
-    const amount = numberOrNull(first(
+    const amount = numberOrNull(firstNonEmpty(
       item.importe,
       item.amount,
       item.total,
@@ -266,7 +254,7 @@ function taxesFromLines(value = {}) {
     if (amount === null) continue;
 
     found = true;
-    const type = key(first(item.tipo, item.type, item.name, item.label, ""));
+    const type = key(firstNonEmpty(item.tipo, item.type, item.name, item.label, ""));
     const negative =
       type.includes("irpf") ||
       type.includes("retencion") ||
@@ -282,7 +270,7 @@ function taxesFromLines(value = {}) {
 function normalizeFinancialAliases(value = {}) {
   const result = { ...safeObject(value, {}) };
 
-  let base = numberOrNull(first(
+  let base = numberOrNull(firstNonEmpty(
     result.baseImponible,
     result.taxableBase,
     result.subtotal,
@@ -296,7 +284,7 @@ function normalizeFinancialAliases(value = {}) {
     result.summary?.base
   ));
 
-  let taxes = numberOrNull(first(
+  let taxes = numberOrNull(firstNonEmpty(
     result.impuestosTotal,
     result.taxAmount,
     result.taxesAmount,
@@ -312,21 +300,21 @@ function normalizeFinancialAliases(value = {}) {
   if (taxes === null) taxes = taxesFromLines(result);
 
   if (taxes === null) {
-    const iva = numberOrNull(first(
+    const iva = numberOrNull(firstNonEmpty(
       result.ivaImporte,
       result.importeIva,
       result.totalIva,
       result.ivaTotal,
-      isObject(result.iva) ? first(result.iva.importe, result.iva.amount) : result.iva
+      isObject(result.iva) ? firstNonEmpty(result.iva.importe, result.iva.amount) : result.iva
     ));
-    const retention = numberOrNull(first(
+    const retention = numberOrNull(firstNonEmpty(
       result.irpfImporte,
       result.importeIrpf,
       result.totalIrpf,
       result.retencion,
       result.retencionesTotal,
       result.withholdingAmount,
-      isObject(result.irpf) ? first(result.irpf.importe, result.irpf.amount) : result.irpf
+      isObject(result.irpf) ? firstNonEmpty(result.irpf.importe, result.irpf.amount) : result.irpf
     ));
 
     if (iva !== null || retention !== null) {
@@ -334,7 +322,7 @@ function normalizeFinancialAliases(value = {}) {
     }
   }
 
-  const paid = numberOrNull(first(
+  const paid = numberOrNull(firstNonEmpty(
     result.paidAmount,
     result.totalPagado,
     result.pagado,
@@ -343,7 +331,7 @@ function normalizeFinancialAliases(value = {}) {
     result.totals?.paid
   )) ?? 0;
 
-  const pending = numberOrNull(first(
+  const pending = numberOrNull(firstNonEmpty(
     result.pendingAmount,
     result.totalPendiente,
     result.pendiente,
@@ -354,7 +342,7 @@ function normalizeFinancialAliases(value = {}) {
     result.totals?.pending
   ));
 
-  let total = numberOrNull(first(
+  let total = numberOrNull(firstNonEmpty(
     result.total,
     result.totalFactura,
     result.importeTotal,
@@ -482,7 +470,7 @@ export function canonicalizeFacturaListItem(value = null) {
     .map((candidate) => cleanText(candidate, ""))
     .find((candidate) => candidate && !isTechnicalIdentifier(candidate)) || canonicalId;
 
-  const systemNumber = cleanText(first(
+  const systemNumber = cleanText(firstNonEmpty(
     source.numeroFacturaSistema,
     source.systemInvoiceNumber,
     outer.numeroFacturaSistema,
@@ -498,9 +486,9 @@ export function canonicalizeFacturaListItem(value = null) {
     ...(legalNumber
       ? {
           numeroFacturaLegal: legalNumber,
-          numeroFactura: cleanText(first(source.numeroFactura, legalNumber), legalNumber),
-          invoiceNumber: cleanText(first(source.invoiceNumber, legalNumber), legalNumber),
-          number: cleanText(first(source.number, legalNumber), legalNumber),
+          numeroFactura: cleanText(firstNonEmpty(source.numeroFactura, legalNumber), legalNumber),
+          invoiceNumber: cleanText(firstNonEmpty(source.invoiceNumber, legalNumber), legalNumber),
+          number: cleanText(firstNonEmpty(source.number, legalNumber), legalNumber),
         }
       : {}),
     ...(systemNumber ? { numeroFacturaSistema: systemNumber } : {}),
@@ -508,17 +496,17 @@ export function canonicalizeFacturaListItem(value = null) {
     entityType: "invoice",
     type: "invoice",
     status: ["issued", "emitida", "sent", "enviada", "paid", "pagada", "draft", "borrador"]
-      .includes(key(first(source.status, source.estado, "")))
-        ? cleanText(first(source.status, source.estado), "issued")
+      .includes(key(firstNonEmpty(source.status, source.estado, "")))
+        ? cleanText(firstNonEmpty(source.status, source.estado), "issued")
         : "issued",
     estado: ["issued", "emitida", "sent", "enviada", "paid", "pagada", "draft", "borrador"]
-      .includes(key(first(source.estado, source.status, "")))
-        ? cleanText(first(source.estado, source.status), "issued")
+      .includes(key(firstNonEmpty(source.estado, source.status, "")))
+        ? cleanText(firstNonEmpty(source.estado, source.status), "issued")
         : "issued",
     meta: {
       ...safeObject(source.meta, {}),
       technicalAliasRecovered: true,
-      technicalAliasId: cleanText(first(
+      technicalAliasId: cleanText(firstNonEmpty(
         hosts[0]?.id,
         hosts[0]?._id,
         hosts[0]?.operationId,
@@ -835,7 +823,7 @@ export const createInvoice = createFactura;
 function canonicalActionId(id = "", payload = {}, options = {}) {
   return resolveFacturaCanonicalId(id, {
     ...options,
-    factura: first(options.factura, payload.factura, payload.item, payload.data),
+    factura: firstNonEmpty(options.factura, payload.factura, payload.item, payload.data),
   });
 }
 

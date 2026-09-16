@@ -31,7 +31,7 @@ import { AppCore } from "../../core/index.js";
 import { normalizeUsuarioModel } from "./usuarios.api.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
-import { isObject, safeObject, isFunction } from "../../core/objects.js";
+import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 
@@ -112,43 +112,6 @@ function isBrowser() {
 /*
   Nunca aplanar arrays de dominio.
 */
-function first(...values) {
-  for (const value of values) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
-
 function attr(value = "") {
   return escapeHtml(
     cleanText(value, "")
@@ -697,7 +660,7 @@ function booleanLabel(
 function normalizeDetail(detail = {}) {
   const source =
     safeObject(
-      first(
+      firstNonEmpty(
         detail?.detail,
         detail?.user,
         detail?.usuario,
@@ -715,7 +678,7 @@ function normalizeDetail(detail = {}) {
 
 function getUserId(detail = {}) {
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.userId,
       detail.id,
       detail.usuarioId,
@@ -727,12 +690,12 @@ function getUserId(detail = {}) {
 }
 
 function getName(detail = {}) {
-  return userNameFromIdentity(detail, first(detail.username, detail.email, "Usuario"));
+  return userNameFromIdentity(detail, firstNonEmpty(detail.username, detail.email, "Usuario"));
 }
 
 function getUsername(detail = {}) {
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.username,
       detail.userName,
       detail.slug,
@@ -744,7 +707,7 @@ function getUsername(detail = {}) {
 
 function getEmail(detail = {}) {
   return normalizeEmail(
-    first(
+    firstNonEmpty(
       detail.email,
       detail.emailLower,
       detail.mail,
@@ -755,7 +718,7 @@ function getEmail(detail = {}) {
 
 function getPhone(detail = {}) {
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.phone,
       detail.telefono,
       detail.mobile,
@@ -799,7 +762,7 @@ function tipoLabel(detail = {}) {
 
 function getRole(detail = {}) {
   return slugKey(
-    first(
+    firstNonEmpty(
       detail.role,
       detail.rol,
       "user"
@@ -819,7 +782,7 @@ function roleLabel(detail = {}) {
 function getStatus(detail = {}) {
   const status =
     slugKey(
-      first(
+      firstNonEmpty(
         detail.status,
         detail.estado,
         detail.state,
@@ -885,7 +848,7 @@ function statusCssModifier(status = "") {
 
 function getAvatar(detail = {}) {
   return safeAvatarUrl(
-    first(
+    firstNonEmpty(
       detail.avatarUrl,
       detail.avatar,
       detail.photoUrl,
@@ -898,7 +861,7 @@ function getAvatar(detail = {}) {
 function getDireccion(detail = {}) {
   const source =
     safeObject(
-      first(
+      firstNonEmpty(
         detail.direccion,
         detail.address,
         {}
@@ -909,7 +872,7 @@ function getDireccion(detail = {}) {
   return {
     calle:
       cleanText(
-        first(
+        firstNonEmpty(
           source.calle,
           source.street,
           ""
@@ -919,7 +882,7 @@ function getDireccion(detail = {}) {
 
     cp:
       cleanText(
-        first(
+        firstNonEmpty(
           source.cp,
           source.postalCode,
           ""
@@ -929,7 +892,7 @@ function getDireccion(detail = {}) {
 
     ciudad:
       cleanText(
-        first(
+        firstNonEmpty(
           source.ciudad,
           source.city,
           detail.ciudad,
@@ -941,7 +904,7 @@ function getDireccion(detail = {}) {
 
     provincia:
       cleanText(
-        first(
+        firstNonEmpty(
           source.provincia,
           source.province,
           detail.provincia,
@@ -952,7 +915,7 @@ function getDireccion(detail = {}) {
 
     pais:
       cleanText(
-        first(
+        firstNonEmpty(
           source.pais,
           source.country,
           detail.pais,
@@ -1401,7 +1364,7 @@ function renderSecuritySection(detail = {}) {
     );
 
   const lastPasswordChangeAt =
-    first(
+    firstNonEmpty(
       security.lastPasswordChangeAt,
       null
     );
@@ -1523,7 +1486,7 @@ function renderLifecycleSection(detail = {}) {
       label: "Activación",
       value: detail.activatedAt,
       actor: cleanText(
-        first(
+        firstNonEmpty(
           detail.activatedBy,
           detail.activatedByRole,
           ""
@@ -1548,7 +1511,7 @@ function renderLifecycleSection(detail = {}) {
       label: "Desactivación",
       value: detail.deactivatedAt,
       actor: cleanText(
-        first(
+        firstNonEmpty(
           detail.deactivatedBy,
           detail.deactivatedByRole,
           ""
@@ -1883,7 +1846,7 @@ export function renderUsuariosDetailModal(input = {}) {
 
   const detail =
     normalizeDetail(
-      first(
+      firstNonEmpty(
         data.detail,
         data.user,
         data.usuario,
@@ -2616,7 +2579,7 @@ async function handleRefresh() {
 
       showToast(
         cleanText(
-          first(
+          firstNonEmpty(
             error?.message,
             "No se pudo actualizar el usuario."
           ),

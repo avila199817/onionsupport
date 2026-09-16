@@ -42,7 +42,7 @@ import {
   normalizeIncidenciaPriority,
   normalizeIncidenciaCategory,
 } from "./incidencias.options.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 
@@ -125,42 +125,6 @@ function cleanMultiline(
    NO aplanar arrays aquí.
    attachments/history/comments son valores completos.
 */
-function first(...values) {
-  for (const value of values) {
-    if (
-      value === undefined ||
-      value === null
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
 function number(
   value = 0,
   fallback = 0
@@ -795,7 +759,7 @@ function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
 }
 
 function formatDate(value = "") {
-  const raw = first(value, "");
+  const raw = firstNonEmpty(value, "");
   if (!raw) return "—";
   const date = new Date(raw);
   if (!Number.isFinite(date.getTime())) return cleanText(raw, "—");
@@ -807,7 +771,7 @@ function formatRelativeDate(
   value = ""
 ) {
   const raw =
-    first(
+    firstNonEmpty(
       value,
       ""
     );
@@ -885,7 +849,7 @@ function formatRelativeDate(
 
 function toTimestamp(value = "") {
   const raw =
-    first(
+    firstNonEmpty(
       value,
       ""
     );
@@ -918,7 +882,7 @@ function getTicketId(detail = {}) {
     getRaw(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.ticketId,
       detail.incidenciaId,
       detail.id,
@@ -938,7 +902,7 @@ function getTitle(detail = {}) {
     getRaw(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.subject,
       detail.asunto,
       detail.title,
@@ -958,7 +922,7 @@ function getDescription(
     getRaw(detail);
 
   return cleanMultiline(
-    first(
+    firstNonEmpty(
       detail.description,
       detail.descripcion,
       detail.message,
@@ -979,7 +943,7 @@ function getStatus(detail = {}) {
 
   const status =
     slugKey(
-      first(
+      firstNonEmpty(
         detail.status,
         detail.estado,
 
@@ -1067,7 +1031,7 @@ function getPriority(
     getRaw(detail);
 
   return normalizeIncidenciaPriority(
-    first(
+    firstNonEmpty(
       detail.priority,
       detail.prioridad,
       detail.severity,
@@ -1111,7 +1075,7 @@ function getCategory(
     getRaw(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.category,
       detail.categoria,
       detail.tipo,
@@ -1133,7 +1097,7 @@ function getRequester(
     getRaw(detail);
 
   return safeObject(
-    first(
+    firstNonEmpty(
       detail.requesterSnapshot,
       detail.cliente,
       detail.receptor,
@@ -1152,7 +1116,7 @@ function getRequester(
 function getClientName(detail = {}) {
   return userNameFromIdentity(detail) || userNameFromIdentity(getRequester(detail)) ||
     userNameFromIdentity(getRaw(detail)) ||
-    cleanText(first(detail.requesterName, detail.clientName, detail.clienteNombre, detail.email), "Usuario");
+    cleanText(firstNonEmpty(detail.requesterName, detail.clientName, detail.clienteNombre, detail.email), "Usuario");
 }
 
 function getClientEmail(
@@ -1165,7 +1129,7 @@ function getClientEmail(
     getRequester(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.email,
       detail.emailLower,
       detail.userEmail,
@@ -1191,7 +1155,7 @@ function getClientPhone(
     getRequester(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.phone,
       detail.telefono,
 
@@ -1240,7 +1204,7 @@ function getAssignment(
     getRaw(detail);
 
   return safeObject(
-    first(
+    firstNonEmpty(
       detail.assignment,
       raw.assignment,
       {}
@@ -1258,7 +1222,7 @@ function getTechnicianObject(
     getAssignment(detail);
 
   return safeObject(
-    first(
+    firstNonEmpty(
       detail.tecnico,
       detail.assignedTo,
       detail.technician,
@@ -1283,7 +1247,7 @@ function getTechnicianName(
     getTechnicianObject(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.assignedToName,
       detail.technicianName,
       detail.tecnicoName,
@@ -1308,7 +1272,7 @@ function getTechnicianEmail(
     getTechnicianObject(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.assignedToEmail,
       detail.technicianEmail,
       detail.tecnicoEmail,
@@ -1376,7 +1340,7 @@ function getInvoiceTotal(
     getRaw(detail);
 
   return number(
-    first(
+    firstNonEmpty(
       detail.invoiceTotal,
       detail.invoicesTotal,
       detail.facturasTotal,
@@ -1411,7 +1375,7 @@ function getCurrency(
     getRaw(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.currency,
       detail.moneda,
       detail.facturaCurrency,
@@ -1434,7 +1398,7 @@ function getInvoiceLabel(
 
   const invoiceId =
     cleanText(
-      first(
+      firstNonEmpty(
         detail.numeroFacturaLegal,
         detail.numeroFactura,
         detail.invoiceNumber,
@@ -1488,7 +1452,7 @@ function getCreatedAt(
   const raw =
     getRaw(detail);
 
-  return first(
+  return firstNonEmpty(
     detail.createdAt,
     raw.createdAt,
 
@@ -1505,7 +1469,7 @@ function getUpdatedAt(
   const raw =
     getRaw(detail);
 
-  return first(
+  return firstNonEmpty(
     detail.lastActivityAt,
     detail.updatedAt,
 
@@ -1532,7 +1496,7 @@ function canonicalAttachmentId(
     safeObject(file);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       raw.id,
       raw.attachmentId,
       raw.fileId,
@@ -1561,7 +1525,7 @@ function normalizeAttachment(
 
   const name =
     safeFilename(
-      first(
+      firstNonEmpty(
         raw.name,
         raw.filename,
         raw.fileName,
@@ -1573,7 +1537,7 @@ function normalizeAttachment(
 
   const contentType =
     cleanText(
-      first(
+      firstNonEmpty(
         raw.contentType,
         raw.mimeType,
         raw.mimetype,
@@ -1623,7 +1587,7 @@ function normalizeAttachment(
 
     size:
       number(
-        first(
+        firstNonEmpty(
           raw.size,
           raw.sizeBytes
         ),
@@ -1632,7 +1596,7 @@ function normalizeAttachment(
 
     sizeBytes:
       number(
-        first(
+        firstNonEmpty(
           raw.sizeBytes,
           raw.size
         ),
@@ -1684,7 +1648,7 @@ function normalizeAttachment(
 
     path:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.path,
           raw.blobPath,
           ""
@@ -1694,7 +1658,7 @@ function normalizeAttachment(
 
     blobPath:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.blobPath,
           raw.path,
           ""
@@ -1715,7 +1679,7 @@ function normalizeAttachment(
       ),
 
     uploadedAt:
-      first(
+      firstNonEmpty(
         raw.uploadedAt,
         raw.createdAt,
         null
@@ -1745,7 +1709,7 @@ function getAttachments(
     getRaw(detail);
 
   return arrayFrom(
-    first(
+    firstNonEmpty(
       detail.attachments,
       detail.files,
       detail.adjuntos,
@@ -1769,7 +1733,7 @@ function getAttachmentId(
   file = {}
 ) {
   return cleanText(
-    first(
+    firstNonEmpty(
       file.id,
       file.attachmentId,
       file.fileId
@@ -1795,7 +1759,7 @@ function isImageLikeAttachment(
 ) {
   const type =
     cleanText(
-      first(
+      firstNonEmpty(
         file.contentType,
         file.type,
         file.mimeType,
@@ -1806,7 +1770,7 @@ function isImageLikeAttachment(
 
   const name =
     cleanText(
-      first(
+      firstNonEmpty(
         file.filename,
         file.fileName,
         file.name
@@ -1827,7 +1791,7 @@ function isPdfLikeAttachment(
 ) {
   const type =
     cleanText(
-      first(
+      firstNonEmpty(
         file.contentType,
         file.type,
         file.mimeType,
@@ -1838,7 +1802,7 @@ function isPdfLikeAttachment(
 
   const name =
     cleanText(
-      first(
+      firstNonEmpty(
         file.filename,
         file.fileName,
         file.name
@@ -1871,7 +1835,7 @@ function attachmentTypeLabel(
 
   const name =
     safeFilename(
-      first(
+      firstNonEmpty(
         file.name,
         file.filename,
         file.fileName
@@ -1901,7 +1865,7 @@ function normalizeTimelineEntry(
 
   const rawKind =
     slugKey(
-      first(
+      firstNonEmpty(
         raw.kind,
         raw.type,
         raw.action,
@@ -1925,7 +1889,7 @@ function normalizeTimelineEntry(
   return {
     id:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.id,
           raw.commentId,
           raw.eventId,
@@ -1947,7 +1911,7 @@ function normalizeTimelineEntry(
 
     title:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.title,
           raw.label
         ),
@@ -1960,7 +1924,7 @@ function normalizeTimelineEntry(
 
     body:
       cleanMultiline(
-        first(
+        firstNonEmpty(
           raw.body,
           raw.message,
           raw.text,
@@ -1975,7 +1939,7 @@ function normalizeTimelineEntry(
 
     author:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.author,
           raw.byName,
           raw.createdByName,
@@ -1991,7 +1955,7 @@ function normalizeTimelineEntry(
       ),
 
     createdAt:
-      first(
+      firstNonEmpty(
         raw.createdAt,
         raw.date,
         raw.timestamp,
@@ -2009,7 +1973,7 @@ function getTimeline(
 
   const direct =
     arrayFrom(
-      first(
+      firstNonEmpty(
         detail.timeline,
         raw.timeline,
         []
@@ -2032,7 +1996,7 @@ function getTimeline(
 
   const history =
     arrayFrom(
-      first(
+      firstNonEmpty(
         detail.history,
         detail.events,
 
@@ -2045,7 +2009,7 @@ function getTimeline(
 
   const comments =
     arrayFrom(
-      first(
+      firstNonEmpty(
         detail.comments,
         detail.notes,
         detail.messages,
@@ -2095,11 +2059,11 @@ function getTimeline(
 
 function getTimelineCount(detail = {}) {
   const raw = getRaw(detail);
-  const direct = arrayFrom(first(detail.timeline, raw.timeline, []));
+  const direct = arrayFrom(firstNonEmpty(detail.timeline, raw.timeline, []));
   if (direct.length) return direct.length;
 
   const history = arrayFrom(
-    first(
+    firstNonEmpty(
       detail.history,
       detail.events,
       raw.history,
@@ -2109,7 +2073,7 @@ function getTimelineCount(detail = {}) {
   );
 
   const comments = arrayFrom(
-    first(
+    firstNonEmpty(
       detail.comments,
       detail.notes,
       detail.messages,
@@ -2189,7 +2153,7 @@ function buildVm(input = {}) {
 
   const detail =
     safeObject(
-      first(
+      firstNonEmpty(
         data.detail,
         data.ticket,
         data.incidencia,
@@ -3402,7 +3366,7 @@ function renderAttachmentPreviewSquare(
 
   const name =
     safeFilename(
-      first(
+      firstNonEmpty(
         file.name,
         file.filename,
         file.fileName
@@ -3505,7 +3469,7 @@ function renderAttachmentActionButtons(
 
   const name =
     safeFilename(
-      first(
+      firstNonEmpty(
         file.name,
         file.filename,
         file.fileName
@@ -3655,7 +3619,7 @@ function renderAttachments(
 
                       const name =
                         safeFilename(
-                          first(
+                          firstNonEmpty(
                             file.name,
                             file.filename,
                             file.fileName
@@ -3666,7 +3630,7 @@ function renderAttachments(
                       const meta =
                         [
                           cleanText(
-                            first(
+                            firstNonEmpty(
                               file.contentType,
                               file.type,
                               file.mimeType,
@@ -3760,7 +3724,7 @@ function renderAttachmentPreview(
 
   const filename =
     safeFilename(
-      first(
+      firstNonEmpty(
         file.filename,
         file.fileName,
         file.name
@@ -3770,7 +3734,7 @@ function renderAttachmentPreview(
 
   const type =
     cleanText(
-      first(
+      firstNonEmpty(
         file.contentType,
         file.type,
         file.mimeType,
@@ -4511,7 +4475,7 @@ export function getDetailCommentValue(
   formLike = {}
 ) {
   return cleanMultiline(
-    first(
+    firstNonEmpty(
       formLike.comment,
       formLike.message,
       formLike.text,

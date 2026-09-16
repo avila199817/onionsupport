@@ -3,14 +3,8 @@
    Shared by /src/views/home/home.template.billing.js
 ========================================================= */
 
-import {
-  attr,
-  clamp,
-  escapeHtml,
-  formatMoney,
-  formatPercent,
-  icon,
-} from "./home.template.foundation.js";
+import { attr, escapeHtml, formatMoney, formatPercent, icon } from "./home.template.foundation.js";
+import { clamp } from "../../core/numbers.js";
 
 function billingValue(value = null, currency = "EUR") {
   return value === null ? "—" : formatMoney(value, currency);

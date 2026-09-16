@@ -22,7 +22,7 @@ import { slugKey } from "../../core/slug-key.js";
    - No hacer HTTP, fetch, DOM imperativo, Store, Router ni Auth.
 ========================================================= */
 
-export const CLIENTES_CREATE_TEMPLATE_VERSION =
+const CLIENTES_CREATE_TEMPLATE_VERSION =
   "clientes.template.create.backend-contract.v4.index-v6-api-v4";
 
 export const CREATE_ACTIONS = Object.freeze({
@@ -41,9 +41,6 @@ export const CREATE_ACTIONS = Object.freeze({
   */
   BILLING_TOGGLE: "create-billing-toggle",
 });
-
-export const CLIENTES_CREATE_ACTIONS =
-  CREATE_ACTIONS;
 
 const MODAL_ID =
   "clientes-create-modal-root";
@@ -1279,14 +1276,6 @@ function normalizeForm(
         FIELD_LIMITS.username
       ),
   };
-}
-
-export function normalizeClienteCreateForm(
-  form = {}
-) {
-  return normalizeForm(
-    form
-  );
 }
 
 function buildSelectedUser(
@@ -2882,10 +2871,6 @@ export function renderClientesCreateModal(
   });
 }
 
-export function renderClientesCreateModalClosed() {
-  return "";
-}
-
 /* =========================================================
    VALIDATION
 ========================================================= */
@@ -3207,18 +3192,6 @@ export function getCreateTemplateSnapshot() {
 /* =========================================================
    COMPAT ALIASES
 ========================================================= */
-
-export const validateCreateClienteForm =
-  validateCreateForm;
-
-export const getClientesCreateFormDefaults =
-  getCreateFormDefaults;
-
-export const renderCreateClienteModal =
-  renderClientesCreateModal;
-
-export const renderClienteCreateModal =
-  renderClientesCreateModal;
 
 export const renderCreateModal =
   renderClientesCreateModal;

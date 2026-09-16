@@ -35,14 +35,10 @@ import { slugKey } from "../../core/slug-key.js";
 import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage } from "../../core/errors.js";
 import { coercedNumber } from "../../core/numbers.js";
 
-export const CLIENTES_MODULE_NAME = "clientes";
-export const CLIENTES_VIEW_NAME = "ClientesView";
-export const CLIENTES_CANONICAL_PATH = "/clientes";
-export const CLIENTES_INDEX_VERSION =
+const CLIENTES_CANONICAL_PATH = "/clientes";
+const CLIENTES_INDEX_VERSION =
   "clientes.index.cursor.v13.nonblocking-mount";
-export const CLIENTES_VIEW_VERSION = CLIENTES_INDEX_VERSION;
-export const CLIENTES_MODULE_VERSION = CLIENTES_INDEX_VERSION;
-export const CLIENTES_INDEX_SOURCE = "views.clientes.index";
+const CLIENTES_INDEX_SOURCE = "views.clientes.index";
 
 export {
   CLIENTES_ENDPOINT,
@@ -1789,23 +1785,23 @@ export function getClienteById(id = "") {
   return findClienteByIdApi(ensureController().state.items, id);
 }
 
-export function setClientesSearch(value = "") {
+function setClientesSearch(value = "") {
   return ensureController().setSearch(value);
 }
 
-export function setClientesFilter(value = "all") {
+function setClientesFilter(value = "all") {
   return ensureController().setFilter(value);
 }
 
-export function setClientesSortOrder(value = DEFAULT_SORT_ORDER) {
+function setClientesSortOrder(value = DEFAULT_SORT_ORDER) {
   return ensureController().setSortOrder(value);
 }
 
-export function toggleClientesSortOrder() {
+function toggleClientesSortOrder() {
   return ensureController().toggleSortOrder();
 }
 
-export function loadMoreClientes() {
+function loadMoreClientes() {
   return ensureController().loadMore();
 }
 

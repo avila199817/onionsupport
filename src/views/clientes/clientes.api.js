@@ -50,21 +50,20 @@ export const CLIENTES_API_VERSION =
 
 export const CLIENTES_ENDPOINT = "/api/clientes";
 export const CLIENTES_PAGE_ENDPOINT = "/api/clientes/page";
-export const CLIENTES_STATS_ENDPOINT = "/api/clientes/stats";
+const CLIENTES_STATS_ENDPOINT = "/api/clientes/stats";
 
 export const CLIENTES_FETCH_LIMIT = 50;
-export const CLIENTES_LIST_LIMIT = CLIENTES_FETCH_LIMIT;
 export const CLIENTES_MAX_LIMIT = 100;
 export const CLIENTES_MAX_PAGES = Number.POSITIVE_INFINITY;
 
-export const CLIENTES_CACHE_SCHEMA_VERSION = 6;
+const CLIENTES_CACHE_SCHEMA_VERSION = 6;
 export const CLIENTES_CACHE_KEY =
   "onion.support.clientes.api.cache.v6.cursor-disabled";
 export const CLIENTES_CACHE_TTL_MS = 0;
 
-export const CLIENTES_TIMEOUT = 15_000;
-export const CLIENTES_DETAIL_TIMEOUT = 20_000;
-export const CLIENTES_MUTATION_TIMEOUT = 25_000;
+const CLIENTES_TIMEOUT = 15_000;
+const CLIENTES_DETAIL_TIMEOUT = 20_000;
+const CLIENTES_MUTATION_TIMEOUT = 25_000;
 
 const FILTERS = new Set(["all", "active", "pending", "blocked"]);
 const ORDERS = new Set(["asc", "desc"]);
@@ -406,22 +405,22 @@ export async function fetchClientesPage(options = {}) {
 }
 
 /* Compatibility aliases: one server cursor page, never a dataset drain. */
-export async function loadClientes(options = {}) {
+async function loadClientes(options = {}) {
   return fetchClientesPage(options);
 }
-export async function refreshClientes(options = {}) {
+async function refreshClientes(options = {}) {
   return fetchClientesPage({ ...options, force: true });
 }
-export async function fetchClientes(options = {}) {
+async function fetchClientes(options = {}) {
   return fetchClientesPage(options);
 }
-export async function listClientes(options = {}) {
+async function listClientes(options = {}) {
   return fetchClientesPage(options);
 }
 export async function getClientes(options = {}) {
   return fetchClientesPage(options);
 }
-export async function fetchClientesRequest(options = {}) {
+async function fetchClientesRequest(options = {}) {
   return fetchClientesPage(options);
 }
 
@@ -521,11 +520,11 @@ export async function getClienteById(id = "", options = {}) {
   return getClienteByIdRequest(id, options);
 }
 
-export const fetchClienteById = getClienteById;
-export const fetchClienteDetail = getClienteById;
-export const fetchClienteDetailRequest = getClienteByIdRequest;
+const fetchClienteById = getClienteById;
+const fetchClienteDetail = getClienteById;
+const fetchClienteDetailRequest = getClienteByIdRequest;
 export const loadClienteDetail = getClienteByIdRequest;
-export const getCliente = getClienteById;
+const getCliente = getClienteById;
 
 function buildCreateClienteBody(payload = {}) {
   const source = safeObject(payload);
@@ -705,20 +704,20 @@ function unsupportedMutation(method = "PATCH") {
   return error;
 }
 
-export async function updateCliente() {
+async function updateCliente() {
   throw unsupportedMutation("PATCH");
 }
-export const updateClienteRequest = updateCliente;
-export async function patchCliente() {
+const updateClienteRequest = updateCliente;
+async function patchCliente() {
   throw unsupportedMutation("PATCH");
 }
-export async function putCliente() {
+async function putCliente() {
   throw unsupportedMutation("PUT");
 }
-export async function deleteCliente() {
+async function deleteCliente() {
   throw unsupportedMutation("DELETE");
 }
-export const deleteClienteRequest = deleteCliente;
+const deleteClienteRequest = deleteCliente;
 
 export function getClienteByIdStore(id = "") {
   ensureStoreScope();
@@ -774,7 +773,7 @@ AppCore.registerModule("clientes.identity-cache", Object.freeze({
   onSessionInvalidated: clearClientesCache,
 }), { overwrite: false });
 
-export function getClientesStoreSnapshot() {
+function getClientesStoreSnapshot() {
   const items = getItems();
   return {
     version: CLIENTES_API_VERSION,
@@ -793,10 +792,10 @@ export function getClientesStoreSnapshot() {
     stats: computeClientesStats(items),
   };
 }
-export const getClientesStateSnapshot = getClientesStoreSnapshot;
+const getClientesStateSnapshot = getClientesStoreSnapshot;
 export const getState = getClientesStoreSnapshot;
 
-export function getClientesApiSnapshot() {
+function getClientesApiSnapshot() {
   return {
     ...getClientesStoreSnapshot(),
     version: CLIENTES_API_VERSION,

@@ -23,6 +23,7 @@ const BASELINE = Object.freeze({
   "src/ui/sidebar": 7,
   "src/ui/topbar": 10,
   "src/views/correo": 25,
+  "src/views/clientes": 102,
   "src/views/cuenta": 53,
   "src/views/facturas": 153,
   "src/views/home": 75,

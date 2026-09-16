@@ -37,7 +37,7 @@ import {
 import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
-export const CLIENTES_CREATE_CONTROLLER_VERSION =
+const CLIENTES_CREATE_CONTROLLER_VERSION =
   "clientes.create-controller.v1.single-owner";
 
 const USER_SEARCH_DEBOUNCE_MS = 220;

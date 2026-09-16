@@ -22,11 +22,8 @@ export {
   normalizeClientesCollection,
 } from "./clientes.model.js";
 
-export const CLIENTES_TEMPLATE_VERSION =
+const CLIENTES_TEMPLATE_VERSION =
   "clientes.template.cursor.v12.private-admin-visual-parity";
-export const CLIENTES_TABLE_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
-export const CLIENTES_VIEW_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
-
 export const CLIENTES_ACTIONS = Object.freeze({
   REFRESH: "refresh",
   CREATE_OPEN: "create-open",
@@ -41,12 +38,7 @@ export const CLIENTES_ACTIONS = Object.freeze({
   EXPORT: "export",
 });
 
-export const CLIENTES_TABLE_ACTIONS = CLIENTES_ACTIONS;
-export const CLIENTES_DEFAULT_VISIBLE_ROWS = 50;
-export const CLIENTES_DEFAULT_PAGE_SIZE = 50;
-export const CLIENTES_MAX_VISIBLE_ROWS = Number.POSITIVE_INFINITY;
-
-export const CLIENTES_TABLE_COLUMNS = Object.freeze([
+const CLIENTES_TABLE_COLUMNS = Object.freeze([
   { key: "main", label: "Cliente" },
   { key: "status", label: "Estado" },
   { key: "created", label: "Alta" },
@@ -500,11 +492,11 @@ export function renderClientesTemplate(input = {}) {
   `;
 }
 
-export function renderClientesLoadingState(input = {}) {
+function renderClientesLoadingState(input = {}) {
   return renderClientesTemplate({ ...safeObject(input), loading: true });
 }
 
-export function renderClientesErrorState(input = {}) {
+function renderClientesErrorState(input = {}) {
   const data = typeof input === "string" ? { error: input } : safeObject(input);
   return renderClientesTemplate({
     ...data,
@@ -513,9 +505,9 @@ export function renderClientesErrorState(input = {}) {
   });
 }
 
-export const renderClientesViewTemplate = renderClientesTemplate;
+const renderClientesViewTemplate = renderClientesTemplate;
 
-export function getClientesTemplateSnapshot() {
+function getClientesTemplateSnapshot() {
   return {
     version: CLIENTES_TEMPLATE_VERSION,
     actions: CLIENTES_ACTIONS,

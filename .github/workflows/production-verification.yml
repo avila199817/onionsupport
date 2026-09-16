@@ -13,10 +13,21 @@ on:
 
 permissions:
   contents: read
+  # Read-only, and only to ask the deploy pipeline which revision it last shipped.
+  # The expectation is never derived from a branch name.
+  actions: read
 
 concurrency:
-  group: production-verification-${{ github.event.pull_request.number || 'main' }}
-  cancel-in-progress: true
+  # A deploy's verification is keyed by the revision it shipped, so a later deploy can
+  # never cancel the verification of an earlier one and let a bad release go unreported.
+  # Only pull-request runs supersede each other, where superseding is what we want.
+  group: >-
+    production-verification-${{
+      github.event_name == 'workflow_run' && github.event.workflow_run.head_sha
+      || github.event.pull_request.number
+      || 'manual'
+    }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verify-production:
@@ -38,10 +49,49 @@ jobs:
       )
 
     steps:
+      # Off the deploy leg there is no revision in the payload that production was ever
+      # asked to serve: the tip of main can be a commit the deploy skipped by paths-ignore,
+      # or one still queued behind another deploy. So the baseline is captured ONCE, here,
+      # from the deploy pipeline itself: the newest push-triggered production deploy that
+      # actually succeeded. Immutable from this point on.
+      - name: Capture deployed production baseline
+        id: baseline
+        if: github.event_name != 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_WORKFLOW: azure-static-web-apps-polite-bay-086469a1e.yml
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          runs="$(
+            curl --fail --silent --show-error --location \
+              --max-time 30 --retry 3 --retry-connrefused \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/workflows/${DEPLOY_WORKFLOW}/runs?branch=main&event=push&status=success&per_page=1"
+          )"
+
+          sha="$(printf '%s' "${runs}" | jq -r '.workflow_runs[0].head_sha // ""')"
+          run_id="$(printf '%s' "${runs}" | jq -r '.workflow_runs[0].id // ""')"
+
+          if [[ ! "${sha}" =~ ^[0-9a-f]{40}$ ]] || [[ ! "${run_id}" =~ ^[0-9]+$ ]]; then
+            echo "::error title=Sin despliegue de referencia::No se pudo capturar un despliegue productivo correcto."
+            exit 1
+          fi
+
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+          echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+          echo "Captured production baseline: ${sha} (deploy run ${run_id})"
+
       - name: Resolve trusted verification revision
         id: trust
         env:
-          TRUSTED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          # workflow_run: the head SHA of the deploy that just shipped, which is by
+          # construction the revision production was asked to serve.
+          # Anything else: the captured baseline above. Never a branch tip.
+          TRUSTED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || steps.baseline.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -222,14 +272,116 @@ jobs:
           ONION_RELEASE_SHA="${EXPECTED_SHA}" \
             node verification-tooling/tools/verify-artifact-envelope.mjs
 
+      # On the deploy leg the chain must be closed end to end, so the rebuild is bound to
+      # the artifact the deploy actually uploaded and validated before touching the Azure
+      # token. Without this the gate only proved "a rebuild of this SHA matches production",
+      # never "the bytes that were shipped are the bytes this SHA reproduces".
+      - name: Download deployed production artifact
+        id: deployed_artifact
+        if: steps.release.outputs.mode == 'compiled-dist' && github.event_name == 'workflow_run'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: frontend-production-dist-${{ steps.revision.outputs.sha }}-*
+          merge-multiple: true
+          path: deployed-artifact
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Bind reproducible rebuild to the deployed artifact
+        id: digest
+        if: steps.deployed_artifact.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rebuilt="$(sha256sum expected-artifact/build-metadata/release-manifest.json | awk '{print $1}')"
+          deployed="$(sha256sum deployed-artifact/build-metadata/release-manifest.json | awk '{print $1}')"
+
+          if [[ ! "${rebuilt}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error title=Digest de rebuild inválido::${rebuilt}"
+            exit 1
+          fi
+
+          if [[ "${rebuilt}" != "${deployed}" ]]; then
+            echo "::error title=El rebuild no reproduce el artefacto desplegado::${rebuilt} != ${deployed}"
+            exit 1
+          fi
+
+          echo "digest=${rebuilt}" >> "${GITHUB_OUTPUT}"
+          echo "Rebuild and deployed artifact share manifest digest ${rebuilt}"
+
       - name: Verify canonical compiled bytes exactly
+        id: bytes
         if: steps.release.outputs.mode == 'compiled-dist'
+        # Off the deploy leg a failure is not yet a verdict: production may have moved on
+        # to a newer deploy while this job ran. The next step decides, and fails closed.
+        # On the deploy leg this stays fatal, because there the identity is exact.
+        continue-on-error: ${{ github.event_name != 'workflow_run' }}
         env:
           DEPLOYED_URL: ${{ steps.canonical.outputs.site_url }}
           ONION_ARTIFACT_DIR: ${{ github.workspace }}/expected-artifact
           ONION_RELEASE_SHA: ${{ steps.revision.outputs.sha }}
+          # Empty off the deploy leg, where the expectation is a rebuild and pinning its
+          # own digest would prove nothing. On the deploy leg this is the digest of the
+          # artifact that was actually shipped, so the pin becomes real.
+          EXPECTED_MANIFEST_DIGEST: ${{ steps.digest.outputs.digest }}
         shell: bash
         run: node verification-tooling/tools/verify-deployed-dist.mjs
+
+      - name: Classify production verification outcome
+        if: steps.release.outputs.mode == 'compiled-dist' && github.event_name != 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_WORKFLOW: azure-static-web-apps-polite-bay-086469a1e.yml
+          BASELINE_SHA: ${{ steps.baseline.outputs.sha }}
+          BASELINE_RUN_ID: ${{ steps.baseline.outputs.run_id }}
+          BYTES_OUTCOME: ${{ steps.bytes.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          runs="$(
+            curl --fail --silent --show-error --location \
+              --max-time 30 --retry 3 --retry-connrefused \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/workflows/${DEPLOY_WORKFLOW}/runs?branch=main&event=push&status=success&per_page=1"
+          )" || runs='{"workflow_runs":[]}'
+
+          newest_sha="$(printf '%s' "${runs}" | jq -r '.workflow_runs[0].head_sha // ""')"
+          newest_run_id="$(printf '%s' "${runs}" | jq -r '.workflow_runs[0].id // ""')"
+
+          state="$(
+            BASELINE_SHA="${BASELINE_SHA}" \
+            BASELINE_RUN_ID="${BASELINE_RUN_ID}" \
+            BYTES_OUTCOME="${BYTES_OUTCOME}" \
+            NEWEST_SHA="${newest_sha}" \
+            NEWEST_RUN_ID="${newest_run_id}" \
+            node --input-type=module -e '
+              import { classifyProductionSkew } from "./verification-tooling/tools/production-baseline-policy.mjs";
+              const run = (sha, id) => ({ sha, runId: Number(id), conclusion: "success" });
+              process.stdout.write(classifyProductionSkew({
+                baseline: run(process.env.BASELINE_SHA, process.env.BASELINE_RUN_ID),
+                matched: process.env.BYTES_OUTCOME === "success",
+                newest: run(process.env.NEWEST_SHA, process.env.NEWEST_RUN_ID),
+              }));
+            '
+          )"
+
+          case "${state}" in
+            exact-match)
+              echo "Production serves exactly the captured baseline ${BASELINE_SHA}."
+              ;;
+            superseded-by-newer-verified-main)
+              echo "::notice title=Baseline superado::Producción avanzó de ${BASELINE_SHA} (run ${BASELINE_RUN_ID}) a ${newest_sha} (run ${newest_run_id}) mientras corría esta verificación."
+              echo "El despliegue de ${newest_sha} verifica esa revisión exactamente en su propia ejecución de esta misma puerta."
+              ;;
+            *)
+              echo "::error title=Producción no coincide::No sirve el baseline capturado ${BASELINE_SHA} ni existe un despliegue posterior correcto que lo explique."
+              exit 1
+              ;;
+          esac
 
       - name: Verify compiled production security, routing and backend
         if: steps.release.outputs.mode == 'compiled-dist'

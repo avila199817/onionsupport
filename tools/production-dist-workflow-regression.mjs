@@ -155,9 +155,77 @@ assert.doesNotMatch(
   "The external compiled verifier must never treat the source checkout as an artifact envelope."
 );
 
+/* =========================================================
+   Production verification must reason about immutable identities, never about a moving
+   main. The gate used to expect production to serve `github.event.pull_request.base.sha`
+   -- the tip of main when the PR event was minted -- which is not a revision production
+   was necessarily ever asked to serve: the deploy declares paths-ignore for .github/** and
+   docs/**, so a tip can be skipped entirely, and a deploy that will happen has not happened
+   yet. That produced false reds attributed to unrelated pull requests.
+========================================================= */
+
+for (const token of [
+  "Capture deployed production baseline",
+  "actions: read",
+  "status=success&per_page=1",
+  "Classify production verification outcome",
+  "production-baseline-policy.mjs",
+  "superseded-by-newer-verified-main",
+  "Bind reproducible rebuild to the deployed artifact",
+  "EXPECTED_MANIFEST_DIGEST: ${{ steps.digest.outputs.digest }}",
+  "run-id: ${{ github.event.workflow_run.id }}",
+]) {
+  assert.ok(
+    verificationWorkflow.includes(token),
+    `Immutable-identity production gate missing: ${token}`
+  );
+}
+
+assert.doesNotMatch(
+  verificationWorkflow,
+  /pull_request\.base\.sha/,
+  "The production gate must never expect production to serve a pull request's base tip."
+);
+
+assert.doesNotMatch(
+  verificationWorkflow,
+  /TRUSTED_SHA:[^\n]*github\.sha/,
+  "The production gate must never expect production to serve the current branch tip."
+);
+
+{
+  const order = [
+    "Capture deployed production baseline",
+    "Resolve trusted verification revision",
+    "Verify canonical compiled bytes exactly",
+    "Classify production verification outcome",
+  ].map((name) => verificationWorkflow.indexOf(name));
+
+  for (let i = 1; i < order.length; i += 1) {
+    assert.ok(
+      order[i - 1] >= 0 && order[i] > order[i - 1],
+      "The baseline is captured before it is trusted, compared and classified."
+    );
+  }
+
+  const classify = verificationWorkflow
+    .split("- name: Classify production verification outcome", 2)[1]
+    .split("\n      - name:", 1)[0];
+  assert.doesNotMatch(
+    classify,
+    /continue-on-error/u,
+    "The classification is the verdict: it may never be allowed to fail silently."
+  );
+  assert.ok(
+    classify.includes("exit 1"),
+    "A production that matches neither the baseline nor a newer deploy must fail the run."
+  );
+}
+
 console.log("Production dist workflow regression: PASS");
 console.log("- build and browser validation run in the no-secret job");
 console.log("- a fresh runner validates the exact artifact before token access");
 console.log("- exact Azure-origin canonicalization and canonical bytes block production success");
 console.log("- external verification supports legacy base PRs and compiled main");
 console.log("- manual rollback is pinned to the verified legacy SHA");
+console.log("- the production gate expects a deployed revision, never a moving branch tip");

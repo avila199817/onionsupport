@@ -7,6 +7,11 @@ import {
   hasOneYearImmutableCache,
   hasPrivateNoStoreCache,
 } from "./cache-control-policy.mjs";
+import {
+  classifyProductionSkew,
+  isVerificationFailure,
+  selectDeployedBaseline,
+} from "./production-baseline-policy.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const deployedVerifier = await readFile(resolve(ROOT, "tools/verify-deployed-dist.mjs"), "utf8");
@@ -132,6 +137,109 @@ for (const token of [
   assert.ok(productionVerifier.includes(token), `Production verifier hardening missing: ${token}`);
 }
 
+/* =========================================================
+   Production verification reasons about immutable identities.
+
+   The six scenarios the owner asked to reproduce, as a pure table: no network, no clock,
+   no CI. `matched` is the verdict of the real byte comparison; `newest` is what the deploy
+   pipeline reports AFTER it.
+========================================================= */
+
+const A = { sha: "a".repeat(40), runId: 100, conclusion: "success" };
+const B = { sha: "b".repeat(40), runId: 101, conclusion: "success" };
+
+// 1. main does not move: production serves the captured baseline.
+assert.equal(
+  classifyProductionSkew({ baseline: A, matched: true, newest: A }),
+  "exact-match",
+  "A production that matches its captured baseline is an exact match"
+);
+
+// 2. main advances during the verification, and so does production.
+assert.equal(
+  classifyProductionSkew({ baseline: A, matched: false, newest: B }),
+  "superseded-by-newer-verified-main",
+  "A strictly newer successful deploy explains a baseline that no longer matches"
+);
+
+// 3. production still serves A while main is already B: the baseline is what was DEPLOYED,
+//    not the tip, so A still matches and nothing is superseded.
+assert.equal(
+  classifyProductionSkew({ baseline: A, matched: true, newest: B }),
+  "exact-match",
+  "A tip ahead of production is irrelevant while production matches its deployed baseline"
+);
+
+// 4. production already serves B while this job captured A.
+assert.equal(
+  classifyProductionSkew({ baseline: A, matched: false, newest: B }),
+  "superseded-by-newer-verified-main",
+  "A job holding a stale baseline defers to the deploy that superseded it"
+);
+
+// 5. genuine mismatch: production matches neither, and nothing newer explains it.
+assert.equal(
+  classifyProductionSkew({ baseline: A, matched: false, newest: A }),
+  "genuine-mismatch",
+  "Without a newer deploy, a non-matching production is a real discrepancy"
+);
+assert.ok(
+  isVerificationFailure("genuine-mismatch") &&
+    !isVerificationFailure("exact-match") &&
+    !isVerificationFailure("superseded-by-newer-verified-main"),
+  "Only a genuine mismatch fails the run"
+);
+
+// 6. the deploy leg: an exact identity is never classified, it is compared. The policy is
+//    only reachable off that leg, so a baseline that is not a successful deploy is refused.
+for (const [label, baseline] of [
+  ["no baseline at all", null],
+  ["baseline with a short sha", { ...A, sha: "abc" }],
+  ["baseline with a non-numeric run id", { ...A, runId: Number.NaN }],
+  ["baseline from a failed deploy", { ...A, conclusion: "failure" }],
+]) {
+  assert.equal(
+    classifyProductionSkew({ baseline, matched: false, newest: B }),
+    "genuine-mismatch",
+    `Missing evidence accepted as an explanation: ${label}`
+  );
+}
+
+// Nothing may launder a discrepancy into a supersede: each mutation flips exactly one fact.
+for (const [label, newest] of [
+  ["an older run", { ...B, runId: 99 }],
+  ["the same run", { ...B, runId: A.runId }],
+  ["the same revision", { ...B, sha: A.sha }],
+  ["a cancelled deploy", { ...B, conclusion: "cancelled" }],
+  ["a failed deploy", { ...B, conclusion: "failure" }],
+  ["an unreachable pipeline", null],
+]) {
+  assert.equal(
+    classifyProductionSkew({ baseline: A, matched: false, newest }),
+    "genuine-mismatch",
+    `Unverified production accepted as superseded: ${label}`
+  );
+}
+
+// The baseline is the newest SUCCESSFUL deploy, whatever order the pipeline reports.
+assert.deepEqual(
+  selectDeployedBaseline([A, B]),
+  { sha: B.sha, runId: B.runId },
+  "The newest successful deploy is the baseline"
+);
+assert.deepEqual(
+  selectDeployedBaseline([B, A]),
+  { sha: B.sha, runId: B.runId },
+  "Baseline selection does not depend on the order the pipeline returns"
+);
+assert.equal(
+  selectDeployedBaseline([{ ...B, conclusion: "failure" }, { ...A, conclusion: "cancelled" }]),
+  null,
+  "A deploy that never succeeded is never a baseline"
+);
+assert.equal(selectDeployedBaseline([]), null, "No deploy is not a baseline");
+assert.equal(selectDeployedBaseline(null), null, "A malformed answer is not a baseline");
+
 console.log("Deployed dist verifier regression: PASS");
 console.log("- redirects, URL ambiguity, MIME and denied paths fail closed");
 console.log("- SVG assets are accepted only with the exact image/svg+xml MIME type");
@@ -139,3 +247,4 @@ console.log("- generic unknown URLs are proven real HTTP 404 responses");
 console.log("- obsolete language-prefixed paths are rejected across the tracked tree");
 console.log("- fingerprinted and private cache policies resist conflicting directives");
 console.log("- deep private SPA routes remain exact, no-store and noindex");
+console.log("- production verification classifies skew from immutable deploy identities, failing closed");

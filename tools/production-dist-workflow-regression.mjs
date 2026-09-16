@@ -222,6 +222,65 @@ assert.doesNotMatch(
   );
 }
 
+/* =========================================================
+   THE CLASSIFIER IS WORKFLOW BOOKKEEPING, NOT VERIFICATION CODE
+
+   Two checkouts, two jobs. `verification-tooling/` is pinned to the trusted, already
+   deployed revision because it holds the code that INSPECTS production; pointing it at the
+   candidate would let a pull request grade itself. `workflow-tooling/` is the workflow's own
+   revision and holds only the code that INTERPRETS this run's bookkeeping -- two run ids and
+   one boolean -- never touching production.
+
+   The classifier is the second kind, and importing it from the first is a bootstrapping
+   error, not a policy choice: the trusted revision is by construction the one already
+   deployed, so it predates every module this run introduces, and the step dies with
+   ERR_MODULE_NOT_FOUND. That is exactly how it failed once.
+========================================================= */
+
+{
+  const CLASSIFIER = "tools/production-baseline-policy.mjs";
+  assert.ok(
+    verificationWorkflow.includes(`./workflow-tooling/${CLASSIFIER}`),
+    "The skew classifier must be imported from the workflow's own checkout."
+  );
+  assert.ok(
+    !verificationWorkflow.includes(`verification-tooling/${CLASSIFIER}`),
+    "The skew classifier must never be imported from the trusted revision: that revision is " +
+      "the one already deployed, so it predates the module and the step cannot resolve it."
+  );
+
+  const stepBlock = (name) =>
+    verificationWorkflow.split(`- name: ${name}`, 2)[1].split("\n      - name:", 1)[0];
+
+  const workflowTooling = stepBlock("Checkout workflow-owned policy");
+  assert.ok(
+    workflowTooling.includes("path: workflow-tooling"),
+    "The workflow-owned policy checkout must land in workflow-tooling/."
+  );
+  assert.doesNotMatch(
+    workflowTooling,
+    /^\s+ref:/mu,
+    "The workflow-owned policy checkout carries no ref: it is this workflow's own revision."
+  );
+
+  const verifierTooling = stepBlock("Checkout verifier tooling");
+  assert.ok(
+    verifierTooling.includes("ref: ${{ steps.trust.outputs.sha }}"),
+    "The verifier tooling stays pinned to the trusted revision: it inspects production."
+  );
+
+  // Whatever leg classifies must also have checked the policy out, or the import cannot resolve.
+  const GUARD = "github.event_name != 'workflow_run'";
+  assert.ok(
+    workflowTooling.includes(`if: ${GUARD}`),
+    "The workflow-owned policy checkout is gated on the leg that classifies."
+  );
+  assert.ok(
+    stepBlock("Classify production verification outcome").includes(GUARD),
+    "The classification runs only on the leg that checked the policy out."
+  );
+}
+
 console.log("Production dist workflow regression: PASS");
 console.log("- build and browser validation run in the no-secret job");
 console.log("- a fresh runner validates the exact artifact before token access");
@@ -229,3 +288,4 @@ console.log("- exact Azure-origin canonicalization and canonical bytes block pro
 console.log("- external verification supports legacy base PRs and compiled main");
 console.log("- manual rollback is pinned to the verified legacy SHA");
 console.log("- the production gate expects a deployed revision, never a moving branch tip");
+console.log("- the skew classifier resolves from the workflow's own checkout, not the trusted one");

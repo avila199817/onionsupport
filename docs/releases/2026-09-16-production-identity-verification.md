@@ -64,6 +64,19 @@ La cadena queda: `head_sha` → build reproducible de esa identidad → digest d
 
 Un digest de manifiesto es estrictamente más fuerte que el SHA: contiene `{path, bytes, sha256}` de los 193 ficheros del `dist` más el propio `gitSha`, así que una sola comparación fija todos los bytes y la identidad a la vez.
 
+### Dónde vive el clasificador
+
+El job hace ahora dos checkouts con trabajos distintos, y la distinción es de confianza, no de comodidad:
+
+| Checkout | Revisión | Contenido |
+| --- | --- | --- |
+| `verification-tooling/` | la ya desplegada (`steps.trust.outputs.sha`) | el código que **inspecciona** producción |
+| `workflow-tooling/` | la del propio workflow (sin `ref:`) | el código que **interpreta** la contabilidad de esta ejecución |
+
+El verificador se queda pinchado a la revisión confiable porque apuntarlo al candidato dejaría que una PR se calificase a sí misma. El clasificador es de la segunda clase: sólo lee dos ids de ejecución y un booleano, y no toca producción en ningún momento.
+
+Importarlo desde la primera fue un error de arranque, no una decisión discutible, y así falló la primera ejecución: la revisión confiable es por construcción la ya desplegada, así que precede a cualquier módulo que introduzca este cambio, y el paso murió con `ERR_MODULE_NOT_FOUND`. `production-dist-workflow-regression.mjs` fija ahora las cuatro condiciones (de dónde se importa, de dónde no, que el checkout del workflow no lleve `ref:`, que el verificador sí lo lleve) y que la pata que clasifica sea la misma que hace ese checkout.
+
 ### Correcciones de paso
 
 - **`concurrency`.** La clave era `production-verification-main` para todo `workflow_run`, con `cancel-in-progress: true`: **el despliegue siguiente cancelaba la verificación del anterior**, y un despliegue realmente malo podía quedar sin informar. Ahora la clave es el SHA desplegado, y sólo las PRs se superan entre sí.

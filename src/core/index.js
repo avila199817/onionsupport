@@ -24,7 +24,7 @@ import {
 import Http from "./http.js";
 import { userNameFromIdentity } from "./user-identity.js";
 import { cleanText, normalizeKey } from "./presentation-text.js";
-import { isObject, isFunction } from "./objects.js";
+import { isObject, isFunction, firstNonBlank } from "./objects.js";
 
 export const CORE_VERSION = "core.minimal.v9-specialized-snapshot";
 const RUNTIME_STATE_VERSION = "core.runtime-state.v2-dirty-guard";
@@ -39,14 +39,6 @@ function isBrowser() { return typeof window !== "undefined" && typeof document !
 function normalizeUserEmail(value = "") {
   const email = cleanText(value, "").toLowerCase().replace(/\s+/g, "");
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
-}
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    return value;
-  }
-  return null;
 }
 function clone(value) {
   if (value === undefined || value === null) return value;
@@ -205,7 +197,7 @@ function normalizeSlug(value = "") {
   return slug && /^[a-z0-9][a-z0-9._-]{0,95}$/.test(slug) ? slug : "";
 }
 function rawUserSlug(user = null) {
-  return isObject(user) ? first(user.slug, user.lookup?.slug, user.profile?.slug, user.routing?.slug, user.username, user.userName, user.user_name, user.usernameLower, user.username_lower, user.userId, user.id, "") : "";
+  return isObject(user) ? firstNonBlank(user.slug, user.lookup?.slug, user.profile?.slug, user.routing?.slug, user.username, user.userName, user.user_name, user.usernameLower, user.username_lower, user.userId, user.id, "") : "";
 }
 function extractUserSlug(user = null) { return normalizeSlug(rawUserSlug(user)); }
 function buildUserHomePath(userOrSlug = null) {
@@ -214,7 +206,7 @@ function buildUserHomePath(userOrSlug = null) {
   try { if (isFunction(configBuildUserHomeRoute)) return configBuildUserHomeRoute(slug) || `${USER_HOME_PREFIX}${slug}`; } catch {}
   return `${USER_HOME_PREFIX}${slug}`;
 }
-function userStatus(user = null) { return isObject(user) ? cleanText(first(user.status, user.estado, user.state, user.accountStatus, ""), "").toLowerCase() : ""; }
+function userStatus(user = null) { return isObject(user) ? cleanText(firstNonBlank(user.status, user.estado, user.state, user.accountStatus, ""), "").toLowerCase() : ""; }
 function userFlagBits(user = null) {
   if (!isObject(user)) return -1;
   let bits = 0;
@@ -238,23 +230,23 @@ function normalizePermissions(value = []) {
 }
 function publicUser(user = null) {
   if (!isObject(user)) return null;
-  const role = normalizeRole(first(user.role, user.rol, user.roles, "")) || "user";
+  const role = normalizeRole(firstNonBlank(user.role, user.rol, user.roles, "")) || "user";
   const slug = extractUserSlug(user);
   const status = userStatus(user) || (userLooksDisabledByFlag(user) ? "disabled" : "active");
-  const name = userNameFromIdentity(user, first(user.username, "Usuario"));
+  const name = userNameFromIdentity(user, firstNonBlank(user.username, "Usuario"));
   return {
-    id: first(user.id, user.userId, null), userId: first(user.userId, user.id, null),
-    username: first(user.username, user.userName, user.user_name, null), slug,
+    id: firstNonBlank(user.id, user.userId, null), userId: firstNonBlank(user.userId, user.id, null),
+    username: firstNonBlank(user.username, user.userName, user.user_name, null), slug,
     name, displayName: name,
-    email: normalizeUserEmail(first(user.emailLower, user.email, user.emailAddress, user.profile?.emailLower, user.profile?.email, user.lookup?.emailLower, user.lookup?.email, "")),
+    email: normalizeUserEmail(firstNonBlank(user.emailLower, user.email, user.emailAddress, user.profile?.emailLower, user.profile?.email, user.lookup?.emailLower, user.lookup?.email, "")),
     role, rol: role, roles: [role],
-    avatarUrl: cleanText(first(user.avatarUrl, user.avatar, user.picture, user.photoUrl, user.profile?.avatarUrl, user.profile?.avatar, ""), ""), status,
+    avatarUrl: cleanText(firstNonBlank(user.avatarUrl, user.avatar, user.picture, user.photoUrl, user.profile?.avatarUrl, user.profile?.avatar, ""), ""), status,
   };
 }
 function normalizeUser(user = null) {
   const output = publicUser(user);
   if (!output) return null;
-  const permissions = normalizePermissions(first(user.permissions, user.permisos, user.profile?.permissions, []));
+  const permissions = normalizePermissions(firstNonBlank(user.permissions, user.permisos, user.profile?.permissions, []));
   return { ...output, permissions, permisos: [...permissions], usable: isUsableUser(user) };
 }
 function cloneCanonicalUser(user = null) {
@@ -264,13 +256,13 @@ function cloneCanonicalUser(user = null) {
 
 function currentUserRoleSignal(user = state.user) {
   if (!isObject(user)) return "";
-  return normalizeRole(first(user.role, user.rol, user.roles, ""));
+  return normalizeRole(firstNonBlank(user.role, user.rol, user.roles, ""));
 }
 function authInputsChanged() {
   const user = state.user;
   return !authSignal.initialized ||
     authSignal.token !== state.token || authSignal.accessToken !== state.accessToken || authSignal.access_token !== state.access_token ||
-    authSignal.user !== user || authSignal.userStatus !== (isObject(user) ? first(user.status, user.estado, user.state, user.accountStatus, null) : null) ||
+    authSignal.user !== user || authSignal.userStatus !== (isObject(user) ? firstNonBlank(user.status, user.estado, user.state, user.accountStatus, null) : null) ||
     authSignal.userRole !== currentUserRoleSignal(user) || authSignal.userSlug !== rawUserSlug(user) || authSignal.userFlags !== userFlagBits(user) ||
     authSignal.session !== state.session || authSignal.sessionId !== state.sessionId || authSignal.sessionUserId !== state.sessionUserId ||
     authSignal.fallbackRole !== state.role || authSignal.fallbackRol !== state.rol;
@@ -280,7 +272,7 @@ function captureAuthInputs() {
   authSignal.initialized = true;
   authSignal.token = state.token; authSignal.accessToken = state.accessToken; authSignal.access_token = state.access_token;
   authSignal.user = user;
-  authSignal.userStatus = isObject(user) ? first(user.status, user.estado, user.state, user.accountStatus, null) : null;
+  authSignal.userStatus = isObject(user) ? firstNonBlank(user.status, user.estado, user.state, user.accountStatus, null) : null;
   authSignal.userRole = currentUserRoleSignal(user);
   authSignal.userSlug = rawUserSlug(user);
   authSignal.userFlags = userFlagBits(user);
@@ -293,7 +285,7 @@ function syncAuthDerivedState(options = {}) {
   const user = state.user;
   const safeUser = isUsableUser(user) ? user : null;
   const token = cleanToken(state.token || state.accessToken || state.access_token);
-  const role = safeUser ? (normalizeRole(first(safeUser.role, safeUser.rol, safeUser.roles, state.role, state.rol, "user")) || "user") : null;
+  const role = safeUser ? (normalizeRole(firstNonBlank(safeUser.role, safeUser.rol, safeUser.roles, state.role, state.rol, "user")) || "user") : null;
   const slug = safeUser ? extractUserSlug(safeUser) : "";
   const homePath = safeUser ? buildUserHomePath(slug) : ROOT_PATH;
   const roles = safeUser && role ? [role] : [];
@@ -374,9 +366,9 @@ function safeInternalPath(value = ROOT_PATH) {
 
 function normalizeSessionContext(value = null, user = null) {
   if (!isObject(value)) return null;
-  const sessionId = cleanText(first(value.sessionId, value.session_id, value.sid, value.id, ""), "");
-  const userId = cleanText(first(value.sessionUserId, value.session_user_id, value.userId, value.user_id, user?.userId, user?.id, ""), "");
-  const expiresAt = first(value.expiresAt, value.expires_at, value.refreshExpiresAt, value.refresh_expires_at, null);
+  const sessionId = cleanText(firstNonBlank(value.sessionId, value.session_id, value.sid, value.id, ""), "");
+  const userId = cleanText(firstNonBlank(value.sessionUserId, value.session_user_id, value.userId, value.user_id, user?.userId, user?.id, ""), "");
+  const expiresAt = firstNonBlank(value.expiresAt, value.expires_at, value.refreshExpiresAt, value.refresh_expires_at, null);
   if (!sessionId && !userId && !expiresAt) return null;
   return { sessionId: sessionId || null, id: sessionId || null, userId: userId || null, sessionUserId: userId || null, expiresAt, active: value.active !== false, revoked: value.revoked === true, persistent: value.persistent === true || value.restoreOnBoot === true };
 }
@@ -522,9 +514,9 @@ function setToken(token = null) {
 }
 function applySession(payload = {}) {
   if (!isObject(payload)) return getState();
-  const token = first(payload.token, payload.accessToken, payload.access_token, payload.data?.token, payload.data?.accessToken, payload.data?.access_token, payload.auth?.token, payload.auth?.accessToken, null);
-  const user = first(payload.user, payload.currentUser, payload.data?.user, payload.data?.currentUser, payload.auth?.user, payload.auth?.currentUser, null);
-  const sessionPayload = first(payload.session, payload.sessionData, payload.currentSession, payload.data?.session, payload.auth?.session, null);
+  const token = firstNonBlank(payload.token, payload.accessToken, payload.access_token, payload.data?.token, payload.data?.accessToken, payload.data?.access_token, payload.auth?.token, payload.auth?.accessToken, null);
+  const user = firstNonBlank(payload.user, payload.currentUser, payload.data?.user, payload.data?.currentUser, payload.auth?.user, payload.auth?.currentUser, null);
+  const sessionPayload = firstNonBlank(payload.session, payload.sessionData, payload.currentSession, payload.data?.session, payload.auth?.session, null);
   let changed = false;
   if (token !== null && token !== undefined) {
     const clean = cleanToken(token); changed = setScalar("token", clean) || changed; changed = setScalar("accessToken", clean) || changed; changed = setScalar("access_token", clean) || changed;
@@ -598,9 +590,9 @@ function request(...args) { const activeRequest = getActiveRequest(); if (!isFun
 
 function setShowToast(fn = null) { if (!isFunction(fn)) return false; toastBridge = fn; return true; }
 function showToast(message = "", type = "info", options = {}) {
-  const text = isObject(message) ? cleanText(first(message.message, message.text, message.title, "")) : cleanText(message, "");
+  const text = isObject(message) ? cleanText(firstNonBlank(message.message, message.text, message.title, "")) : cleanText(message, "");
   if (!text) return null;
-  const variant = isObject(message) ? cleanText(first(message.type, message.variant, type, "info"), "info") : cleanText(type, "info");
+  const variant = isObject(message) ? cleanText(firstNonBlank(message.type, message.variant, type, "info"), "info") : cleanText(type, "info");
   if (toastBridge) return toastBridge(text, variant, options);
   const toast = getModule("toast");
   if (isFunction(toast?.show)) return toast.show({ ...(isObject(options) ? options : {}), type: variant, message: text });

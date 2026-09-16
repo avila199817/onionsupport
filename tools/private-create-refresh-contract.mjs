@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import { firstNonBlank } from "../src/core/objects.js";
 
 // Execute the production submit/close/reset functions and parent callbacks.
 // Rendering, form validation and transport are boundaries here; browser form
@@ -63,7 +64,7 @@ function clientFixture() {
         modalHost: null, returnFocus: null, firstModalPaint: false,
         createModal: { open: false, submitting: false, form: {} },
         getCreateFormDefaults: () => ({}), safeObject, cleanText: (value) => String(value ?? ""),
-        first: (...values) => values.find((value) => value != null), isBrowser: () => false,
+        firstNonBlank, isBrowser: () => false,
         readCreateForm: () => child.createModal.form,
         validateCreateForm: () => ({ valid: true, errors: {}, payload: {} }),
         scheduleRender: noop, renderNow: noop, removeModalHost: noop,

@@ -40,7 +40,7 @@ ROOT_ASSET_PATTERN = re.compile(
     r"['\"](/src/(?:css|media)/[^'\"?#]+(?:\?[^'\"#]*)?(?:#[^'\"]*)?)['\"]"
 )
 FIRST_HELPER_PATTERN = re.compile(
-    r"function\s+first\s*\(\s*\.\.\.values\s*\)\s*\{(?P<body>.*?)\n\}",
+    r"function\s+(?P<name>first(?:NonBlank|NonEmpty)?)\s*\(\s*\.\.\.values\s*\)\s*\{(?P<body>.*?)\n\}",
     re.DOTALL,
 )
 EXTERNAL_SCHEMES = ("http://", "https://", "data:", "blob:")
@@ -150,11 +150,13 @@ def validate_js_references(errors: list[str]) -> None:
 
 
 def validate_first_helpers(errors: list[str]) -> None:
-    """A `first()` selector must preserve arrays as values, never flatten them.
+    """A first-candidate selector must preserve arrays as values, never flatten them.
 
     Flattening its variadic arguments silently turns a domain collection into its
     first element. We have already hit this class of bug in Facturas/Incidencias,
-    so it is now a repository-level invariant.
+    so it is now a repository-level invariant. The selectors live in
+    src/core/objects.js (firstNonBlank, firstNonEmpty); a local `first(...values)`
+    copy is checked the same way.
     """
 
     for js_file in sorted(SRC.rglob("*.js")):
@@ -163,7 +165,7 @@ def validate_first_helpers(errors: list[str]) -> None:
             body = match.group("body")
             if "values.flat(" in body or "values.flatMap(" in body:
                 errors.append(
-                    f"{js_file.relative_to(ROOT)} :: first(...values) no puede aplanar arrays"
+                    f"{js_file.relative_to(ROOT)} :: {match.group('name')}(...values) no puede aplanar arrays"
                 )
 
 

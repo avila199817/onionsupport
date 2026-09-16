@@ -2,7 +2,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { renderModalCloseButton, renderModalShell } from "../../features/entity-overlay/modal-host.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 /* =========================================================
@@ -163,43 +163,6 @@ const DEFAULT_FORM =
 /*
   No aplanar arrays.
 */
-function first(...values) {
-  for (const value of values) {
-    if (
-      value === undefined ||
-      value === null
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
-
 function attr(
   value = ""
 ) {
@@ -650,7 +613,7 @@ function normalizeUserResult(
 
   const profile =
     safeObject(
-      first(
+      firstNonEmpty(
         raw.profile,
         nested.profile,
         {}
@@ -660,7 +623,7 @@ function normalizeUserResult(
 
   const userId =
     trimField(
-      first(
+      firstNonEmpty(
         raw.userId,
         raw.id,
         raw.uid,
@@ -690,7 +653,7 @@ function normalizeUserResult(
 
   const clienteId =
     trimField(
-      first(
+      firstNonEmpty(
         raw.targetClienteId,
         raw.clienteId,
         raw.clientId,
@@ -731,7 +694,7 @@ function normalizeUserResult(
 
   const name =
     trimField(
-      first(
+      firstNonEmpty(
         raw.displayName,
         raw.fullName,
         raw.name,
@@ -791,7 +754,7 @@ function normalizeUserResult(
 
   const phone =
     normalizePhone(
-      first(
+      firstNonEmpty(
         raw.phone,
         raw.telefono,
         raw.mobile,
@@ -808,7 +771,7 @@ function normalizeUserResult(
 
   const username =
     trimField(
-      first(
+      firstNonEmpty(
         raw.username,
         raw.usernameLower,
         raw.userName,
@@ -829,7 +792,7 @@ function normalizeUserResult(
 
   const role =
     trimField(
-      first(
+      firstNonEmpty(
         raw.role,
         raw.rol,
         nested.role,
@@ -926,7 +889,7 @@ function normalizeForm(
 
   const selectedUser =
     normalizeUserResult(
-      first(
+      firstNonEmpty(
         input.selectedUser,
         input.user,
         input.usuario,
@@ -942,7 +905,7 @@ function normalizeForm(
 
   const userId =
     trimField(
-      first(
+      firstNonEmpty(
         input.userId,
         input.targetUserId,
 
@@ -963,7 +926,7 @@ function normalizeForm(
 
   const targetClienteId =
     trimField(
-      first(
+      firstNonEmpty(
         input.targetClienteId,
         input.clienteId,
         input.clientId,
@@ -983,7 +946,7 @@ function normalizeForm(
 
   const tipo =
     normalizeClienteType(
-      first(
+      firstNonEmpty(
         input.tipo,
         input.clienteTipo,
         input.segmento,
@@ -993,7 +956,7 @@ function normalizeForm(
 
   const selectedName =
     trimField(
-      first(
+      firstNonEmpty(
         input.targetUserName,
 
         hasSelectedUser
@@ -1022,7 +985,7 @@ function normalizeForm(
 
   const selectedPhone =
     normalizePhone(
-      first(
+      firstNonEmpty(
         input.targetUserPhone,
 
         hasSelectedUser
@@ -1039,7 +1002,7 @@ function normalizeForm(
 
   const selectedUsername =
     trimField(
-      first(
+      firstNonEmpty(
         input.targetUsername,
 
         hasSelectedUser
@@ -1066,7 +1029,7 @@ function normalizeForm(
 
   const nombreFiscal =
     trimField(
-      first(
+      firstNonEmpty(
         input.nombreFiscal,
         input.razonSocial,
         input.businessName,
@@ -1083,7 +1046,7 @@ function normalizeForm(
 
   const nif =
     trimField(
-      first(
+      firstNonEmpty(
         input.nif,
         input.cif,
         input.vatNumber,
@@ -1095,7 +1058,7 @@ function normalizeForm(
 
   const contactoNombre =
     trimField(
-      first(
+      firstNonEmpty(
         input.contactoNombre,
         input.contactName,
 
@@ -1116,7 +1079,7 @@ function normalizeForm(
   */
   const explicitContactEmail =
     normalizeEmailText(
-      first(
+      firstNonEmpty(
         input.contactoEmail,
         input.email,
         input.emailCliente,
@@ -1134,7 +1097,7 @@ function normalizeForm(
 
   const contactoPhone =
     normalizePhone(
-      first(
+      firstNonEmpty(
         input.contactoPhone,
         input.phone,
         input.telefono,
@@ -1152,7 +1115,7 @@ function normalizeForm(
 
   const calle =
     trimField(
-      first(
+      firstNonEmpty(
         input.calle,
 
         input.direccion
@@ -1168,7 +1131,7 @@ function normalizeForm(
 
   const cp =
     trimField(
-      first(
+      firstNonEmpty(
         input.cp,
         input.postalCode,
         input.codigoPostal,
@@ -1183,7 +1146,7 @@ function normalizeForm(
 
   const ciudad =
     trimField(
-      first(
+      firstNonEmpty(
         input.ciudad,
         input.city,
 
@@ -1197,7 +1160,7 @@ function normalizeForm(
 
   const provincia =
     trimField(
-      first(
+      firstNonEmpty(
         input.provincia,
         input.province,
 
@@ -1211,7 +1174,7 @@ function normalizeForm(
 
   const pais =
     trimField(
-      first(
+      firstNonEmpty(
         input.pais,
         input.country,
 
@@ -1302,7 +1265,7 @@ function normalizeForm(
 
     username:
       trimField(
-        first(
+        firstNonEmpty(
           input.username,
           selectedUsername,
           ""
@@ -1348,21 +1311,21 @@ function buildSelectedUser(
     ...selected,
 
     userId:
-      first(
+      firstNonEmpty(
         selected.userId,
         selected.id,
         form.targetUserId
       ),
 
     id:
-      first(
+      firstNonEmpty(
         selected.id,
         selected.userId,
         form.targetUserId
       ),
 
     targetClienteId:
-      first(
+      firstNonEmpty(
         selected.targetClienteId,
         selected.clienteId,
         selected.clientId,
@@ -1370,7 +1333,7 @@ function buildSelectedUser(
       ),
 
     clienteId:
-      first(
+      firstNonEmpty(
         selected.clienteId,
         selected.targetClienteId,
         selected.clientId,
@@ -1378,7 +1341,7 @@ function buildSelectedUser(
       ),
 
     displayName:
-      first(
+      firstNonEmpty(
         selected.displayName,
         selected.fullName,
         selected.name,
@@ -1387,7 +1350,7 @@ function buildSelectedUser(
       ),
 
     name:
-      first(
+      firstNonEmpty(
         selected.name,
         selected.displayName,
         selected.fullName,
@@ -1396,28 +1359,28 @@ function buildSelectedUser(
       ),
 
     email:
-      first(
+      firstNonEmpty(
         selected.email,
         selected.emailLower,
         form.targetUserEmail
       ),
 
     phone:
-      first(
+      firstNonEmpty(
         selected.phone,
         selected.telefono,
         form.targetUserPhone
       ),
 
     username:
-      first(
+      firstNonEmpty(
         selected.username,
         selected.usernameLower,
         form.targetUsername
       ),
 
     avatarUrl:
-      first(
+      firstNonEmpty(
         selected.avatarUrl,
         selected.avatar,
         form.targetUserAvatar

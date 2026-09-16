@@ -1,5 +1,5 @@
 import { cleanText } from "../../core/presentation-text.js";
-import { safeObject } from "../../core/objects.js";
+import { safeObject, firstNonBlank } from "../../core/objects.js";
 /* =========================================================
    Onion Support - Global Entity Intent
 
@@ -107,15 +107,6 @@ function safeDecode(value = "") {
   } catch {
     return String(value ?? "");
   }
-}
-
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    return value;
-  }
-  return null;
 }
 
 export function normalizeEntityType(value = "") {
@@ -235,7 +226,7 @@ function textId(type = "", text = "") {
 export function inferEntityIntent(input = {}) {
   const data = safeObject(input);
   const dataset = safeObject(data.dataset);
-  const route = first(
+  const route = firstNonBlank(
     data.route,
     data.href,
     dataset.route,
@@ -246,7 +237,7 @@ export function inferEntityIntent(input = {}) {
   const url = urlFromRoute(route);
 
   const explicitType = normalizeEntityType(
-    first(
+    firstNonBlank(
       data.type,
       data.entityType,
       dataset.entityType,
@@ -261,7 +252,7 @@ export function inferEntityIntent(input = {}) {
   const id =
     explicitId(type, dataset, data) ||
     routeId(type, url) ||
-    textId(type, first(data.text, data.textContent, ""));
+    textId(type, firstNonBlank(data.text, data.textContent, ""));
 
   if (!id) return null;
 
@@ -326,7 +317,7 @@ function blocksEntityIntentFromElement(element = null) {
   ].join(","));
   if (!actionNode) return false;
   const data = datasetSnapshot(actionNode);
-  const action = cleanText(first(data.entityOverlayAction, data.facturasAction, data.facturaAction,
+  const action = cleanText(firstNonBlank(data.entityOverlayAction, data.facturasAction, data.facturaAction,
     data.incidenciasAction, data.incidenciaAction, data.ticketAction, data.clientesAction,
     data.clienteAction, data.usuariosAction, data.usuarioAction, data.detailAction, data.action, ""))
     .toLowerCase().replace(/_/g, "-");
@@ -360,7 +351,7 @@ export function inferEntityIntentFromElement(target = null) {
   if (!node) return null;
 
   const dataset = datasetSnapshot(node);
-  const type = first(
+  const type = firstNonBlank(
     dataset.entityType,
     dataset.facturaId || dataset.invoiceId ? "factura" : "",
     dataset.incidenciaId || dataset.ticketId ? "incidencia" : "",
@@ -369,7 +360,7 @@ export function inferEntityIntentFromElement(target = null) {
     ""
   );
 
-  const id = first(
+  const id = firstNonBlank(
     dataset.entityId,
     dataset.facturaId,
     dataset.invoiceId,
@@ -386,7 +377,7 @@ export function inferEntityIntentFromElement(target = null) {
     type,
     id,
     dataset,
-    route: first(
+    route: firstNonBlank(
       dataset.route,
       dataset.href,
       dataset.path,

@@ -14,7 +14,7 @@ import { renderUsuariosTableTemplate, USUARIOS_ACTIONS } from "../usuarios/usuar
 import UsuariosDetailModal from "../usuarios/usuarios.template.modal.js";
 import { loadUsuarioDetail, normalizeUsuarioModel } from "../usuarios/usuarios.api.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 
 export const EMPLEADOS_VIEW_VERSION = "empleados.view.v5.usuarios-parity-current-employee";
@@ -25,16 +25,6 @@ const ACTIONS = USUARIOS_ACTIONS;
 const SEARCH_DEBOUNCE_MS = 160;
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
-const first = (...values) => {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (isObject(value) && !Object.keys(value).length) continue;
-    return value;
-  }
-  return null;
-};
 function getAppState() {
   try {
     return typeof AppCore?.runtimeState?.read === "function"
@@ -47,7 +37,7 @@ function getAppState() {
 
 function currentUser(context = {}) {
   const state = getAppState();
-  return safeObject(first(
+  return safeObject(firstNonEmpty(
     context.user,
     context.currentUser,
     state.user,
@@ -60,7 +50,7 @@ function currentUser(context = {}) {
 
 function currentRole(context = {}, user = currentUser(context)) {
   const state = getAppState();
-  const raw = first(context.role, context.rol, user.role, user.rol, state.role, state.rol, state.roles, "user");
+  const raw = firstNonEmpty(context.role, context.rol, user.role, user.rol, state.role, state.rol, state.roles, "user");
   try {
     if (typeof AppCore?.normalizeRole === "function") return cleanText(AppCore.normalizeRole(raw), "user");
   } catch {
@@ -69,11 +59,11 @@ function currentRole(context = {}, user = currentUser(context)) {
   return slugKey(Array.isArray(raw) ? raw[0] : raw) === "admin" ? "admin" : "user";
 }
 
-const employeeId = (item = {}) => cleanText(first(item.userId, item.usuarioId, item.id, item.uid, item.email, ""), "");
+const employeeId = (item = {}) => cleanText(firstNonEmpty(item.userId, item.usuarioId, item.id, item.uid, item.email, ""), "");
 const isAdmin = (context = {}, user = currentUser(context)) => context.admin === true || currentRole(context, user) === "admin";
 
 function statusOf(item = {}) {
-  const status = slugKey(first(item.status, item.estado, item.state, ""));
+  const status = slugKey(firstNonEmpty(item.status, item.estado, item.state, ""));
   if (["pending", "pendiente", "invited", "invitado", "new", "unverified", "awaiting_activation"].includes(status)) return "pending";
   if (["blocked", "bloqueado", "inactive", "inactivo", "disabled", "archived", "deleted", "suspended", "banned", "revoked"].includes(status)) return "blocked";
   if (item.blocked === true || item.disabled === true || item.active === false || item.enabled === false || item.isActive === false) return "blocked";
@@ -125,7 +115,7 @@ function applyEmployeeCopy(root) {
 }
 
 function errorText(error) {
-  return cleanText(first(
+  return cleanText(firstNonEmpty(
     error?.message,
     error?.data?.message,
     error?.payload?.message,
@@ -159,12 +149,12 @@ function exportEmployee(item = {}) {
   if (!isBrowser() || !employeeId(item)) return false;
   const row = [
     employeeId(item),
-    first(item.fullName, item.displayName, item.name, item.nombre, item.username, ""),
-    first(item.email, item.emailLower, item.mail, ""),
-    first(item.phone, item.telefono, item.mobile, ""),
-    first(item.city, item.ciudad, item.direccion?.ciudad, item.address?.city, ""),
-    first(item.role, item.rol, "admin"),
-    first(item.status, item.estado, item.state, item.active === false ? "inactive" : "active"),
+    firstNonEmpty(item.fullName, item.displayName, item.name, item.nombre, item.username, ""),
+    firstNonEmpty(item.email, item.emailLower, item.mail, ""),
+    firstNonEmpty(item.phone, item.telefono, item.mobile, ""),
+    firstNonEmpty(item.city, item.ciudad, item.direccion?.ciudad, item.address?.city, ""),
+    firstNonEmpty(item.role, item.rol, "admin"),
+    firstNonEmpty(item.status, item.estado, item.state, item.active === false ? "inactive" : "active"),
   ];
   const csv = [
     ["ID", "Nombre", "Email", "Teléfono", "Ciudad", "Rol", "Estado"],

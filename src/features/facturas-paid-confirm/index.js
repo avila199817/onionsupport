@@ -19,7 +19,7 @@ import {
   markFacturaPaid,
 } from "../../views/facturas/facturas.api.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { safeObject } from "../../core/objects.js";
+import { safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 
 export const FACTURAS_PAID_CONFIRM_VERSION =
@@ -59,16 +59,6 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    return value;
-  }
-  return null;
-}
-
-
 function formatMoney(value = 0, currency = "EUR") {
   const amount = Number(value);
   const safeAmount = Number.isFinite(amount) ? amount : 0;
@@ -88,7 +78,7 @@ function formatMoney(value = 0, currency = "EUR") {
 
 function facturaId(factura = {}) {
   return cleanText(
-    first(
+    firstNonBlank(
       factura?.id,
       factura?.facturaId,
       factura?.invoiceId,
@@ -101,7 +91,7 @@ function facturaId(factura = {}) {
 
 function facturaNumber(factura = {}) {
   return cleanText(
-    first(
+    firstNonBlank(
       factura?.numeroFacturaLegal,
       factura?.numeroFactura,
       factura?.invoiceNumber,
@@ -114,7 +104,7 @@ function facturaNumber(factura = {}) {
 
 function facturaTotal(factura = {}) {
   const value = Number(
-    first(
+    firstNonBlank(
       factura?.total,
       factura?.totalFactura,
       factura?.amount,
@@ -130,14 +120,14 @@ function facturaTotal(factura = {}) {
 
 function facturaCurrency(factura = {}) {
   return cleanText(
-    first(factura?.currency, factura?.moneda, factura?.payment?.currency, "EUR"),
+    firstNonBlank(factura?.currency, factura?.moneda, factura?.payment?.currency, "EUR"),
     "EUR"
   ).toUpperCase();
 }
 
 function facturaEmail(factura = {}) {
   return cleanText(
-    first(
+    firstNonBlank(
       factura?.clienteSnapshot?.email,
       factura?.cliente?.email,
       factura?.emailCliente,
@@ -152,7 +142,7 @@ function facturaEmail(factura = {}) {
 
 function facturaClient(factura = {}) {
   return cleanText(
-    first(
+    firstNonBlank(
       factura?.clienteSnapshot?.razonSocial,
       factura?.cliente?.razonSocial,
       factura?.clienteSnapshot?.empresa,
@@ -170,7 +160,7 @@ function facturaClient(factura = {}) {
 
 function facturaPaymentMethod(factura = {}) {
   return cleanText(
-    first(
+    firstNonBlank(
       factura?.payment?.method,
       factura?.payment?.formaPago,
       factura?.metodoPago,
@@ -183,7 +173,7 @@ function facturaPaymentMethod(factura = {}) {
 
 function facturaIsPaid(factura = {}) {
   const status = slugKey(
-    first(
+    firstNonBlank(
       factura?.paymentStatus,
       factura?.estadoPago,
       factura?.payment?.status,
@@ -251,7 +241,7 @@ function findController() {
 
 function nodeFacturaId(node = null) {
   return cleanText(
-    first(
+    firstNonBlank(
       node?.dataset?.facturaId,
       node?.closest?.("[data-factura-id]")?.dataset?.facturaId,
       detailRoot()?.dataset?.facturaId,
@@ -263,7 +253,7 @@ function nodeFacturaId(node = null) {
 
 function actionFromNode(node = null) {
   return cleanText(
-    first(node?.dataset?.facturasAction, node?.dataset?.action, ""),
+    firstNonBlank(node?.dataset?.facturasAction, node?.dataset?.action, ""),
     ""
   );
 }
@@ -480,7 +470,7 @@ async function openDialog(node = null) {
     if (!state?.open || seq !== dialogLookupSeq) return false;
     state.loading = false;
     state.error = cleanText(
-      first(error?.message, error?.data?.message, "No se pudo cargar la factura."),
+      firstNonBlank(error?.message, error?.data?.message, "No se pudo cargar la factura."),
       "No se pudo cargar la factura."
     );
     render({ focus: true });
@@ -536,7 +526,7 @@ async function executePayment() {
 
     state.submitting = false;
     state.error = cleanText(
-      first(
+      firstNonBlank(
         error?.message,
         error?.data?.message,
         error?.payload?.message,
@@ -618,7 +608,7 @@ async function reconcileRetryAction() {
   if (!detail?.isConnected) return false;
 
   const id = cleanText(
-    first(detail.dataset?.facturaId, detail.closest?.("[data-factura-id]")?.dataset?.facturaId, ""),
+    firstNonBlank(detail.dataset?.facturaId, detail.closest?.("[data-factura-id]")?.dataset?.facturaId, ""),
     ""
   );
   if (!id) return false;

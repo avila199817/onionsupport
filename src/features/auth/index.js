@@ -22,7 +22,7 @@ import {
   normalizeUserSlug,
 } from "../../core/config.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, isFunction } from "../../core/objects.js";
+import { isObject, isFunction, firstNonBlank } from "../../core/objects.js";
 
 export const AUTH_VERSION = "auth.minimal.v10-logout-fail-closed";
 const ROOT_PATH = "/";
@@ -45,14 +45,6 @@ const sessionState = {
 const activeFlowControllers = new Set();
 const selectorMetrics = { coreReads: 0, httpTokenFallbacks: 0, contexts: 0 };
 
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    return value;
-  }
-  return null;
-}
 function redact(value = "") {
   return cleanText(value, "")
     .replace(LEGACY_RESET_TOKEN_PATH, "$1***")
@@ -263,10 +255,10 @@ function isCanonicalRuntimeUser(user = null) {
 }
 
 function runtimeToken(state = coreState()) {
-  return cleanToken(first(state?.token, state?.accessToken, state?.access_token, ""));
+  return cleanToken(firstNonBlank(state?.token, state?.accessToken, state?.access_token, ""));
 }
 function runtimeUser(state = coreState()) {
-  const candidate = first(state?.user, state?.currentUser, state?.session?.user, null);
+  const candidate = firstNonBlank(state?.user, state?.currentUser, state?.session?.user, null);
   if (!isObject(candidate)) return null;
   if (isCanonicalRuntimeUser(candidate)) return candidate.usable === false ? null : candidate;
   return normalizeUser(candidate);
@@ -278,7 +270,7 @@ function runtimeSession(state = coreState()) {
 }
 function runtimeRole(state = coreState(), user = runtimeUser(state)) {
   if (!user) return "";
-  return roleOrUser(first(state?.role, state?.rol, user.role, user.rol, user.roles, ""));
+  return roleOrUser(firstNonBlank(state?.role, state?.rol, user.role, user.rol, user.roles, ""));
 }
 function runtimeRoles(state, user, token, role) {
   if (!token || !user || !role) return [];
@@ -386,11 +378,11 @@ function payloadSources(payload = {}) {
 function looksLikeUser(value = null) {
   if (!isObject(value)) return false;
   if (isObject(value.user) || isObject(value.currentUser) || isObject(value.usuario) || isObject(value.me) || isObject(value.account)) return false;
-  const strongIdentity = cleanText(first(value.id, value.userId, value.uid, value.sub, value.username, value.userName, value.user_name, value.email, value.emailLower, value.email_lower, value.lookup?.emailLower, value.lookup?.email_lower, ""), "");
+  const strongIdentity = cleanText(firstNonBlank(value.id, value.userId, value.uid, value.sub, value.username, value.userName, value.user_name, value.email, value.emailLower, value.email_lower, value.lookup?.emailLower, value.lookup?.email_lower, ""), "");
   if (strongIdentity) return true;
-  const slug = cleanText(first(value.slug, value.lookup?.slug, value.profile?.slug, value.routing?.slug, ""), "");
-  const displayName = cleanText(first(value.displayName, value.fullName, value.name, value.nombre, value.profile?.displayName, value.profile?.publicName, value.profile?.name, ""), "");
-  const role = AppCore.normalizeRole(first(value.role, value.rol, value.roles, ""));
+  const slug = cleanText(firstNonBlank(value.slug, value.lookup?.slug, value.profile?.slug, value.routing?.slug, ""), "");
+  const displayName = cleanText(firstNonBlank(value.displayName, value.fullName, value.name, value.nombre, value.profile?.displayName, value.profile?.publicName, value.profile?.name, ""), "");
+  const role = AppCore.normalizeRole(firstNonBlank(value.role, value.rol, value.roles, ""));
   const hasAccountSignals = value.active !== undefined || value.enabled !== undefined || value.disabled !== undefined || value.status !== undefined || value.estado !== undefined || value.permissions !== undefined || value.permisos !== undefined || value.clienteId !== undefined || value.tenantId !== undefined;
   return Boolean((slug && (role || displayName || hasAccountSignals)) || (displayName && (role || hasAccountSignals)));
 }
@@ -419,7 +411,7 @@ function normalizeAuthPayload(payload = {}, options = {}) {
   const token = extractToken(source) || currentToken;
   const user = normalizeUser(extractUser(source) || currentUser);
   const session = extractSession(source);
-  const role = user ? roleOrUser(first(user.role, user.rol, user.roles, "")) : "";
+  const role = user ? roleOrUser(firstNonBlank(user.role, user.rol, user.roles, "")) : "";
   const homePath = user ? buildUserHomePath(user) : ROOT_PATH;
   return {
     token, accessToken: token, access_token: token,

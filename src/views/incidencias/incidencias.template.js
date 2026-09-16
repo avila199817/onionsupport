@@ -14,7 +14,7 @@ import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v35-visible-date-minute-precision-linked-invoice-row-total";
@@ -57,17 +57,6 @@ export const INCIDENCIAS_TABLE_COLUMNS = Object.freeze([
 /* =========================================================
    HELPERS
 ========================================================= */
-
-function first(...values) {
-  for (const v of values) {
-    if (v === null || v === undefined) continue;
-    if (typeof v === "string" && !v.trim()) continue;
-    if (Array.isArray(v) && !v.length) continue;
-    if (isObject(v) && !Object.keys(v).length) continue;
-    return v;
-  }
-  return null;
-}
 
 function num(v = 0, fb = 0) {
   if (v === null || v === undefined || v === "") return fb;
@@ -195,14 +184,14 @@ function formatMoney(v = 0, currency = DEFAULT_CURRENCY) {
   return formatter.format(num(v, 0));
 }
 function formatDate(v = "") {
-  const raw = first(v, "");
+  const raw = firstNonEmpty(v, "");
   if (!raw) return "—";
   const d = new Date(raw);
   if (!Number.isFinite(d.getTime())) return cleanText(raw, "—");
   try { return DATE_FORMATTER.format(d); } catch { return d.toISOString(); }
 }
 function formatShortDate(v = "") {
-  const raw = first(v, "");
+  const raw = firstNonEmpty(v, "");
   if (!raw) return "—";
   const d = new Date(raw);
   if (!Number.isFinite(d.getTime())) return cleanText(raw, "—");
@@ -210,7 +199,7 @@ function formatShortDate(v = "") {
 }
 
 function formatRelativeDate(v = "") {
-  const raw = first(v, "");
+  const raw = firstNonEmpty(v, "");
   if (!raw) return "—";
   const d = new Date(raw);
   const ms = d.getTime();
@@ -230,7 +219,7 @@ function formatRelativeDate(v = "") {
 }
 
 const dateMs = (v = "") => {
-  const raw = first(v, "");
+  const raw = firstNonEmpty(v, "");
   const ms = raw ? new Date(raw).getTime() : 0;
   return Number.isFinite(ms) ? ms : 0;
 };
@@ -242,44 +231,44 @@ const dateMs = (v = "") => {
 function unwrap(v = {}) {
   const it = safeObject(v, {});
   if (it.meta?.frontendReady === true) return it;
-  return safeObject(first(it.ticket, it.incidencia, it.item, it.detail, it.data?.ticket, it.data?.incidencia, it.data?.item, it.data, it), it);
+  return safeObject(firstNonEmpty(it.ticket, it.incidencia, it.item, it.detail, it.data?.ticket, it.data?.incidencia, it.data?.item, it.data, it), it);
 }
 
 function getId(it = {}) {
   const r = unwrap(it);
-  return cleanText(first(r.ticketId, r.incidenciaId, r.id, r.entityId, r.code, r.numero, r.ticketCode, r.reference, r.ref, ""), "");
+  return cleanText(firstNonEmpty(r.ticketId, r.incidenciaId, r.id, r.entityId, r.code, r.numero, r.ticketCode, r.reference, r.ref, ""), "");
 }
 function getSubject(it = {}) {
   const r = unwrap(it);
-  return cleanText(first(r.subject, r.asunto, r.title, r.name, "Sin asunto"), "Sin asunto");
+  return cleanText(firstNonEmpty(r.subject, r.asunto, r.title, r.name, "Sin asunto"), "Sin asunto");
 }
 function getDesc(it = {}) {
   const r = unwrap(it);
-  return cleanText(first(r.preview, r.description, r.descripcion, r.message, r.body, ""), "");
+  return cleanText(firstNonEmpty(r.preview, r.description, r.descripcion, r.message, r.body, ""), "");
 }
 function getStatusRaw(it = {}) {
   const r = unwrap(it);
-  return cleanText(first(r.status, r.estado, r.statusKey, r.lifecycle?.status, "open"), "open");
+  return cleanText(firstNonEmpty(r.status, r.estado, r.statusKey, r.lifecycle?.status, "open"), "open");
 }
 function getPriorityRaw(it = {}) {
   const r = unwrap(it);
-  return cleanText(first(r.priority, r.prioridad, r.severity, "medium"), "medium");
+  return cleanText(firstNonEmpty(r.priority, r.prioridad, r.severity, "medium"), "medium");
 }
 function getCategory(it = {}) {
   const r = unwrap(it);
-  return cleanText(first(r.category, r.categoria, r.tipo, r.type, "general"), "general");
+  return cleanText(firstNonEmpty(r.category, r.categoria, r.tipo, r.type, "general"), "general");
 }
 
 function getClientName(it = {}) {
   const r = unwrap(it);
   return userNameFromIdentity(r) || userNameFromIdentity(r.requesterSnapshot) ||
     userNameFromIdentity(r.cliente) || userNameFromIdentity(r.receptor) ||
-    cleanText(first(r.requesterName, r.clientName, r.clienteNombre, r.email, "Usuario"), "Usuario");
+    cleanText(firstNonEmpty(r.requesterName, r.clientName, r.clienteNombre, r.email, "Usuario"), "Usuario");
 }
 
 function getClientEmail(it = {}) {
   const r = unwrap(it), rs = safeObject(r.requesterSnapshot), c = safeObject(r.cliente), rec = safeObject(r.receptor), u = safeObject(r.user);
-  return cleanText(first(r.email, r.emailLower, r.userEmail, r.clienteEmail, rs.email, rs.emailLower, c.email, c.emailLower, rec.email, rec.emailLower, u.email, u.emailLower, ""), "");
+  return cleanText(firstNonEmpty(r.email, r.emailLower, r.userEmail, r.clienteEmail, rs.email, rs.emailLower, c.email, c.emailLower, rec.email, rec.emailLower, u.email, u.emailLower, ""), "");
 }
 
 function getAvatar(it = {}) {
@@ -289,12 +278,12 @@ function getAvatar(it = {}) {
 
 function getAssignedName(it = {}) {
   const r = unwrap(it), a = safeObject(r.assignment), tec = safeObject(r.tecnico), asg = safeObject(r.assignedTo), t = safeObject(r.technician);
-  return cleanText(first(r.assignedToName, r.technicianName, r.tecnicoName, r.agentName, a.assignedToName, a.technician?.name, a.technician?.displayName, tec.displayName, tec.name, tec.nombre, asg.displayName, asg.name, asg.nombre, t.displayName, t.name, t.nombre, ""), "");
+  return cleanText(firstNonEmpty(r.assignedToName, r.technicianName, r.tecnicoName, r.agentName, a.assignedToName, a.technician?.name, a.technician?.displayName, tec.displayName, tec.name, tec.nombre, asg.displayName, asg.name, asg.nombre, t.displayName, t.name, t.nombre, ""), "");
 }
 
 function getAssignedEmail(it = {}) {
   const r = unwrap(it), a = safeObject(r.assignment), tec = safeObject(r.tecnico), asg = safeObject(r.assignedTo), t = safeObject(r.technician);
-  return cleanText(first(r.assignedToEmail, r.technicianEmail, r.tecnicoEmail, r.agentEmail, a.assignedToEmail, a.technician?.email, tec.email, asg.email, t.email, ""), "");
+  return cleanText(firstNonEmpty(r.assignedToEmail, r.technicianEmail, r.tecnicoEmail, r.agentEmail, a.assignedToEmail, a.technician?.email, tec.email, asg.email, t.email, ""), "");
 }
 
 function getAssignedAvatar(it = {}) {
@@ -304,16 +293,16 @@ function getAssignedAvatar(it = {}) {
 
 function getCreated(it = {}) {
   const r = unwrap(it);
-  return first(r.createdAt, r.fechaCreacion, r.created_at, r.lifecycle?.createdAt, "");
+  return firstNonEmpty(r.createdAt, r.fechaCreacion, r.created_at, r.lifecycle?.createdAt, "");
 }
 function getUpdated(it = {}) {
   const r = unwrap(it);
-  return first(r.lastActivityAt, r.updatedAt, r.modifiedAt, r.updated_at, r.lifecycle?.lastActivityAt, r.lifecycle?.updatedAt, getCreated(r), "");
+  return firstNonEmpty(r.lastActivityAt, r.updatedAt, r.modifiedAt, r.updated_at, r.lifecycle?.lastActivityAt, r.lifecycle?.updatedAt, getCreated(r), "");
 }
 
 function getAttachmentsCount(it = {}) {
   const r = unwrap(it);
-  const files = arrayFrom(first(r.attachments, r.files, r.adjuntos, []));
+  const files = arrayFrom(firstNonEmpty(r.attachments, r.files, r.adjuntos, []));
   return Math.max(files.length, num(r.attachmentsCount, 0), num(r.attachmentCount, 0), num(r.filesCount, 0), num(r.adjuntosCount, 0), num(r.meta?.attachmentsCount, 0), num(r.meta?.filesCount, 0));
 }
 
@@ -325,7 +314,7 @@ function getAttachmentsCount(it = {}) {
 */
 function getInvoiceTotal(it = {}) {
   const r = unwrap(it);
-  return num(first(
+  return num(firstNonEmpty(
     r.invoiceDisplay?.linkedTotal,
     r.linkedInvoices?.linkedTotal,
     r.billing?.linkedTotal,
@@ -355,7 +344,7 @@ function getInvoiceTotal(it = {}) {
 */
 function getInvoiceContributionTotal(it = {}) {
   const r = unwrap(it);
-  return num(first(
+  return num(firstNonEmpty(
     r.invoiceDisplay?.displayTotal,
     r.invoiceDisplay?.total,
     r.meta?.invoiceListDisplayTotal,
@@ -382,7 +371,7 @@ function getInvoiceContributionTotal(it = {}) {
 
 function getCurrency(it = {}) {
   const r = unwrap(it);
-  return cleanText(first(r.currency, r.moneda, r.facturaCurrency, r.facturaMoneda, r.invoiceSnapshot?.currency, r.billing?.currency, r.linkedInvoices?.currency, r.meta?.invoiceCurrency, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
+  return cleanText(firstNonEmpty(r.currency, r.moneda, r.facturaCurrency, r.facturaMoneda, r.invoiceSnapshot?.currency, r.billing?.currency, r.linkedInvoices?.currency, r.meta?.invoiceCurrency, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
 }
 
 /* =========================================================
@@ -536,13 +525,13 @@ function mergeStats(items = [], provided = {}) {
   const s = safeObject(provided);
   if (local.total > 0) return local;
   return {
-    total: num(first(s.total, local.total), local.total),
-    open: num(first(s.open, local.open), local.open),
-    closed: num(first(s.closed, local.closed), local.closed),
-    urgent: num(first(s.urgent, local.urgent), local.urgent),
-    attachments: num(first(s.attachments, local.attachments), local.attachments),
-    invoiceTotal: num(first(s.invoiceTotal, local.invoiceTotal), local.invoiceTotal),
-    lastUpdateTs: num(first(s.lastUpdateTs, local.lastUpdateTs), local.lastUpdateTs),
+    total: num(firstNonEmpty(s.total, local.total), local.total),
+    open: num(firstNonEmpty(s.open, local.open), local.open),
+    closed: num(firstNonEmpty(s.closed, local.closed), local.closed),
+    urgent: num(firstNonEmpty(s.urgent, local.urgent), local.urgent),
+    attachments: num(firstNonEmpty(s.attachments, local.attachments), local.attachments),
+    invoiceTotal: num(firstNonEmpty(s.invoiceTotal, local.invoiceTotal), local.invoiceTotal),
+    lastUpdateTs: num(firstNonEmpty(s.lastUpdateTs, local.lastUpdateTs), local.lastUpdateTs),
   };
 }
 
@@ -561,10 +550,10 @@ function mergeFilterCounts(items = [], provided = null) {
   const local = filterCounts(items);
   const counts = safeObject(provided);
   return {
-    all: Math.max(0, num(first(counts.all, local.all), local.all)),
-    open: Math.max(0, num(first(counts.open, local.open), local.open)),
-    closed: Math.max(0, num(first(counts.closed, local.closed), local.closed)),
-    urgent: Math.max(0, num(first(counts.urgent, local.urgent), local.urgent)),
+    all: Math.max(0, num(firstNonEmpty(counts.all, local.all), local.all)),
+    open: Math.max(0, num(firstNonEmpty(counts.open, local.open), local.open)),
+    closed: Math.max(0, num(firstNonEmpty(counts.closed, local.closed), local.closed)),
+    urgent: Math.max(0, num(firstNonEmpty(counts.urgent, local.urgent), local.urgent)),
   };
 }
 
@@ -604,17 +593,17 @@ function normalizeItems(input = {}) {
 
 function remoteTotal(input = {}, fb = 0) {
   const d = safeObject(input), data = safeObject(d.data), payload = safeObject(d.payload), result = safeObject(d.result), response = safeObject(d.response);
-  return Math.max(fb, num(first(d.total, d.count, d.totalCount, d.remoteCount, d.meta?.total, d.meta?.count, d.pagination?.total, d.pagination?.totalCount, data.total, data.count, data.totalCount, data.meta?.total, payload.total, payload.count, result.total, result.count, response.total, response.count, fb), fb));
+  return Math.max(fb, num(firstNonEmpty(d.total, d.count, d.totalCount, d.remoteCount, d.meta?.total, d.meta?.count, d.pagination?.total, d.pagination?.totalCount, data.total, data.count, data.totalCount, data.meta?.total, payload.total, payload.count, result.total, result.count, response.total, response.count, fb), fb));
 }
 
 function buildVm(input = {}) {
   const d = safeObject(input);
   const items = normalizeItems(d);
-  const rawFilter = slugKey(first(d.filter, "all"));
+  const rawFilter = slugKey(firstNonEmpty(d.filter, "all"));
   const filter = normalizeFilter(d.filter);
   const search = cleanText(d.search, "");
-  const order = normalizeSort(first(d.sortOrder, d.order, d.sort?.order, d.sort?.direction, DEFAULT_SORT_ORDER));
-  const sortMode = normalizeSortMode(first(d.sortMode, d.sort?.mode, d.sort?.field, DEFAULT_SORT_MODE));
+  const order = normalizeSort(firstNonEmpty(d.sortOrder, d.order, d.sort?.order, d.sort?.direction, DEFAULT_SORT_ORDER));
+  const sortMode = normalizeSortMode(firstNonEmpty(d.sortMode, d.sort?.mode, d.sort?.field, DEFAULT_SORT_MODE));
   const selection = sortMode === "attachments"
     ? "attachments"
     : sortMode === "amount"
@@ -639,7 +628,7 @@ function buildVm(input = {}) {
   );
   const visible = filtered.slice(0, visibleLimit);
   const total = remoteTotal(d, items.length);
-  const nextCursor = cleanText(first(d.nextCursor, d.pagination?.nextCursor, ""), "");
+  const nextCursor = cleanText(firstNonEmpty(d.nextCursor, d.pagination?.nextCursor, ""), "");
   /*
     Una página remota sólo es accionable si existe cursor opaco. El total no
     puede activar por sí solo el feed: hacerlo dejaría un sentinel permanente
@@ -653,7 +642,7 @@ function buildVm(input = {}) {
   const filterFacetsExact = d.filterFacetsExact === true;
   return {
     data: d,
-    route: cleanText(first(d.route, d.routes?.incidencias, DEFAULT_ROUTE), DEFAULT_ROUTE),
+    route: cleanText(firstNonEmpty(d.route, d.routes?.incidencias, DEFAULT_ROUTE), DEFAULT_ROUTE),
     admin: Boolean(d.admin || d.role === "admin"),
     items,
     filteredItems: filtered,

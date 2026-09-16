@@ -30,7 +30,7 @@ import {
   filterClientes,
 } from "./clientes.model.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { safeObject } from "../../core/objects.js";
+import { safeObject, firstNonBlank } from "../../core/objects.js";
 
 export {
   CLIENTES_MODEL_VERSION,
@@ -122,15 +122,6 @@ function invalidateIdentityCache() {
   lastError = "";
 }
 
-function first(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    return value;
-  }
-  return null;
-}
-
 function clampInt(value, fallback, min, max) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) return fallback;
@@ -209,7 +200,7 @@ function responseLooksFailed(response = {}) {
 function errorMessage(response = {}, fallback = "No se pudieron cargar los clientes.") {
   const data = safeObject(response);
   return cleanText(
-    first(
+    firstNonBlank(
       data.message,
       data.error?.message,
       data.error,
@@ -224,7 +215,7 @@ function errorMessage(response = {}, fallback = "No se pudieron cargar los clien
 
 function errorCode(error = null) {
   return cleanText(
-    first(
+    firstNonBlank(
       error?.code,
       error?.data?.code,
       error?.payload?.code,
@@ -246,7 +237,7 @@ function normalizePageError(error = null) {
   normalized.name = cleanText(error?.name, "Error");
   normalized.code = "CLIENTES_CURSOR_INVALID";
   normalized.status = Number(
-    first(
+    firstNonBlank(
       error?.status,
       error?.statusCode,
       error?.response?.status,
@@ -259,12 +250,12 @@ function normalizePageError(error = null) {
 
 function normalizedMeta(response = {}) {
   const data = safeObject(response);
-  return safeObject(first(data.meta, data.data?.meta, {}), {});
+  return safeObject(firstNonBlank(data.meta, data.data?.meta, {}), {});
 }
 
 function normalizedPagination(response = {}) {
   const data = safeObject(response);
-  return safeObject(first(data.pagination, data.data?.pagination, {}), {});
+  return safeObject(firstNonBlank(data.pagination, data.data?.pagination, {}), {});
 }
 
 function detailFromResponse(response = null) {
@@ -300,14 +291,14 @@ function createAckFromResponse(response = null) {
     seen.add(value);
 
     const clienteId = cleanText(
-      first(value.clienteId, value.clientId, value.id, ""),
+      firstNonBlank(value.clienteId, value.clientId, value.id, ""),
       ""
     ).slice(0, MAX_ID_LENGTH);
     if (clienteId) {
       return {
         ok: value.ok !== false,
         clienteId,
-        userId: cleanText(first(value.userId, value.usuarioId, ""), "")
+        userId: cleanText(firstNonBlank(value.userId, value.usuarioId, ""), "")
           .slice(0, MAX_USER_ID_LENGTH),
         synced: value.synced === true,
       };
@@ -329,14 +320,14 @@ function createAckFromResponse(response = null) {
 export async function fetchClientesPage(options = {}) {
   const scope = readScope();
   const limit = clampInt(
-    first(options.limit, options.pageSize, CLIENTES_FETCH_LIMIT),
+    firstNonBlank(options.limit, options.pageSize, CLIENTES_FETCH_LIMIT),
     CLIENTES_FETCH_LIMIT,
     1,
     CLIENTES_MAX_LIMIT
   );
-  const search = normalizeSearch(first(options.q, options.search, options.query, ""));
+  const search = normalizeSearch(firstNonBlank(options.q, options.search, options.query, ""));
   const filter = normalizeFilter(options.filter);
-  const order = normalizeOrder(first(options.order, options.sortOrder, "desc"));
+  const order = normalizeOrder(firstNonBlank(options.order, options.sortOrder, "desc"));
   const cursor = normalizeCursor(options.cursor);
 
   const query = { limit, filter, order };
@@ -361,7 +352,7 @@ export async function fetchClientesPage(options = {}) {
   if (responseLooksFailed(response)) {
     const error = new Error(errorMessage(response));
     const code = cleanText(
-      first(response?.code, response?.error, "CLIENTES_PAGE_REJECTED")
+      firstNonBlank(response?.code, response?.error, "CLIENTES_PAGE_REJECTED")
     ).toUpperCase();
     error.code = code === "CLIENTES_CURSOR_REJECTED"
       ? "CLIENTES_CURSOR_INVALID"
@@ -374,20 +365,20 @@ export async function fetchClientesPage(options = {}) {
   const items = responseItems(response);
   const pagination = normalizedPagination(response);
   const meta = normalizedMeta(response);
-  const nextCursor = normalizeCursor(first(
+  const nextCursor = normalizeCursor(firstNonBlank(
     response?.nextCursor,
     pagination.nextCursor,
     response?.data?.nextCursor,
     ""
   ));
-  const hasMore = first(
+  const hasMore = firstNonBlank(
     response?.hasMore,
     pagination.hasMore,
     response?.data?.hasMore,
     false
   ) === true && Boolean(nextCursor);
   const totalKnown = meta.totalKnown === true;
-  const explicitTotal = Number(first(
+  const explicitTotal = Number(firstNonBlank(
     response?.total,
     response?.totalCount,
     meta.total,
@@ -562,20 +553,20 @@ function buildCreateClienteBody(payload = {}) {
   const source = safeObject(payload);
   const contacto = safeObject(source.contacto);
   const direccion = safeObject(source.direccion);
-  const userId = cleanText(first(
+  const userId = cleanText(firstNonBlank(
     source.userId,
     source.targetUserId,
     source.usuarioId,
     ""
   ), "").slice(0, MAX_USER_ID_LENGTH);
-  const tipo = normalizeClienteType(first(
+  const tipo = normalizeClienteType(firstNonBlank(
     source.tipo,
     source.clienteTipo,
     source.segmento,
     source.type,
     ""
   ));
-  const nombreFiscal = cleanText(first(
+  const nombreFiscal = cleanText(firstNonBlank(
     source.nombreFiscal,
     source.razonSocial,
     source.businessName,
@@ -584,7 +575,7 @@ function buildCreateClienteBody(payload = {}) {
     source.name,
     ""
   ), "").slice(0, MAX_NAME_LENGTH);
-  const contactoEmail = normalizeEmailText(first(
+  const contactoEmail = normalizeEmailText(firstNonBlank(
     source.contactoEmail,
     source.email,
     contacto.email,
@@ -596,19 +587,19 @@ function buildCreateClienteBody(payload = {}) {
     userId,
     tipo,
     nombreFiscal,
-    nif: cleanText(first(source.nif, source.cif, source.taxId, ""), "")
+    nif: cleanText(firstNonBlank(source.nif, source.cif, source.taxId, ""), "")
       .toUpperCase().slice(0, MAX_NIF_LENGTH),
-    calle: cleanText(first(source.calle, direccion.calle, direccion.street, ""), "")
+    calle: cleanText(firstNonBlank(source.calle, direccion.calle, direccion.street, ""), "")
       .slice(0, MAX_STREET_LENGTH),
-    cp: cleanText(first(source.cp, source.postalCode, direccion.cp, direccion.postalCode, ""), "")
+    cp: cleanText(firstNonBlank(source.cp, source.postalCode, direccion.cp, direccion.postalCode, ""), "")
       .slice(0, MAX_POSTAL_LENGTH),
-    ciudad: cleanText(first(source.ciudad, source.city, direccion.ciudad, direccion.city, ""), "")
+    ciudad: cleanText(firstNonBlank(source.ciudad, source.city, direccion.ciudad, direccion.city, ""), "")
       .slice(0, MAX_CITY_LENGTH),
-    provincia: cleanText(first(source.provincia, source.province, direccion.provincia, direccion.province, ""), "")
+    provincia: cleanText(firstNonBlank(source.provincia, source.province, direccion.provincia, direccion.province, ""), "")
       .slice(0, MAX_PROVINCE_LENGTH),
-    pais: cleanText(first(source.pais, source.country, direccion.pais, direccion.country, "España"), "España")
+    pais: cleanText(firstNonBlank(source.pais, source.country, direccion.pais, direccion.country, "España"), "España")
       .slice(0, MAX_COUNTRY_LENGTH),
-    contactoNombre: cleanText(first(
+    contactoNombre: cleanText(firstNonBlank(
       source.contactoNombre,
       source.nombreContacto,
       contacto.nombre,
@@ -617,7 +608,7 @@ function buildCreateClienteBody(payload = {}) {
       ""
     ), nombreFiscal).slice(0, MAX_NAME_LENGTH),
     contactoEmail,
-    contactoPhone: normalizePhone(first(
+    contactoPhone: normalizePhone(firstNonBlank(
       source.contactoPhone,
       source.phone,
       source.telefono,
@@ -706,7 +697,7 @@ export function createCliente(payload = {}, options = {}) {
         ok: true,
         clienteId: ack.clienteId,
         id: ack.clienteId,
-        userId: cleanText(first(ack.userId, body.userId), body.userId)
+        userId: cleanText(firstNonBlank(ack.userId, body.userId), body.userId)
           .slice(0, MAX_USER_ID_LENGTH),
         synced: ack.synced === true,
       };

@@ -33,7 +33,8 @@ import {
   isPrivateApiPath as configIsPrivateApiPath,
 } from "./config.js";
 import { cleanText, normalizeKey } from "./presentation-text.js";
-import { isObject, isFunction } from "./objects.js";
+import { isObject, isFunction, firstNonBlank } from "./objects.js";
+import { nowIso } from "./clock.js";
 
 export const HTTP_VERSION =
   "core.http.refresh.blob.v9-runtime-state-port";
@@ -128,39 +129,6 @@ function normalizeCode(
       "_"
     )
     .toUpperCase();
-}
-
-function first(...values) {
-  for (
-    const value
-    of values
-  ) {
-    if (
-      value === undefined ||
-      value === null
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value ===
-        "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
-function nowIso() {
-  return (
-    new Date()
-      .toISOString()
-  );
 }
 
 /* =========================================================
@@ -943,7 +911,7 @@ export function getAccessToken() {
   }
 
   return cleanToken(
-    first(
+    firstNonBlank(
       state.token,
       state.accessToken,
       state.access_token,
@@ -1733,7 +1701,7 @@ function extractErrorCode(
   ) {
     const explicit =
       normalizeCode(
-        first(
+        firstNonBlank(
           payload.code,
           payload.errorCode,
           payload.error_code,
@@ -1822,7 +1790,7 @@ function extractErrorMessage(
     isObject(payload)
   ) {
     return cleanText(
-      first(
+      firstNonBlank(
         payload.message,
         payload.error_description,
         payload.detail,

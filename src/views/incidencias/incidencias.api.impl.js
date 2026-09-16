@@ -6,7 +6,7 @@
 
    Punto cerrado:
    - El backend /api/tickets devuelve items/rows/tickets/incidencias.
-   - Esta capa NO puede perder arrays por usar first(...).flat().
+   - Esta capa NO puede perder arrays por usar firstNonEmpty(...).flat().
    - listIncidencias() debe devolver items.length === response.items.length.
 
    Responsabilidad:
@@ -26,9 +26,10 @@ import Http from "../../core/http.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { notifyDomainChanged } from "../../core/domain-events.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { nowIso, nowMs } from "../../core/clock.js";
 
 export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v24.cursor-scale-safe";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
@@ -112,22 +113,9 @@ function isFileLike(value = null) {
 /*
   IMPORTANTE:
   No aplanar arrays aquí. El bug que dejaba la tabla en 0/18 venía de
-  first(...values.flat(Infinity)): cuando el backend devolvía items: [..],
+  un first(...values.flat(Infinity)) local: cuando el backend devolvía items: [..],
   first(items, ...) devolvía el primer ticket, y arrayFrom(ticket) => [].
 */
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
-
-    return value;
-  }
-
-  return null;
-}
-
 function number(value = 0, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
   if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
@@ -160,14 +148,6 @@ function number(value = 0, fallback = 0) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function now() {
-  return Date.now();
-}
-
-function nowIso() {
-  return new Date().toISOString();
 }
 
 function normalizeSearch(value = "") {
@@ -483,7 +463,7 @@ function cacheAgeMs() {
   if (!lastLoadedAt) return Number.POSITIVE_INFINITY;
   const time = Date.parse(lastLoadedAt);
   if (!Number.isFinite(time)) return Number.POSITIVE_INFINITY;
-  return Math.max(0, now() - time);
+  return Math.max(0, nowMs() - time);
 }
 
 function buildListQuery({ query = {}, params = {}, ...rest } = {}) {
@@ -660,7 +640,7 @@ function responseErrorMessage(response = {}, fallback = "La operación no se pud
   const source = safeObject(response);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       source.message,
       source.errorMessage,
       source.error_description,
@@ -921,14 +901,14 @@ export function normalizeIncidenciasListResponse(payload = null, requestMeta = {
     pagination: {
       ...pagination,
       mode: cleanText(
-        first(pagination.mode, requestMeta.pageMode, requestMeta.query?.pageMode),
+        firstNonEmpty(pagination.mode, requestMeta.pageMode, requestMeta.query?.pageMode),
         "cursor"
       ),
       nextCursor,
       hasMore,
       total: paginationTotal,
       pageSize: normalizeEnvelopeCount(
-        first(
+        firstNonEmpty(
           pagination.pageSize,
           pagination.limit,
           requestMeta.limit,
@@ -1015,7 +995,7 @@ function detailFromPayload(payload = null) {
   const object = safeObject(payload, null);
   if (!object) return null;
 
-  const direct = first(
+  const direct = firstNonEmpty(
     object.ticket,
     object.item,
     object.detail,
@@ -1045,7 +1025,7 @@ function fileFromPayload(payload = null) {
   const data = safeObject(object.data, {});
 
   return safeObject(
-    first(
+    firstNonEmpty(
       object.file,
       object.attachment,
       object.adjunto,
@@ -1088,25 +1068,25 @@ function normalizeCreateSearchUser(user = {}) {
   const raw = safeObject(user);
 
   const userId = cleanText(
-    first(raw.userId, raw.id, raw.uid, raw.sub, raw.usuarioId, raw.auth?.userId, raw.profile?.userId, raw.lookup?.userId, raw.raw?.userId, raw.raw?.id),
+    firstNonEmpty(raw.userId, raw.id, raw.uid, raw.sub, raw.usuarioId, raw.auth?.userId, raw.profile?.userId, raw.lookup?.userId, raw.raw?.userId, raw.raw?.id),
     ""
   );
 
   const clienteId = cleanText(
-    first(raw.targetClienteId, raw.clienteId, raw.clientId, raw.customerId, raw.cliente?.clienteId, raw.cliente?.id, raw.client?.clienteId, raw.client?.id, raw.tenant?.clienteId, raw.lookup?.clienteId, raw.raw?.clienteId, raw.raw?.cliente?.clienteId, raw.raw?.cliente?.id),
+    firstNonEmpty(raw.targetClienteId, raw.clienteId, raw.clientId, raw.customerId, raw.cliente?.clienteId, raw.cliente?.id, raw.client?.clienteId, raw.client?.id, raw.tenant?.clienteId, raw.lookup?.clienteId, raw.raw?.clienteId, raw.raw?.cliente?.clienteId, raw.raw?.cliente?.id),
     ""
   );
 
-  const name = userNameFromIdentity(raw, first(
+  const name = userNameFromIdentity(raw, firstNonEmpty(
     raw.publicName, raw.clienteNombre, raw.clientName,
     userNameFromIdentity(raw.lookup), raw.username, userId, "Usuario"
   ));
 
   const email = firstEmail(raw.email, raw.emailLower, raw.userEmail, raw.clienteEmail, raw.clientEmail, raw.profile?.email, raw.lookup?.email, raw.raw?.email, raw.raw?.emailLower);
-  const username = cleanText(first(raw.username, raw.usernameLower, raw.profile?.username, raw.raw?.username), "");
+  const username = cleanText(firstNonEmpty(raw.username, raw.usernameLower, raw.profile?.username, raw.raw?.username), "");
   const avatar = firstUrl(raw, raw.raw, raw.profile, raw.cliente, raw.client);
-  const role = slugKey(first(raw.role, raw.rol, raw.raw?.role, raw.raw?.rol, "user")) || "user";
-  const phone = cleanText(first(raw.phone, raw.telefono, raw.raw?.phone, raw.raw?.telefono), "");
+  const role = slugKey(firstNonEmpty(raw.role, raw.rol, raw.raw?.role, raw.raw?.rol, "user")) || "user";
+  const phone = cleanText(firstNonEmpty(raw.phone, raw.telefono, raw.raw?.phone, raw.raw?.telefono), "");
 
   return {
     id: userId,
@@ -1185,7 +1165,7 @@ function unwrapTicket(value = {}) {
   const raw = safeObject(value, {});
 
   return safeObject(
-    first(
+    firstNonEmpty(
       raw.ticket,
       raw.incidencia,
       raw.item,
@@ -1202,7 +1182,7 @@ function unwrapTicket(value = {}) {
 
 function getTicketId(item = {}) {
   const raw = unwrapTicket(item);
-  return cleanText(first(raw.ticketId, raw.incidenciaId, raw.id, raw._id, raw.code, raw.numero, raw.ticketCode, raw.reference, raw.ref), "");
+  return cleanText(firstNonEmpty(raw.ticketId, raw.incidenciaId, raw.id, raw._id, raw.code, raw.numero, raw.ticketCode, raw.reference, raw.ref), "");
 }
 
 function normalizeStatus(value = "") {
@@ -1279,11 +1259,11 @@ function normalizeCategory(value = "") {
 
 function normalizePerson(value = {}) {
   const raw = safeObject(value);
-  const userId = cleanText(first(raw.userId, raw.id, raw.uid, raw.sub), "");
+  const userId = cleanText(firstNonEmpty(raw.userId, raw.id, raw.uid, raw.sub), "");
   const name = userNameFromIdentity(raw);
   const email = firstEmail(raw.email, raw.emailLower, raw.mail);
   const avatar = firstUrl(raw.avatarUrl, raw.avatar, raw.picture, raw.photoUrl, raw.photoURL, raw.imageUrl, raw);
-  const role = slugKey(first(raw.role, raw.rol, ""));
+  const role = slugKey(firstNonEmpty(raw.role, raw.rol, ""));
 
   return {
     id: userId || null,
@@ -1304,7 +1284,7 @@ function normalizeTechnician(item = {}) {
   const raw = unwrapTicket(item);
   const assignment = safeObject(raw.assignment);
   const base = normalizePerson(
-    first(
+    firstNonEmpty(
       raw.tecnico,
       raw.assignedTo,
       raw.technician,
@@ -1316,7 +1296,7 @@ function normalizeTechnician(item = {}) {
   );
 
   const userId = cleanText(
-    first(
+    firstNonEmpty(
       raw.assignedToUserId,
       raw.technicianUserId,
       raw.tecnicoUserId,
@@ -1327,7 +1307,7 @@ function normalizeTechnician(item = {}) {
     ""
   );
   const name = cleanText(
-    first(
+    firstNonEmpty(
       raw.assignedToName,
       raw.technicianName,
       raw.tecnicoName,
@@ -1387,9 +1367,9 @@ function normalizeTechnician(item = {}) {
 
 function normalizeAttachment(file = {}, index = 0) {
   const raw = safeObject(file);
-  const id = cleanText(first(raw.id, raw.attachmentId, raw.fileId, `att_${index}`), `att_${index}`);
-  const name = safePublicText(first(raw.name, raw.filename, raw.fileName, raw.originalName, `Adjunto ${index + 1}`), `Adjunto ${index + 1}`);
-  const contentType = cleanText(first(raw.contentType, raw.mimeType, raw.mimetype, raw.type), "");
+  const id = cleanText(firstNonEmpty(raw.id, raw.attachmentId, raw.fileId, `att_${index}`), `att_${index}`);
+  const name = safePublicText(firstNonEmpty(raw.name, raw.filename, raw.fileName, raw.originalName, `Adjunto ${index + 1}`), `Adjunto ${index + 1}`);
+  const contentType = cleanText(firstNonEmpty(raw.contentType, raw.mimeType, raw.mimetype, raw.type), "");
 
   /*
     No usar firstUrl() aquí:
@@ -1410,7 +1390,7 @@ function normalizeAttachment(file = {}, index = 0) {
   const downloadUrl = firstAttachmentUrl(raw.downloadUrl);
   const signedUrl = firstAttachmentUrl(raw.signedUrl, raw.sasUrl, viewUrl);
   const url = viewUrl;
-  const path = safePublicText(first(raw.path, raw.blobPath, raw.blobName, raw.storagePath, raw.storageKey), "");
+  const path = safePublicText(firstNonEmpty(raw.path, raw.blobPath, raw.blobName, raw.storagePath, raw.storageKey), "");
 
   return {
     ...raw,
@@ -1419,9 +1399,9 @@ function normalizeAttachment(file = {}, index = 0) {
     name,
     filename: name,
     fileName: name,
-    originalName: safePublicText(first(raw.originalName, name), name),
-    size: number(first(raw.size, raw.sizeBytes), 0),
-    sizeBytes: number(first(raw.sizeBytes, raw.size), 0),
+    originalName: safePublicText(firstNonEmpty(raw.originalName, name), name),
+    size: number(firstNonEmpty(raw.size, raw.sizeBytes), 0),
+    sizeBytes: number(firstNonEmpty(raw.sizeBytes, raw.size), 0),
     contentType,
     mimeType: contentType,
     mimetype: contentType,
@@ -1435,35 +1415,35 @@ function normalizeAttachment(file = {}, index = 0) {
     blobUrl: firstAttachmentUrl(raw.blobUrl, viewUrl),
     publicUrl: firstAttachmentUrl(raw.publicUrl, viewUrl),
     path,
-    blobPath: safePublicText(first(raw.blobPath, path), path),
-    blobName: safePublicText(first(raw.blobName, path), path),
-    storagePath: safePublicText(first(raw.storagePath, path), path),
-    storageKey: safePublicText(first(raw.storageKey, path), path),
-    containerName: cleanText(first(raw.containerName, raw.container, "tickets"), "tickets"),
+    blobPath: safePublicText(firstNonEmpty(raw.blobPath, path), path),
+    blobName: safePublicText(firstNonEmpty(raw.blobName, path), path),
+    storagePath: safePublicText(firstNonEmpty(raw.storagePath, path), path),
+    storageKey: safePublicText(firstNonEmpty(raw.storageKey, path), path),
+    containerName: cleanText(firstNonEmpty(raw.containerName, raw.container, "tickets"), "tickets"),
     isImage: Boolean(raw.isImage || contentType.startsWith("image/")),
     isVideo: Boolean(raw.isVideo || contentType.startsWith("video/")),
     isPdf: Boolean(raw.isPdf || contentType === "application/pdf"),
-    uploadedAt: cleanText(first(raw.uploadedAt, raw.createdAt), ""),
+    uploadedAt: cleanText(firstNonEmpty(raw.uploadedAt, raw.createdAt), ""),
   };
 }
 
 function normalizeRequester(item = {}) {
   const raw = unwrapTicket(item);
-  const snap = safeObject(first(raw.requesterSnapshot, raw.cliente, raw.receptor, raw.user, {}));
+  const snap = safeObject(firstNonEmpty(raw.requesterSnapshot, raw.cliente, raw.receptor, raw.user, {}));
 
-  const userId = cleanText(first(raw.userId, raw.usuarioId, raw.ownerUserId, snap.userId, snap.id, snap.uid), "");
-  const clienteId = cleanText(first(raw.clienteId, raw.clientId, raw.customerId, snap.clienteId, snap.clientId), "");
+  const userId = cleanText(firstNonEmpty(raw.userId, raw.usuarioId, raw.ownerUserId, snap.userId, snap.id, snap.uid), "");
+  const clienteId = cleanText(firstNonEmpty(raw.clienteId, raw.clientId, raw.customerId, snap.clienteId, snap.clientId), "");
   const name = safePublicText(
-    userNameFromIdentity({ ...raw, profile: snap }, first(
+    userNameFromIdentity({ ...raw, profile: snap }, firstNonEmpty(
       raw.requesterName, raw.clientName, raw.clienteNombre, raw.email, userId
     )),
     "Usuario"
   );
   const email = firstEmail(raw.email, raw.emailLower, raw.userEmail, raw.clienteEmail, snap.email, snap.emailLower);
-  const username = cleanText(first(raw.username, raw.usernameLower, snap.username, snap.usernameLower), "");
-  const phone = cleanText(first(raw.phone, raw.telefono, snap.phone, snap.telefono), "");
+  const username = cleanText(firstNonEmpty(raw.username, raw.usernameLower, snap.username, snap.usernameLower), "");
+  const phone = cleanText(firstNonEmpty(raw.phone, raw.telefono, snap.phone, snap.telefono), "");
   const avatar = firstUrl(raw.avatarUrl, raw.avatar, raw.userAvatarUrl, raw.userAvatar, raw.clienteAvatarUrl, raw.clienteAvatar, snap.avatarUrl, snap.avatar, snap.picture, snap.photoUrl, snap.photoURL);
-  const role = slugKey(first(raw.role, raw.rol, snap.role, snap.rol, "user")) || "user";
+  const role = slugKey(firstNonEmpty(raw.role, raw.rol, snap.role, snap.rol, "user")) || "user";
 
   return {
     id: userId || null,
@@ -1483,14 +1463,14 @@ function normalizeRequester(item = {}) {
     hasAvatar: Boolean(avatar),
     role,
     active: raw.active !== false && snap.active !== false,
-    tipo: cleanText(first(raw.tipo, snap.tipo), ""),
-    nif: cleanText(first(raw.nif, snap.nif), ""),
+    tipo: cleanText(firstNonEmpty(raw.tipo, snap.tipo), ""),
+    nif: cleanText(firstNonEmpty(raw.nif, snap.nif), ""),
   };
 }
 
 function incidenciaSortTime(item = {}) {
   const raw = unwrapTicket(item);
-  const ms = Date.parse(first(raw.lastActivityAt, raw.updatedAt, raw.modifiedAt, raw.closedAt, raw.createdAt, raw.lifecycle?.lastActivityAt, raw.lifecycle?.updatedAt, raw.lifecycle?.closedAt, raw.lifecycle?.createdAt, 0));
+  const ms = Date.parse(firstNonEmpty(raw.lastActivityAt, raw.updatedAt, raw.modifiedAt, raw.closedAt, raw.createdAt, raw.lifecycle?.lastActivityAt, raw.lifecycle?.updatedAt, raw.lifecycle?.closedAt, raw.lifecycle?.createdAt, 0));
   if (Number.isFinite(ms)) return ms;
 
   const ts = number(raw._ts, 0);
@@ -1514,35 +1494,35 @@ export function normalizeIncidencia(item = {}) {
 
   if (!ticketId && !looksLikeIncidencia(raw)) return null;
 
-  const id = ticketId || cleanText(first(raw.id, raw._id), "");
+  const id = ticketId || cleanText(firstNonEmpty(raw.id, raw._id), "");
   const finalId = id || `INC-${Math.abs(JSON.stringify(raw).length)}-${Date.now()}`;
 
-  const subject = safePublicText(first(raw.subject, raw.asunto, raw.title, raw.titulo, raw.name), "Incidencia");
-  const description = safePublicText(first(raw.description, raw.descripcion, raw.message, raw.preview, raw.text, raw.body), "Sin descripción.");
-  const status = normalizeStatus(first(raw.status, raw.estado, raw.state, raw.lifecycle?.status, DEFAULT_STATUS));
-  const priority = normalizePriority(first(raw.priority, raw.prioridad, raw.severity, raw.urgency, raw.sla?.priority, DEFAULT_PRIORITY));
-  const category = normalizeCategory(first(raw.category, raw.categoria, raw.tipo, raw.type, raw.subcategory, DEFAULT_CATEGORY));
-  const type = normalizeCategory(first(raw.tipo, raw.type, category, DEFAULT_CATEGORY));
+  const subject = safePublicText(firstNonEmpty(raw.subject, raw.asunto, raw.title, raw.titulo, raw.name), "Incidencia");
+  const description = safePublicText(firstNonEmpty(raw.description, raw.descripcion, raw.message, raw.preview, raw.text, raw.body), "Sin descripción.");
+  const status = normalizeStatus(firstNonEmpty(raw.status, raw.estado, raw.state, raw.lifecycle?.status, DEFAULT_STATUS));
+  const priority = normalizePriority(firstNonEmpty(raw.priority, raw.prioridad, raw.severity, raw.urgency, raw.sla?.priority, DEFAULT_PRIORITY));
+  const category = normalizeCategory(firstNonEmpty(raw.category, raw.categoria, raw.tipo, raw.type, raw.subcategory, DEFAULT_CATEGORY));
+  const type = normalizeCategory(firstNonEmpty(raw.tipo, raw.type, category, DEFAULT_CATEGORY));
 
   const requester = normalizeRequester(raw);
   const technician = normalizeTechnician(raw);
-  const attachments = arrayFrom(first(raw.attachments, raw.files, raw.adjuntos, [])).map(normalizeAttachment);
+  const attachments = arrayFrom(firstNonEmpty(raw.attachments, raw.files, raw.adjuntos, [])).map(normalizeAttachment);
 
   const attachmentsCount = countFrom(attachments.length, raw.attachmentsCount, raw.attachmentCount, raw.filesCount, raw.adjuntosCount, raw.meta?.attachmentsCount, raw.meta?.filesCount);
-  const comments = arrayFrom(first(raw.comments, raw.notes, raw.messages, []));
-  const history = arrayFrom(first(raw.history, raw.events, []));
+  const comments = arrayFrom(firstNonEmpty(raw.comments, raw.notes, raw.messages, []));
+  const history = arrayFrom(firstNonEmpty(raw.history, raw.events, []));
   const commentsCount = countFrom(comments.length, raw.commentsCount, raw.meta?.commentsCount);
   const historyCount = countFrom(history.length, raw.historyCount, raw.meta?.historyCount);
 
-  const invoices = arrayFrom(first(raw.invoices, raw.facturas, raw.linkedInvoices?.items, []));
+  const invoices = arrayFrom(firstNonEmpty(raw.invoices, raw.facturas, raw.linkedInvoices?.items, []));
   const invoicesCount = countFrom(raw.facturasCount, raw.invoicesCount, raw.linkedInvoicesCount, raw.linkedInvoices?.count, invoices.length);
-  const invoiceTotal = number(first(raw.facturasTotal, raw.invoicesTotal, raw.importeFacturas, raw.invoiceTotal, raw.facturaTotal, raw.facturaImporte, raw.importeFactura, raw.totalFactura, raw.invoiceAmount, raw.linkedInvoicesTotal, raw.linkedInvoicesAmount, raw.linkedInvoicesImporte, raw.linkedInvoices?.total, raw.linkedInvoices?.amount, raw.meta?.invoicesTotal, raw.meta?.invoiceTotal, 0), 0);
-  const currency = cleanText(first(raw.currency, raw.moneda, raw.facturaCurrency, raw.facturaMoneda, raw.linkedInvoicesCurrency, raw.linkedInvoicesMoneda, raw.linkedInvoices?.currency, raw.linkedInvoices?.moneda, raw.meta?.invoiceCurrency, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
+  const invoiceTotal = number(firstNonEmpty(raw.facturasTotal, raw.invoicesTotal, raw.importeFacturas, raw.invoiceTotal, raw.facturaTotal, raw.facturaImporte, raw.importeFactura, raw.totalFactura, raw.invoiceAmount, raw.linkedInvoicesTotal, raw.linkedInvoicesAmount, raw.linkedInvoicesImporte, raw.linkedInvoices?.total, raw.linkedInvoices?.amount, raw.meta?.invoicesTotal, raw.meta?.invoiceTotal, 0), 0);
+  const currency = cleanText(firstNonEmpty(raw.currency, raw.moneda, raw.facturaCurrency, raw.facturaMoneda, raw.linkedInvoicesCurrency, raw.linkedInvoicesMoneda, raw.linkedInvoices?.currency, raw.linkedInvoices?.moneda, raw.meta?.invoiceCurrency, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
 
-  const createdAt = first(raw.createdAt, raw.fechaCreacion, raw.created_at, raw.lifecycle?.createdAt, null);
-  const updatedAt = first(raw.updatedAt, raw.updated_at, raw.modifiedAt, raw.lastActivityAt, raw.lifecycle?.updatedAt, null);
-  const lastActivityAt = first(raw.lastActivityAt, raw.lifecycle?.lastActivityAt, updatedAt, createdAt, null);
-  const closedAt = first(raw.closedAt, raw.resolvedAt, raw.lifecycle?.closedAt, raw.lifecycle?.resolvedAt, null);
+  const createdAt = firstNonEmpty(raw.createdAt, raw.fechaCreacion, raw.created_at, raw.lifecycle?.createdAt, null);
+  const updatedAt = firstNonEmpty(raw.updatedAt, raw.updated_at, raw.modifiedAt, raw.lastActivityAt, raw.lifecycle?.updatedAt, null);
+  const lastActivityAt = firstNonEmpty(raw.lastActivityAt, raw.lifecycle?.lastActivityAt, updatedAt, createdAt, null);
+  const closedAt = firstNonEmpty(raw.closedAt, raw.resolvedAt, raw.lifecycle?.closedAt, raw.lifecycle?.resolvedAt, null);
 
   const requesterSnapshot = {
     ...safeObject(raw.requesterSnapshot),
@@ -1551,7 +1531,7 @@ export function normalizeIncidencia(item = {}) {
 
   const cliente = {
     ...safeObject(raw.cliente || raw.client),
-    id: first(raw.cliente?.id, requester.clienteId, requester.userId, null),
+    id: firstNonEmpty(raw.cliente?.id, requester.clienteId, requester.userId, null),
     userId: requester.userId,
     clienteId: requester.clienteId,
     name: requester.name,
@@ -1574,7 +1554,7 @@ export function normalizeIncidencia(item = {}) {
   const assignment = {
     ...safeObject(raw.assignment),
     status: cleanText(
-      first(raw.assignment?.status, technician.assigned ? "assigned" : "unassigned"),
+      firstNonEmpty(raw.assignment?.status, technician.assigned ? "assigned" : "unassigned"),
       technician.assigned ? "assigned" : "unassigned"
     ),
     policy: cleanText(raw.assignment?.policy || raw.meta?.assignmentPolicy || "", ""),
@@ -1591,7 +1571,7 @@ export function normalizeIncidencia(item = {}) {
     avatar: technician.avatarUrl || null,
     avatarUrl: technician.avatarUrl || null,
     assignedToHasAvatar: technician.hasAvatar,
-    team: cleanText(first(raw.assignment?.team, technician.assigned ? "support" : ""), technician.assigned ? "support" : ""),
+    team: cleanText(firstNonEmpty(raw.assignment?.team, technician.assigned ? "support" : ""), technician.assigned ? "support" : ""),
     assignedTo: technician,
     technician,
   };
@@ -1604,8 +1584,8 @@ export function normalizeIncidencia(item = {}) {
     incidenciaId: finalId,
     entityId: finalId,
 
-    entityType: cleanText(first(raw.entityType, "ticket"), "ticket"),
-    tipoDocumento: cleanText(first(raw.tipoDocumento, "ticket"), "ticket"),
+    entityType: cleanText(firstNonEmpty(raw.entityType, "ticket"), "ticket"),
+    tipoDocumento: cleanText(firstNonEmpty(raw.tipoDocumento, "ticket"), "ticket"),
     schemaVersion: number(raw.schemaVersion, number(raw.meta?.schemaVersion, 1)),
 
     subject,
@@ -1615,12 +1595,12 @@ export function normalizeIncidencia(item = {}) {
     description,
     descripcion: description,
     message: description,
-    preview: safePublicText(first(raw.preview, description.slice(0, 280)), description.slice(0, 280)),
+    preview: safePublicText(firstNonEmpty(raw.preview, description.slice(0, 280)), description.slice(0, 280)),
 
     status,
     estado: status,
-    statusKey: cleanText(first(raw.statusKey, status), status),
-    statusReason: cleanText(first(raw.statusReason, raw.motivoEstado), ""),
+    statusKey: cleanText(firstNonEmpty(raw.statusKey, status), status),
+    statusReason: cleanText(firstNonEmpty(raw.statusReason, raw.motivoEstado), ""),
 
     priority,
     prioridad: priority,
@@ -1631,11 +1611,11 @@ export function normalizeIncidencia(item = {}) {
     categoria: category,
     tipo: type,
     type,
-    subcategory: cleanText(first(raw.subcategory, raw.subcategoria), ""),
+    subcategory: cleanText(firstNonEmpty(raw.subcategory, raw.subcategoria), ""),
     tags: arrayFrom(raw.tags),
 
-    source: cleanText(first(raw.source, raw.origen), ""),
-    origen: cleanText(first(raw.origen, raw.source), ""),
+    source: cleanText(firstNonEmpty(raw.source, raw.origen), ""),
+    origen: cleanText(firstNonEmpty(raw.origen, raw.source), ""),
     channel: cleanText(raw.channel, ""),
 
     userId: requester.userId,
@@ -1722,8 +1702,8 @@ export function normalizeIncidencia(item = {}) {
     agentAvatar: technician.avatarUrl || null,
     agentAvatarUrl: technician.avatarUrl,
 
-    invoiceId: cleanText(first(raw.invoiceId, raw.facturaId, raw.linkedInvoiceId, raw.linkedFacturaId), ""),
-    facturaId: cleanText(first(raw.facturaId, raw.invoiceId, raw.linkedFacturaId, raw.linkedInvoiceId), ""),
+    invoiceId: cleanText(firstNonEmpty(raw.invoiceId, raw.facturaId, raw.linkedInvoiceId, raw.linkedFacturaId), ""),
+    facturaId: cleanText(firstNonEmpty(raw.facturaId, raw.invoiceId, raw.linkedFacturaId, raw.linkedInvoiceId), ""),
     invoiceIds: arrayFrom(raw.invoiceIds),
     facturaIds: arrayFrom(raw.facturaIds),
     invoices,
@@ -1732,9 +1712,9 @@ export function normalizeIncidencia(item = {}) {
     invoicesCount,
     linkedInvoicesCount: invoicesCount,
 
-    numeroFacturaLegal: cleanText(first(raw.numeroFacturaLegal, raw.numeroFactura, raw.invoiceNumber), ""),
-    numeroFactura: cleanText(first(raw.numeroFactura, raw.numeroFacturaLegal, raw.invoiceNumber), ""),
-    invoiceNumber: cleanText(first(raw.invoiceNumber, raw.numeroFacturaLegal, raw.numeroFactura), ""),
+    numeroFacturaLegal: cleanText(firstNonEmpty(raw.numeroFacturaLegal, raw.numeroFactura, raw.invoiceNumber), ""),
+    numeroFactura: cleanText(firstNonEmpty(raw.numeroFactura, raw.numeroFacturaLegal, raw.invoiceNumber), ""),
+    invoiceNumber: cleanText(firstNonEmpty(raw.invoiceNumber, raw.numeroFacturaLegal, raw.numeroFactura), ""),
 
     invoiceTotal,
     invoicesTotal: invoiceTotal,
@@ -1754,7 +1734,7 @@ export function normalizeIncidencia(item = {}) {
     facturaCurrency: currency,
     facturaMoneda: currency,
 
-    paymentStatus: cleanText(first(raw.paymentStatus, raw.estadoPago, raw.linkedInvoices?.paymentStatus), ""),
+    paymentStatus: cleanText(firstNonEmpty(raw.paymentStatus, raw.estadoPago, raw.linkedInvoices?.paymentStatus), ""),
 
     attachments,
     files: attachments,
@@ -1834,7 +1814,7 @@ function normalizeList(items = []) {
     const normalized = normalizeIncidencia(item);
     if (!normalized) continue;
 
-    const id = cleanText(first(normalized.ticketId, normalized.id), "");
+    const id = cleanText(firstNonEmpty(normalized.ticketId, normalized.id), "");
     if (!id) continue;
 
     map.set(id, map.has(id) ? mergeIncidenciaData(map.get(id), normalized) : normalized);
@@ -1858,7 +1838,7 @@ function upsertCachedIncidencia(item = null) {
   const id = getTicketId(normalized);
   if (!id) return normalized;
 
-  detailCache.set(id, { item: normalized, at: now() });
+  detailCache.set(id, { item: normalized, at: nowMs() });
   pruneDetailCache();
 
   const current = arrayFrom(lastList.items).filter((row) => getTicketId(row) !== id);
@@ -1898,7 +1878,7 @@ function normalizeFilesInput(value = null) {
 
 function extractFiles(payload = {}) {
   const source = safeObject(payload);
-  return normalizeFilesInput(first(source.attachments, source.files, source.adjuntos, source.uploads, source.file, source.adjunto, []));
+  return normalizeFilesInput(firstNonEmpty(source.attachments, source.files, source.adjuntos, source.uploads, source.file, source.adjunto, []));
 }
 
 function dedupeFiles(files = []) {
@@ -1929,16 +1909,16 @@ function withoutFileFields(payload = {}) {
 function normalizeCreatePayload(payload = {}) {
   const source = safeObject(payload);
 
-  const subject = cleanText(first(source.subject, source.asunto, source.title), "");
-  const description = cleanText(first(source.description, source.descripcion, source.message, source.body, source.text), "");
-  const priority = normalizePriority(first(source.priority, source.prioridad, DEFAULT_PRIORITY));
-  const status = normalizeStatus(first(source.status, source.estado, DEFAULT_STATUS));
-  const category = normalizeCategory(first(source.category, source.categoria, source.tipo, DEFAULT_CATEGORY));
-  const origin = cleanText(first(source.source, source.origen, source.channel, "panel_admin"), "panel_admin");
+  const subject = cleanText(firstNonEmpty(source.subject, source.asunto, source.title), "");
+  const description = cleanText(firstNonEmpty(source.description, source.descripcion, source.message, source.body, source.text), "");
+  const priority = normalizePriority(firstNonEmpty(source.priority, source.prioridad, DEFAULT_PRIORITY));
+  const status = normalizeStatus(firstNonEmpty(source.status, source.estado, DEFAULT_STATUS));
+  const category = normalizeCategory(firstNonEmpty(source.category, source.categoria, source.tipo, DEFAULT_CATEGORY));
+  const origin = cleanText(firstNonEmpty(source.source, source.origen, source.channel, "panel_admin"), "panel_admin");
 
-  const targetUserId = cleanText(first(source.targetUserId, source.receptorUserId, source.affectedUserId, source.usuarioId, source.userId, source.user?.userId, source.user?.id, source.usuario?.userId, source.usuario?.id), "");
-  const targetClienteId = cleanText(first(source.targetClienteId, source.clienteId, source.clientId, source.customerId, source.cliente?.clienteId, source.cliente?.id, source.client?.clienteId, source.client?.id), "");
-  const targetUserName = cleanText(first(source.targetUserName, source.receptorName, source.affectedUserName, source.userName, source.clienteNombre, source.clientName, source.name, source.nombre, source.user?.displayName, source.user?.name, source.cliente?.displayName, source.cliente?.name, source.cliente?.nombre), "");
+  const targetUserId = cleanText(firstNonEmpty(source.targetUserId, source.receptorUserId, source.affectedUserId, source.usuarioId, source.userId, source.user?.userId, source.user?.id, source.usuario?.userId, source.usuario?.id), "");
+  const targetClienteId = cleanText(firstNonEmpty(source.targetClienteId, source.clienteId, source.clientId, source.customerId, source.cliente?.clienteId, source.cliente?.id, source.client?.clienteId, source.client?.id), "");
+  const targetUserName = cleanText(firstNonEmpty(source.targetUserName, source.receptorName, source.affectedUserName, source.userName, source.clienteNombre, source.clientName, source.name, source.nombre, source.user?.displayName, source.user?.name, source.cliente?.displayName, source.cliente?.name, source.cliente?.nombre), "");
   const targetUserEmail = firstEmail(source.targetUserEmail, source.receptorEmail, source.affectedUserEmail, source.userEmail, source.clienteEmail, source.clientEmail, source.email, source.emailLower, source.user?.email, source.cliente?.email, source.client?.email);
   const targetUserAvatar = firstUrl(source.targetUserAvatar, source.receptorAvatar, source.userAvatar, source.userAvatarUrl, source.clienteAvatar, source.clienteAvatarUrl, source.clientAvatar, source.clientAvatarUrl, source.avatar, source.avatarUrl, source.user?.avatarUrl, source.user?.avatar, source.cliente?.avatarUrl, source.cliente?.avatar, source.client?.avatar);
 
@@ -2293,7 +2273,7 @@ export async function getIncidenciaByIdRequest(id = "", options = {}) {
   const ttl = Math.max(0, number(options.ttlMs ?? options.cacheTtlMs, INCIDENCIAS_DETAIL_CACHE_TTL_MS));
   const cached = detailCache.get(key);
 
-  if (!force && useCache && cached && now() - cached.at <= ttl) return cached.item;
+  if (!force && useCache && cached && nowMs() - cached.at <= ttl) return cached.item;
   if (!force && !options.signal && detailInFlight.has(key)) return detailInFlight.get(key);
 
   const epoch = cacheEpoch;
@@ -2552,7 +2532,7 @@ function normalizeFileResponse(response = {}, context = {}) {
       : viewUrl || downloadUrl;
 
   const id = cleanText(
-    first(
+    firstNonEmpty(
       data.id,
       data.attachmentId,
       context.attachmentId
@@ -2561,7 +2541,7 @@ function normalizeFileResponse(response = {}, context = {}) {
   );
 
   const contentType = cleanText(
-    first(
+    firstNonEmpty(
       data.contentType,
       data.mimeType,
       data.mimetype,
@@ -2587,7 +2567,7 @@ function normalizeFileResponse(response = {}, context = {}) {
     sasUrl: url,
 
     name: safePublicText(
-      first(
+      firstNonEmpty(
         data.name,
         data.filename,
         data.fileName,
@@ -2674,7 +2654,7 @@ export async function downloadIncidenciaAttachment(
   }
 
   const resolvedFilename = safePublicText(
-    first(
+    firstNonEmpty(
       filename,
       file.name,
       file.filename,
@@ -2730,7 +2710,7 @@ export function computeIncidenciasStats(items = lastList.items) {
       if (isUrgentPriority(item.priority || item.prioridad)) acc.urgent += 1;
 
       acc.attachments += number(item.attachmentsCount, arrayFrom(item.attachments).length);
-      acc.invoiceTotal += number(first(item.invoiceTotal, item.invoicesTotal, item.facturasTotal), 0);
+      acc.invoiceTotal += number(firstNonEmpty(item.invoiceTotal, item.invoicesTotal, item.facturasTotal), 0);
 
       return acc;
     },

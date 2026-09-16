@@ -9,7 +9,7 @@
 
 import * as Base from "./facturas.api.base.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 
 export * from "./facturas.api.base.js";
 
@@ -51,17 +51,6 @@ const FACTURA_TECHNICAL_TYPES = new Set([
   "factura_create_operation",
 ]);
 
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (isObject(value) && !Object.keys(value).length) continue;
-    return value;
-  }
-  return null;
-}
-
 function recordKey(value = "") {
   return cleanText(value, "")
     .toLowerCase()
@@ -98,7 +87,7 @@ export function isFacturaTechnicalRecord(value = null) {
     recordKey(item.operation) === "factura_create" &&
     (
       cleanText(item.operationHash, "") ||
-      recordKey(first(
+      recordKey(firstNonEmpty(
         item.version,
         item.idempotencyVersion,
         item.meta?.idempotencyVersion,
@@ -112,7 +101,7 @@ function technicalSnapshotFactura(value = {}) {
   const item = safeObject(value);
   const snapshot = safeObject(item.responseSnapshot);
 
-  return safeObject(first(
+  return safeObject(firstNonEmpty(
     snapshot.factura,
     snapshot.invoice,
     snapshot.item,
@@ -134,7 +123,7 @@ function promoteTechnicalFactura(value = {}) {
   }
 
   const technicalId = cleanText(item.id, "");
-  const canonicalId = cleanText(first(
+  const canonicalId = cleanText(firstNonEmpty(
     nested.id,
     nested.facturaId,
     nested.invoiceId,
@@ -147,8 +136,8 @@ function promoteTechnicalFactura(value = {}) {
     factura: {
       ...nested,
       id: canonicalId || nested.id,
-      facturaId: cleanText(first(nested.facturaId, canonicalId), canonicalId),
-      invoiceId: cleanText(first(nested.invoiceId, canonicalId), canonicalId),
+      facturaId: cleanText(firstNonEmpty(nested.facturaId, canonicalId), canonicalId),
+      invoiceId: cleanText(firstNonEmpty(nested.invoiceId, canonicalId), canonicalId),
       meta: {
         ...safeObject(nested.meta),
         technicalAliasRecovered: true,
@@ -248,11 +237,11 @@ function cleanActionUrl(value = "") {
 
 function sanitizeDocumentObject(value = {}) {
   const source = safeObject(value);
-  const url = cleanActionUrl(first(source.url, source.signedUrl, source.sasUrl, ""));
-  const signedUrl = cleanActionUrl(first(source.signedUrl, source.sasUrl, url, ""));
-  const sasUrl = cleanActionUrl(first(source.sasUrl, source.signedUrl, signedUrl, ""));
-  const viewUrl = cleanActionUrl(first(source.viewUrl, signedUrl, sasUrl, url, ""));
-  const downloadUrl = cleanActionUrl(first(source.downloadUrl, signedUrl, sasUrl, url, ""));
+  const url = cleanActionUrl(firstNonEmpty(source.url, source.signedUrl, source.sasUrl, ""));
+  const signedUrl = cleanActionUrl(firstNonEmpty(source.signedUrl, source.sasUrl, url, ""));
+  const sasUrl = cleanActionUrl(firstNonEmpty(source.sasUrl, source.signedUrl, signedUrl, ""));
+  const viewUrl = cleanActionUrl(firstNonEmpty(source.viewUrl, signedUrl, sasUrl, url, ""));
+  const downloadUrl = cleanActionUrl(firstNonEmpty(source.downloadUrl, signedUrl, sasUrl, url, ""));
 
   return {
     ...source,
@@ -266,9 +255,9 @@ function sanitizeDocumentObject(value = {}) {
 
 function documentMetadataFrom(item = {}) {
   const source = safeObject(item);
-  const file = sanitizeDocumentObject(first(source.file, source.pdf, source.document, {}));
-  const pdf = sanitizeDocumentObject(first(source.pdf, source.file, source.document, {}));
-  const document = sanitizeDocumentObject(first(source.document, source.file, source.pdf, {}));
+  const file = sanitizeDocumentObject(firstNonEmpty(source.file, source.pdf, source.document, {}));
+  const pdf = sanitizeDocumentObject(firstNonEmpty(source.pdf, source.file, source.document, {}));
+  const document = sanitizeDocumentObject(firstNonEmpty(source.document, source.file, source.pdf, {}));
 
   return { file, pdf, document };
 }
@@ -337,7 +326,7 @@ function facturaId(item = {}) {
   const promotion = promoteTechnicalFactura(item);
   const source = safeObject(promotion.factura);
 
-  return cleanText(first(
+  return cleanText(firstNonEmpty(
     source?.id,
     source?.facturaId,
     source?.invoiceId,
@@ -353,19 +342,19 @@ function sanitizePdfResult(result = null) {
   const source = safeObject(result, null);
   if (!source) return result;
 
-  const file = sanitizeDocumentObject(first(source.file, source.pdf, source.document, source));
-  const pdf = sanitizeDocumentObject(first(source.pdf, source.file, source.document, source));
-  const document = sanitizeDocumentObject(first(source.document, source.file, source.pdf, source));
+  const file = sanitizeDocumentObject(firstNonEmpty(source.file, source.pdf, source.document, source));
+  const pdf = sanitizeDocumentObject(firstNonEmpty(source.pdf, source.file, source.document, source));
+  const document = sanitizeDocumentObject(firstNonEmpty(source.document, source.file, source.pdf, source));
 
-  const nestedFactura = canonicalizeFactura(first(source.factura, source.item, source.data, {}));
+  const nestedFactura = canonicalizeFactura(firstNonEmpty(source.factura, source.item, source.data, {}));
 
   return {
     ...source,
-    url: cleanActionUrl(first(source.url, file.url, pdf.url, document.url, "")) || null,
-    signedUrl: cleanActionUrl(first(source.signedUrl, file.signedUrl, pdf.signedUrl, document.signedUrl, "")) || null,
-    sasUrl: cleanActionUrl(first(source.sasUrl, file.sasUrl, pdf.sasUrl, document.sasUrl, "")) || null,
-    viewUrl: cleanActionUrl(first(source.viewUrl, file.viewUrl, pdf.viewUrl, document.viewUrl, "")) || null,
-    downloadUrl: cleanActionUrl(first(source.downloadUrl, file.downloadUrl, pdf.downloadUrl, document.downloadUrl, "")) || null,
+    url: cleanActionUrl(firstNonEmpty(source.url, file.url, pdf.url, document.url, "")) || null,
+    signedUrl: cleanActionUrl(firstNonEmpty(source.signedUrl, file.signedUrl, pdf.signedUrl, document.signedUrl, "")) || null,
+    sasUrl: cleanActionUrl(firstNonEmpty(source.sasUrl, file.sasUrl, pdf.sasUrl, document.sasUrl, "")) || null,
+    viewUrl: cleanActionUrl(firstNonEmpty(source.viewUrl, file.viewUrl, pdf.viewUrl, document.viewUrl, "")) || null,
+    downloadUrl: cleanActionUrl(firstNonEmpty(source.downloadUrl, file.downloadUrl, pdf.downloadUrl, document.downloadUrl, "")) || null,
     file,
     pdf,
     document,
@@ -381,10 +370,10 @@ function hasActionablePdf(result = null, mode = "view") {
   if (isBlob(result)) return true;
   const source = safeObject(result);
   const preferred = mode === "download"
-    ? first(source.downloadUrl, source.file?.downloadUrl, source.pdf?.downloadUrl, source.document?.downloadUrl)
-    : first(source.viewUrl, source.file?.viewUrl, source.pdf?.viewUrl, source.document?.viewUrl);
+    ? firstNonEmpty(source.downloadUrl, source.file?.downloadUrl, source.pdf?.downloadUrl, source.document?.downloadUrl)
+    : firstNonEmpty(source.viewUrl, source.file?.viewUrl, source.pdf?.viewUrl, source.document?.viewUrl);
 
-  return Boolean(cleanActionUrl(first(
+  return Boolean(cleanActionUrl(firstNonEmpty(
     preferred,
     source.signedUrl,
     source.sasUrl,
@@ -428,9 +417,9 @@ export function normalizeFacturaCreateResponse(payload = null) {
   const normalized = Base.normalizeFacturaCreateResponse(payload);
   const item = canonicalizeFactura(normalized?.item, {
     ...safeObject(payload),
-    file: first(normalized?.file, payload?.file, payload?.pdf, payload?.document, {}),
-    pdf: first(payload?.pdf, normalized?.file, payload?.file, payload?.document, {}),
-    document: first(payload?.document, payload?.file, payload?.pdf, {}),
+    file: firstNonEmpty(normalized?.file, payload?.file, payload?.pdf, payload?.document, {}),
+    pdf: firstNonEmpty(payload?.pdf, normalized?.file, payload?.file, payload?.document, {}),
+    document: firstNonEmpty(payload?.document, payload?.file, payload?.pdf, {}),
   });
 
   return {

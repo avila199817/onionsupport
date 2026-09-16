@@ -9,7 +9,7 @@
 
 import { cleanText } from "../../core/presentation-text.js";
 import BaseDefault, * as Base from "./facturas.template.modal.base.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 
 export * from "./facturas.template.modal.base.js";
 
@@ -95,17 +95,6 @@ function key(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (isObject(value) && !Object.keys(value).length) continue;
-    return value;
-  }
-  return null;
-}
-
 function empty(value) {
   if (value === undefined || value === null) return true;
   if (typeof value === "string") return !value.trim();
@@ -172,7 +161,7 @@ export function isFacturaModalTechnicalRecord(value = null) {
     key(source.operation) === "factura_create" &&
       (
         cleanText(source.operationHash, "") ||
-        key(first(
+        key(firstNonEmpty(
           source.version,
           source.idempotencyVersion,
           source.meta?.idempotencyVersion,
@@ -306,7 +295,7 @@ function fillFallbacks(target = {}, outer = {}, technical = {}) {
   const result = { ...target };
   for (const name of FALLBACK_KEYS) {
     if (!empty(result[name])) continue;
-    const candidate = first(outer?.[name], technical?.[name]);
+    const candidate = firstNonEmpty(outer?.[name], technical?.[name]);
     if (!empty(candidate)) result[name] = candidate;
   }
   return result;
@@ -325,7 +314,7 @@ function taxAmountFromLines(value = {}) {
     const item = safeObject(raw, null);
     if (!item) continue;
 
-    const amount = numberOrNull(first(
+    const amount = numberOrNull(firstNonEmpty(
       item.importe,
       item.amount,
       item.total,
@@ -334,7 +323,7 @@ function taxAmountFromLines(value = {}) {
     if (amount === null) continue;
 
     found = true;
-    const taxKey = key(first(item.tipo, item.taxType, item.name, item.label, ""));
+    const taxKey = key(firstNonEmpty(item.tipo, item.taxType, item.name, item.label, ""));
     const negative =
       taxKey.includes("irpf") ||
       taxKey.includes("retencion") ||
@@ -349,7 +338,7 @@ function taxAmountFromLines(value = {}) {
 function repairFinancialAliases(value = {}) {
   const result = { ...value };
 
-  let base = numberOrNull(first(
+  let base = numberOrNull(firstNonEmpty(
     result.baseImponible,
     result.taxableBase,
     result.subtotal,
@@ -361,7 +350,7 @@ function repairFinancialAliases(value = {}) {
     result.totals?.subtotal
   ));
 
-  let taxes = numberOrNull(first(
+  let taxes = numberOrNull(firstNonEmpty(
     result.taxAmount,
     result.taxesAmount,
     result.totalImpuestos,
@@ -373,27 +362,27 @@ function repairFinancialAliases(value = {}) {
   if (taxes === null) taxes = taxAmountFromLines(result);
 
   if (taxes === null) {
-    const iva = numberOrNull(first(
+    const iva = numberOrNull(firstNonEmpty(
       result.ivaImporte,
       result.importeIva,
       result.totalIva,
       result.ivaTotal,
-      isObject(result.iva) ? first(result.iva.importe, result.iva.amount) : result.iva
+      isObject(result.iva) ? firstNonEmpty(result.iva.importe, result.iva.amount) : result.iva
     ));
-    const retention = numberOrNull(first(
+    const retention = numberOrNull(firstNonEmpty(
       result.irpfImporte,
       result.importeIrpf,
       result.totalIrpf,
       result.retencion,
       result.withholdingAmount,
-      isObject(result.irpf) ? first(result.irpf.importe, result.irpf.amount) : result.irpf
+      isObject(result.irpf) ? firstNonEmpty(result.irpf.importe, result.irpf.amount) : result.irpf
     ));
     if (iva !== null || retention !== null) {
       taxes = round2((iva || 0) - Math.abs(retention || 0));
     }
   }
 
-  const paid = numberOrNull(first(
+  const paid = numberOrNull(firstNonEmpty(
     result.paidAmount,
     result.totalPagado,
     result.pagado,
@@ -402,7 +391,7 @@ function repairFinancialAliases(value = {}) {
     result.totals?.paid
   )) ?? 0;
 
-  const pending = numberOrNull(first(
+  const pending = numberOrNull(firstNonEmpty(
     result.pendingAmount,
     result.totalPendiente,
     result.pendiente,
@@ -413,7 +402,7 @@ function repairFinancialAliases(value = {}) {
     result.totals?.pending
   ));
 
-  let total = numberOrNull(first(
+  let total = numberOrNull(firstNonEmpty(
     result.total,
     result.totalFactura,
     result.importeTotal,
@@ -509,7 +498,7 @@ export function resolveFacturaModalCanonical(value = null) {
   const canonicalId = canonicalIdentity(canonical) || canonicalIdentity(outer);
   if (!canonicalId || isTechnicalIdentifier(canonicalId)) return null;
 
-  const legalNumber = cleanText(first(
+  const legalNumber = cleanText(firstNonEmpty(
     canonical.numeroFacturaLegal,
     canonical.legalInvoiceNumber,
     canonical.legalNumber,
@@ -520,7 +509,7 @@ export function resolveFacturaModalCanonical(value = null) {
     ""
   ), "");
 
-  const systemNumber = cleanText(first(
+  const systemNumber = cleanText(firstNonEmpty(
     canonical.numeroFacturaSistema,
     canonical.systemInvoiceNumber,
     canonical.systemNumber,
@@ -537,17 +526,17 @@ export function resolveFacturaModalCanonical(value = null) {
     ...(legalNumber
       ? {
           numeroFacturaLegal: legalNumber,
-          numeroFactura: cleanText(first(canonical.numeroFactura, legalNumber), legalNumber),
-          invoiceNumber: cleanText(first(canonical.invoiceNumber, legalNumber), legalNumber),
-          number: cleanText(first(canonical.number, legalNumber), legalNumber),
+          numeroFactura: cleanText(firstNonEmpty(canonical.numeroFactura, legalNumber), legalNumber),
+          invoiceNumber: cleanText(firstNonEmpty(canonical.invoiceNumber, legalNumber), legalNumber),
+          number: cleanText(firstNonEmpty(canonical.number, legalNumber), legalNumber),
         }
       : {}),
     ...(systemNumber ? { numeroFacturaSistema: systemNumber } : {}),
     tipoDocumento: "factura",
     entityType: "invoice",
     type: "invoice",
-    status: cleanText(first(canonical.status, canonical.estado, "issued"), "issued"),
-    estado: cleanText(first(canonical.estado, canonical.status, "issued"), "issued"),
+    status: cleanText(firstNonEmpty(canonical.status, canonical.estado, "issued"), "issued"),
+    estado: cleanText(firstNonEmpty(canonical.estado, canonical.status, "issued"), "issued"),
     meta: {
       ...safeObject(canonical.meta, {}),
       technicalAliasRecovered: true,
@@ -563,7 +552,7 @@ export function resolveFacturaModalCanonical(value = null) {
 
 function renderState(options = {}) {
   const source = safeObject(options, {});
-  const current = first(source.factura, source.item, source.detail, null);
+  const current = firstNonEmpty(source.factura, source.item, source.detail, null);
   const technical = Boolean(findTechnicalHost(current));
   const canonical = resolveFacturaModalCanonical(current);
   const waitingCanonical = Boolean(

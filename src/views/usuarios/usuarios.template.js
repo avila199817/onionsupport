@@ -26,7 +26,7 @@ import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 
@@ -72,16 +72,6 @@ const FILTERS = Object.freeze([
 
 const TABLE_SCALE = "110";
 
-function first(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (isObject(value) && !Object.keys(value).length) continue;
-    return value;
-  }
-  return null;
-}
 function number(value = 0, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -108,7 +98,7 @@ function sortOrderValue(input = {}) {
   const data = safeObject(input);
   const state = stateFrom(data);
   return normalizeSortOrder(
-    first(data.sortOrder, data.order, state.sortOrder, state.order, USUARIOS_DEFAULT_SORT_ORDER)
+    firstNonEmpty(data.sortOrder, data.order, state.sortOrder, state.order, USUARIOS_DEFAULT_SORT_ORDER)
   );
 }
 function sessionStartTimestamp(item = {}) {
@@ -239,22 +229,22 @@ function stateFrom(input = {}) {
   return safeObject(safeObject(input).state);
 }
 function getId(item = {}) {
-  return cleanText(first(item.userId, item.usuarioId, item.id, item.uid, item.email, ""), "");
+  return cleanText(firstNonEmpty(item.userId, item.usuarioId, item.id, item.uid, item.email, ""), "");
 }
 function getName(item = {}) {
-  return userNameFromIdentity(item, first(item.username, item.email, "Usuario"));
+  return userNameFromIdentity(item, firstNonEmpty(item.username, item.email, "Usuario"));
 }
 function getCode(item = {}) {
-  return cleanText(first(item.code, item.username, getId(item), "USR-SIN-ID"), "USR-SIN-ID");
+  return cleanText(firstNonEmpty(item.code, item.username, getId(item), "USR-SIN-ID"), "USR-SIN-ID");
 }
 function getEmail(item = {}) {
-  return cleanText(first(item.email, item.emailLower, item.mail, ""), "").toLowerCase() || "Sin email";
+  return cleanText(firstNonEmpty(item.email, item.emailLower, item.mail, ""), "").toLowerCase() || "Sin email";
 }
 function getCity(item = {}) {
-  return cleanText(first(item.city, item.ciudad, item.direccion?.ciudad, item.address?.city, item.address?.ciudad, ""), "") || "Sin ciudad";
+  return cleanText(firstNonEmpty(item.city, item.ciudad, item.direccion?.ciudad, item.address?.city, item.address?.ciudad, ""), "") || "Sin ciudad";
 }
 function getStatus(item = {}) {
-  const explicit = slugKey(first(item.status, item.estado, item.state, ""));
+  const explicit = slugKey(firstNonEmpty(item.status, item.estado, item.state, ""));
   if (["pending", "pendiente", "invited", "invitado", "new", "unverified", "awaiting_activation"].includes(explicit)) return "pending";
   if (["blocked", "bloqueado", "inactive", "inactivo", "disabled", "archived", "deleted", "suspended", "banned", "revoked"].includes(explicit)) return "blocked";
   if (item.blocked === true || item.disabled === true) return "blocked";
@@ -270,19 +260,19 @@ function statusLabel(item = {}) {
 }
 function avatarPresentation(item = {}) {
   const name = getName(item);
-  const email = cleanText(first(item.email, item.emailLower, item.mail, ""), "").toLowerCase();
+  const email = cleanText(firstNonEmpty(item.email, item.emailLower, item.mail, ""), "").toLowerCase();
   return resolveAvatarPresentation({
     ...item,
     displayName: name,
     name,
     email,
     userId: getId(item),
-    username: first(item.username, item.userName, item.slug, ""),
+    username: firstNonEmpty(item.username, item.userName, item.slug, ""),
   });
 }
 function renderAvatar(item = {}) {
   const name = getName(item);
-  const src = safeAvatarUrl(first(item.avatarUrl, item.avatar, item.photoUrl, item.picture, ""));
+  const src = safeAvatarUrl(firstNonEmpty(item.avatarUrl, item.avatar, item.photoUrl, item.picture, ""));
   const presentation = avatarPresentation(item);
   return `<span class="usuarios-avatar${src ? " has-image" : " is-fallback"}" aria-hidden="true" data-avatar-system="true" data-avatar-host="true" data-avatar-name="${attr(presentation.name)}" data-avatar-email="${attr(presentation.email)}" data-avatar-user-id="${attr(presentation.userId)}" data-avatar-username="${attr(presentation.username)}" data-avatar-tone="${attr(String(presentation.tone))}" data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}" data-has-avatar="${src ? "true" : "false"}">${src ? `<img class="usuarios-avatar-img" data-avatar-image="true" src="${attr(src)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}<span class="usuarios-avatar-fallback" data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span></span>`;
 }
@@ -294,9 +284,9 @@ function renderRow(item = {}, state = {}) {
   const id = getId(item);
   const name = getName(item);
   const opening = Boolean(id && cleanText(state.openingUserId, "") === id);
-  const lastLoginAt = first(item.lastLoginAt, null);
+  const lastLoginAt = firstNonEmpty(item.lastLoginAt, null);
   return `<tr class="usuarios-table-row usuarios-table-row--${attr(getStatus(item))}${opening ? " is-loading" : ""}" data-user-row="true" data-user-id="${attr(id)}" data-session-start="${attr(lastLoginAt || "")}" ${id ? `data-usuarios-action="${USUARIOS_ACTIONS.DETAIL}" data-action="open-user" tabindex="0" role="button" aria-label="Abrir usuario ${attr(name)}"` : 'aria-disabled="true"'} aria-busy="${opening ? "true" : "false"}">
-    <td class="usuarios-cell usuarios-cell--main" data-column="main"><div class="usuarios-main">${renderAvatar(item)}<div class="usuarios-main-copy"><div class="usuarios-user-line-top"><span class="usuarios-user-id">${escapeHtml(getCode(item))}</span></div><div class="usuarios-user-name">${escapeHtml(name)}</div><div class="usuarios-user-description">${escapeHtml(cleanText(first(item.phone, item.telefono, item.tipo, "Usuario Onion Support"), "Usuario Onion Support"))}</div></div></div></td>
+    <td class="usuarios-cell usuarios-cell--main" data-column="main"><div class="usuarios-main">${renderAvatar(item)}<div class="usuarios-main-copy"><div class="usuarios-user-line-top"><span class="usuarios-user-id">${escapeHtml(getCode(item))}</span></div><div class="usuarios-user-name">${escapeHtml(name)}</div><div class="usuarios-user-description">${escapeHtml(cleanText(firstNonEmpty(item.phone, item.telefono, item.tipo, "Usuario Onion Support"), "Usuario Onion Support"))}</div></div></div></td>
     <td class="usuarios-cell usuarios-cell--status" data-column="status">${renderStatusChip(item)}</td>
     <td class="usuarios-cell usuarios-cell--date" data-column="date"><span class="usuarios-date-inline" title="${attr(formatDateTime(item.createdAt))}">${escapeHtml(formatDateShort(item.createdAt))}</span></td>
     <td class="usuarios-cell usuarios-cell--email" data-column="email"><span class="usuarios-email-inline" title="${attr(getEmail(item))}">${escapeHtml(getEmail(item))}</span></td>
@@ -326,7 +316,7 @@ function renderSpinner(label = "") {
 function filterValue(input = {}) {
   const data = safeObject(input);
   const state = stateFrom(data);
-  const value = slugKey(first(data.filter, data.activeFilter, state.filter, state.activeFilter, "all"));
+  const value = slugKey(firstNonEmpty(data.filter, data.activeFilter, state.filter, state.activeFilter, "all"));
   return ["active", "pending", "blocked"].includes(value) ? value : "all";
 }
 function searchValue(input = {}) {
@@ -339,16 +329,16 @@ function searchValue(input = {}) {
 function totalInfo(input = {}, items = []) {
   const data = safeObject(input);
   const state = stateFrom(data);
-  const totalKnown = Boolean(first(state.totalKnown, data.totalKnown, false));
+  const totalKnown = Boolean(firstNonEmpty(state.totalKnown, data.totalKnown, false));
   const totalCount = totalKnown
-    ? Math.max(items.length, number(first(state.totalCount, state.remoteCount, data.totalCount, data.remoteCount, items.length), items.length))
+    ? Math.max(items.length, number(firstNonEmpty(state.totalCount, state.remoteCount, data.totalCount, data.remoteCount, items.length), items.length))
     : null;
   return { totalKnown, totalCount };
 }
 function isRestricted(input = {}) {
   const data = safeObject(input);
   const state = stateFrom(data);
-  return Boolean(first(data.forbidden, data.restricted, data.accessDenied, state.forbidden, state.restricted, state.accessDenied, false));
+  return Boolean(firstNonEmpty(data.forbidden, data.restricted, data.accessDenied, state.forbidden, state.restricted, state.accessDenied, false));
 }
 function silentProgressLabel(state = {}) {
   if (state.searchPending === true) return "Preparando la búsqueda de usuarios";
@@ -364,12 +354,12 @@ export function renderHeader(input = {}) {
   const stats = loadedStats(items);
   const filter = filterValue(data);
   const { totalKnown, totalCount } = totalInfo(data, items);
-  const loading = Boolean(first(state.loading, data.loading, false));
-  const creating = Boolean(first(state.creating, data.creating, false));
-  const exporting = Boolean(first(state.exporting, data.exporting, false));
+  const loading = Boolean(firstNonEmpty(state.loading, data.loading, false));
+  const creating = Boolean(firstNonEmpty(state.creating, data.creating, false));
+  const exporting = Boolean(firstNonEmpty(state.exporting, data.exporting, false));
   const admin = data.admin !== false && !isRestricted(data);
   const countText = totalKnown ? `${formatNumber(totalCount)} usuarios` : `${formatNumber(items.length)}${state.hasMore ? "+" : ""} cargados`;
-  const updatedAt = number(first(state.lastSyncAt, data.lastSyncAt, 0), 0);
+  const updatedAt = number(firstNonEmpty(state.lastSyncAt, data.lastSyncAt, 0), 0);
 
   return `<section class="usuarios-hero" data-usuarios-hero="true">
     <div class="usuarios-hero-top"><div class="usuarios-hero-copy"><h1 class="usuarios-page-title">Usuarios</h1><p class="usuarios-page-subtitle">Gestiona usuarios con paginación remota y búsqueda global.</p></div>
@@ -438,8 +428,8 @@ export function renderTable(input = {}) {
   const sourceItems = itemsFrom(data);
   const order = sortOrderValue(data);
   const items = sortBySessionStart(sourceItems, order);
-  const loading = Boolean(first(state.loading, data.loading, false));
-  const error = cleanText(first(state.error, data.error, ""), "");
+  const loading = Boolean(firstNonEmpty(state.loading, data.loading, false));
+  const error = cleanText(firstNonEmpty(state.error, data.error, ""), "");
   const filter = filterValue(data);
   const search = searchValue(data);
   const filtering = filter !== "all" || Boolean(cleanText(search, ""));
@@ -481,8 +471,8 @@ export function renderUsuariosTableTemplate(input = {}) {
   const data = safeObject(input);
   const state = stateFrom(data);
   const items = itemsFrom(data);
-  const loading = Boolean(first(state.loading, data.loading, false));
-  const error = cleanText(first(state.error, data.error, ""), "");
+  const loading = Boolean(firstNonEmpty(state.loading, data.loading, false));
+  const error = cleanText(firstNonEmpty(state.error, data.error, ""), "");
   const order = sortOrderValue(data);
   const rootAttrs = `data-usuarios-scope="true" data-template-version="${attr(USUARIOS_TEMPLATE_VERSION)}" data-loaded="${attr(String(items.length))}" data-total-known="${state.totalKnown ? "true" : "false"}" data-has-more="${state.hasMore ? "true" : "false"}" data-filter="${attr(filterValue(data))}" data-sort-field="lastLoginAt" data-sort-order="${attr(order)}" data-loading="${loading ? "true" : "false"}" data-table-columns="6" data-table-scale="${TABLE_SCALE}"`;
   if (isRestricted(data)) return `<section class="usuarios-view-root is-restricted" ${rootAttrs}>${renderAccessDeniedState()}</section>`;

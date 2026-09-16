@@ -2,7 +2,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 /* =========================================================
    Onion Support - Cuenta Template
@@ -196,18 +196,6 @@ const COPY = Object.freeze({
 });
 
 
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
-    return value;
-  }
-  return null;
-}
-
-
 const attr = escapeHtml;
 
 function normalizeLocale(value = "") {
@@ -230,11 +218,11 @@ function resolveState(state = {}) {
     saving: source.saving === true,
     savingAction: cleanText(source.savingAction, ""),
     error: cleanText(source.error, ""),
-    success: cleanText(first(source.success, source.view?.successMessage, ""), ""),
+    success: cleanText(firstNonEmpty(source.success, source.view?.successMessage, ""), ""),
     deactivated: source.deactivated === true,
     preferences: {
-      themeMode: normalizeThemeMode(first(preferences.themeMode, "system")),
-      locale: normalizeLocale(first(preferences.locale, "es")),
+      themeMode: normalizeThemeMode(firstNonEmpty(preferences.themeMode, "system")),
+      locale: normalizeLocale(firstNonEmpty(preferences.locale, "es")),
     },
   };
 }
@@ -274,22 +262,22 @@ function getName(detail = {}) {
 }
 
 function getEmail(detail = {}) {
-  return cleanText(first(detail.email, detail.emailLower, ""), "—");
+  return cleanText(firstNonEmpty(detail.email, detail.emailLower, ""), "—");
 }
 
 function getUsername(detail = {}) {
-  return cleanText(first(detail.username, detail.usernameLower, detail.slug, ""), "—");
+  return cleanText(firstNonEmpty(detail.username, detail.usernameLower, detail.slug, ""), "—");
 }
 
 function getRole(detail = {}, state = {}) {
-  const key = slugKey(first(detail.role, detail.rol, "user"));
+  const key = slugKey(firstNonEmpty(detail.role, detail.rol, "user"));
   const c = copyFor(state);
   return key === "admin" ? c.roleAdmin : c.roleUser;
 }
 
 function getStatus(detail = {}, state = {}) {
   const c = copyFor(state);
-  const key = slugKey(first(detail.status, detail.estado, detail.active === false ? "disabled" : "active"));
+  const key = slugKey(firstNonEmpty(detail.status, detail.estado, detail.active === false ? "disabled" : "active"));
   if (key === "pending") return { label: c.pending, tone: "warning" };
   if (["disabled", "inactive", "blocked", "suspended"].includes(key) || detail.active === false) {
     return { label: c.disabled, tone: "danger" };
@@ -333,7 +321,7 @@ function renderButton({ action = "", label = "", iconName = "", variant = "", di
 function renderAvatar(detail = {}, size = "hero") {
   const name = getName(detail);
   const presentation = resolveAvatarPresentation({ ...detail, name });
-  const src = detail.hasAvatar === false ? "" : safeAvatarUrl(first(detail.avatarUrl, detail.avatar, detail.picture, ""));
+  const src = detail.hasAvatar === false ? "" : safeAvatarUrl(firstNonEmpty(detail.avatarUrl, detail.avatar, detail.picture, ""));
   return `
     <span class="cuenta-avatar cuenta-avatar--${attr(size)}${src ? " has-image" : " is-fallback"}" role="img" aria-label="${attr(name)}"
       data-avatar-system="true" data-avatar-host="true" data-avatar-authority="global"
@@ -432,7 +420,7 @@ export function renderAvatarCard(detail = {}, state = {}) {
   const local = resolveState(state);
   const c = copyFor(local);
   const busy = local.saving && local.savingAction === "avatar";
-  const hasAvatar = Boolean(safeAvatarUrl(first(detail.avatarUrl, detail.avatar, detail.picture, "")));
+  const hasAvatar = Boolean(safeAvatarUrl(firstNonEmpty(detail.avatarUrl, detail.avatar, detail.picture, "")));
   return `
     <article class="cuenta-card cuenta-card--photo" data-cuenta-card="avatar">
       ${renderCardHead(c.photoTitle, c.photoText, "image")}

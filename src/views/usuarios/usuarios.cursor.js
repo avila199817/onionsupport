@@ -19,6 +19,7 @@ import {
 } from "./usuarios.api.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { clamp } from "../../core/numbers.js";
 
 export const USUARIOS_CURSOR_VERSION =
   "usuarios.cursor.v3.employee-directory-boundary";
@@ -54,10 +55,6 @@ const INTERNAL_EMPLOYEE_MARKERS = new Set([
 function number(value = 0, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(number(value, min), min), max);
 }
 
 function directoryKey(value = "") {
@@ -212,7 +209,7 @@ export function buildUsuariosCursorQuery({
     statusFilter === "all";
 
   const query = {
-    limit: clamp(limit, 1, USUARIOS_CURSOR_MAX_PAGE_SIZE),
+    limit: clamp(number(limit, 1), 1, USUARIOS_CURSOR_MAX_PAGE_SIZE),
     includeTotal: shouldIncludeTotal,
     sortBy: cleanText(sortBy, "updatedAt"),
     sortDir: cleanText(sortDir, "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC",
@@ -234,11 +231,7 @@ export async function fetchUsuariosCursorPage(options = {}) {
   const response = await Http.get(
     USUARIOS_CURSOR_ENDPOINT,
     {
-      timeout: clamp(
-        options.timeout ?? USUARIOS_CURSOR_TIMEOUT,
-        1_000,
-        120_000
-      ),
+      timeout: clamp(number(options.timeout ?? USUARIOS_CURSOR_TIMEOUT, 1_000), 1_000, 120_000),
       query: buildUsuariosCursorQuery(options),
       source: "views.usuarios.cursor.page",
       signal: options.signal,

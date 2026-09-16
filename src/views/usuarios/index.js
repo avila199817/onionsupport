@@ -74,7 +74,7 @@ import {
   fetchUsuariosCursorPage,
   mergeUsuariosCursorItems,
 } from "./usuarios.cursor.js";
-import { isObject, safeObject, isFunction } from "../../core/objects.js";
+import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 
@@ -163,16 +163,6 @@ let lastController = null;
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
-function first(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (isObject(value) && !Object.keys(value).length) continue;
-    return value;
-  }
-  return null;
-}
 function number(value = 0, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -185,7 +175,7 @@ function normalizeSessionSortOrder(value = USUARIOS_DEFAULT_SORT_ORDER) {
 }
 function safeError(error = null, fallback = "No se pudieron cargar los usuarios.") {
   return cleanText(
-    first(
+    firstNonEmpty(
       error?.message,
       error?.data?.message,
       error?.payload?.message,
@@ -223,7 +213,7 @@ function getCurrentUser(state = getAppState()) {
 }
 function getCurrentRole(context = {}, state = getAppState()) {
   const user = safeObject(getCurrentUser(state), {});
-  const raw = first(
+  const raw = firstNonEmpty(
     context.role,
     context.rol,
     context.user?.role,
@@ -273,7 +263,7 @@ function getBrowserPath() {
 }
 function routePathFromContext(context = {}) {
   return cleanText(
-    first(
+    firstNonEmpty(
       context.canonicalPath,
       context.routePath,
       context.route?.path,
@@ -398,7 +388,7 @@ async function safeAsyncCall(target = null, methods = [], args = [], fallback = 
   return fallback;
 }
 function getUsuarioId(item = {}) {
-  return cleanText(first(item.userId, item.usuarioId, item.id, item.uid, item.email, ""), "");
+  return cleanText(firstNonEmpty(item.userId, item.usuarioId, item.id, item.uid, item.email, ""), "");
 }
 function mergeUsuariosFreshPageFirst(previousItems = [], freshPage = []) {
   return mergeUsuariosCursorItems(previousItems, freshPage);
@@ -414,13 +404,13 @@ function csvEscape(value = "") {
 function buildUsuariosCsv(items = []) {
   const rows = safeArray(items).map((item) => [
     getUsuarioId(item),
-    first(item.fullName, item.displayName, item.name, item.nombre, item.username, ""),
-    first(item.email, item.emailLower, item.mail, ""),
-    first(item.phone, item.telefono, item.mobile, ""),
-    first(item.city, item.ciudad, item.direccion?.ciudad, item.address?.city, ""),
-    first(item.role, item.rol, "user"),
-    first(item.status, item.estado, item.state, item.active === false ? "inactive" : "active"),
-    first(item.lastLoginAt, ""),
+    firstNonEmpty(item.fullName, item.displayName, item.name, item.nombre, item.username, ""),
+    firstNonEmpty(item.email, item.emailLower, item.mail, ""),
+    firstNonEmpty(item.phone, item.telefono, item.mobile, ""),
+    firstNonEmpty(item.city, item.ciudad, item.direccion?.ciudad, item.address?.city, ""),
+    firstNonEmpty(item.role, item.rol, "user"),
+    firstNonEmpty(item.status, item.estado, item.state, item.active === false ? "inactive" : "active"),
+    firstNonEmpty(item.lastLoginAt, ""),
   ]);
   return [
     ["ID", "Nombre", "Email", "Teléfono", "Ciudad", "Rol", "Estado", "Inicio de sesión"],
@@ -621,7 +611,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       selectionEnd: active === searchInput ? searchInput.selectionEnd : null,
       userId: cleanText(row?.getAttribute?.("data-user-id"), ""),
       action: cleanText(
-        first(
+        firstNonEmpty(
           action?.getAttribute?.("data-usuarios-action"),
           action?.getAttribute?.("data-action"),
           ""
@@ -673,7 +663,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         );
         const matchesActionIdentity = (candidate) => {
           const actionName = cleanText(
-            first(
+            firstNonEmpty(
               candidate.getAttribute("data-usuarios-action"),
               candidate.getAttribute("data-action"),
               ""
@@ -1229,7 +1219,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     return task;
   }
   async function refreshUsuario(userId = "") {
-    const id = cleanText(first(userId, detailId, ""), "");
+    const id = cleanText(firstNonEmpty(userId, detailId, ""), "");
     if (!id || destroyed || !routeActive() || !detailModalOpen || detailId !== id) return null;
     // The shell can be used during its initial cache revalidation. Refresh
     // shares that request instead of fetching and painting the same user twice.
@@ -1260,7 +1250,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     }
   }
   async function copyUsuarioId(userId = "") {
-    const id = cleanText(first(userId, detailId, ""), "");
+    const id = cleanText(firstNonEmpty(userId, detailId, ""), "");
     if (!detailModalOpen || id !== detailId) return false;
     return UsuariosDetailModal.copyId();
   }
@@ -1320,13 +1310,13 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     }
   }
   function actionFrom(node = null) {
-    return normalizeAction(first(node?.getAttribute?.("data-usuarios-action"), node?.getAttribute?.("data-action"), ""));
+    return normalizeAction(firstNonEmpty(node?.getAttribute?.("data-usuarios-action"), node?.getAttribute?.("data-action"), ""));
   }
   async function handleAction(node = null, event = null) {
     const action = actionFrom(node);
     if (!action) return false;
     const userId = cleanText(
-      first(
+      firstNonEmpty(
         node?.getAttribute?.("data-user-id"),
         node?.closest?.("[data-user-id]")?.getAttribute?.("data-user-id"),
         ""

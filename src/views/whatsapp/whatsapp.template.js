@@ -17,23 +17,12 @@ import {
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 
 
 export const WHATSAPP_TEMPLATE_VERSION =
   "whatsapp.template.v2.correo-fullview";
-
-
-
-function first(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    return value;
-  }
-  return null;
-}
 
 
 
@@ -106,7 +95,7 @@ function conversationById(items = [], id = "") {
 function identityName(identity = {}) {
   const source = safeObject(identity);
   const contacto = safeObject(source.contacto);
-  return cleanText(first(
+  return cleanText(firstNonBlank(
     source.displayName,
     source.fullName,
     source.name,
@@ -123,7 +112,7 @@ function identityName(identity = {}) {
 function identityEmail(identity = {}) {
   const source = safeObject(identity);
   const contacto = safeObject(source.contacto);
-  return cleanText(first(
+  return cleanText(firstNonBlank(
     source.email,
     source.emailLower,
     source.mail,
@@ -136,7 +125,7 @@ function identityEmail(identity = {}) {
 function identityUserId(identity = {}, conversation = {}) {
   const source = safeObject(identity);
   const current = safeObject(conversation);
-  return cleanText(first(
+  return cleanText(firstNonBlank(
     source.userId,
     source.usuarioId,
     source.uid,
@@ -147,12 +136,12 @@ function identityUserId(identity = {}, conversation = {}) {
 
 function identityUsername(identity = {}) {
   const source = safeObject(identity);
-  return cleanText(first(source.username, source.userName, source.slug, ""), "");
+  return cleanText(firstNonBlank(source.username, source.userName, source.slug, ""), "");
 }
 
 function identityAvatar(identity = {}) {
   const source = safeObject(identity);
-  return sanitizeRuntimeImageUrl(first(
+  return sanitizeRuntimeImageUrl(firstNonBlank(
     source.avatarUrl,
     source.avatar,
     source.photoUrl,

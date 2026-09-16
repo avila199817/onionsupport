@@ -39,7 +39,7 @@ import {
 import { onDomainChanged } from "../../core/domain-events.js";
 import { captureUserProfileScope, isUserProfileScopeCurrent } from "../../features/user-profile/index.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 
 export const CUENTA_INDEX_VERSION =
   "cuenta.index.productivo.v8.canonical-surface";
@@ -75,23 +75,12 @@ function isDomNode(value) {
   return Boolean(value && value.nodeType === 1 && typeof value.querySelector === "function");
 }
 
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
-    return value;
-  }
-  return null;
-}
-
 function hasContent(value) {
   return isObject(value) && Object.keys(value).length > 0;
 }
 
 function safeError(error = null, fallback = "No se pudo procesar la cuenta.") {
-  return cleanText(first(
+  return cleanText(firstNonEmpty(
     error?.data?.message,
     error?.payload?.message,
     error?.response?.data?.message,
@@ -104,7 +93,7 @@ function safeError(error = null, fallback = "No se pudo procesar la cuenta.") {
 }
 
 function safeErrorCode(error = null) {
-  return cleanText(first(
+  return cleanText(firstNonEmpty(
     error?.code,
     error?.error,
     error?.data?.code,
@@ -223,7 +212,7 @@ function readPreferences(item = null) {
   }
   return {
     themeMode: normalizeTheme(readStorage(STORAGE_KEYS.themeMode, "system")),
-    locale: normalizeLocale(readStorage(STORAGE_KEYS.locale, first(item?.lang, item?.locale, "es"))),
+    locale: normalizeLocale(readStorage(STORAGE_KEYS.locale, firstNonEmpty(item?.lang, item?.locale, "es"))),
   };
 }
 
@@ -587,7 +576,7 @@ function createCuentaController(host, context = {}) {
     if (destroyed || saving || !ownsSession()) return false;
     const password = isObject(explicitPayload)
       ? String(explicitPayload.password ?? "")
-      : String(first(readField(host, "deactivatePassword"), readField(host, "password"), "") ?? "");
+      : String(firstNonEmpty(readField(host, "deactivatePassword"), readField(host, "password"), "") ?? "");
     if (!password.trim()) {
       setFeedback({ nextError: "Introduce tu contraseña para confirmar la desactivación.", nextErrorCode: "PASSWORD_REQUIRED" });
       return false;
@@ -641,7 +630,7 @@ function createCuentaController(host, context = {}) {
     if (destroyed) return;
     const node = event.target?.closest?.(ACTION_SELECTOR);
     if (!node || !host.contains(node) || node.disabled || node.getAttribute("aria-disabled") === "true") return;
-    const action = cleanText(first(node.dataset?.cuentaAction, node.dataset?.action, ""), "");
+    const action = cleanText(firstNonEmpty(node.dataset?.cuentaAction, node.dataset?.action, ""), "");
     if (!action) return;
     if ([CUENTA_ACTIONS.CHOOSE_AVATAR, CUENTA_ACTIONS.DELETE_AVATAR, CUENTA_ACTIONS.SET_THEME, CUENTA_ACTIONS.RETRY].includes(action)) {
       event.preventDefault();
@@ -656,8 +645,8 @@ function createCuentaController(host, context = {}) {
   function handleChange(event) {
     const target = event.target;
     if (!target || !host.contains(target)) return;
-    const field = cleanText(first(target.dataset?.cuentaField, target.dataset?.field, target.name, ""), "");
-    const action = cleanText(first(target.dataset?.cuentaAction, target.dataset?.action, ""), "");
+    const field = cleanText(firstNonEmpty(target.dataset?.cuentaField, target.dataset?.field, target.name, ""), "");
+    const action = cleanText(firstNonEmpty(target.dataset?.cuentaAction, target.dataset?.action, ""), "");
     if (field === "avatar" && target.type === "file" && target.files?.[0]) {
       void uploadAvatar(target.files[0]);
       return;
@@ -668,7 +657,7 @@ function createCuentaController(host, context = {}) {
   function handleSubmit(event) {
     const form = event.target?.closest?.("form");
     if (!form || !host.contains(form)) return;
-    const action = cleanText(first(form.dataset?.cuentaAction, form.dataset?.action, ""), "");
+    const action = cleanText(firstNonEmpty(form.dataset?.cuentaAction, form.dataset?.action, ""), "");
     if (![CUENTA_ACTIONS.CHANGE_PASSWORD, CUENTA_ACTIONS.DEACTIVATE].includes(action)) return;
     event.preventDefault();
     event.stopPropagation();
@@ -730,7 +719,7 @@ function createCuentaController(host, context = {}) {
   }
 
   function getInitialItem(options = {}) {
-    const contextItem = first(options.item, options.cuenta, localContext.item, localContext.cuenta, null);
+    const contextItem = firstNonEmpty(options.item, options.cuenta, localContext.item, localContext.cuenta, null);
     if (hasContent(contextItem)) {
       const normalized = normalizeCuentaDetail(contextItem, {});
       if (hasContent(normalized)) return normalized;

@@ -3,7 +3,7 @@ import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 import { createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../../features/entity-overlay/modal-host.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 /* =========================================================
@@ -103,42 +103,6 @@ function isBrowser() {
   No aplanar arrays:
   permissions/audit son colecciones reales.
 */
-function first(...values) {
-  for (const value of values) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
 function number(
   value = 0,
   fallback = 0
@@ -1074,7 +1038,7 @@ function normalizeAddress(
   return {
     calle:
       cleanText(
-        first(
+        firstNonEmpty(
           source.calle,
           source.street,
           source.line1,
@@ -1086,7 +1050,7 @@ function normalizeAddress(
 
     linea2:
       cleanText(
-        first(
+        firstNonEmpty(
           source.linea2,
           source.line2,
           source.addressLine2,
@@ -1097,7 +1061,7 @@ function normalizeAddress(
 
     cp:
       cleanText(
-        first(
+        firstNonEmpty(
           source.cp,
           source.postalCode,
           source.zip,
@@ -1108,7 +1072,7 @@ function normalizeAddress(
 
     ciudad:
       cleanText(
-        first(
+        firstNonEmpty(
           source.ciudad,
           source.city,
           ""
@@ -1118,7 +1082,7 @@ function normalizeAddress(
 
     provincia:
       cleanText(
-        first(
+        firstNonEmpty(
           source.provincia,
           source.province,
           source.region,
@@ -1130,7 +1094,7 @@ function normalizeAddress(
 
     pais:
       cleanText(
-        first(
+        firstNonEmpty(
           source.pais,
           source.country,
           ""
@@ -1220,7 +1184,7 @@ function resolveDetail(
     );
 
   return safeObject(
-    first(
+    firstNonEmpty(
       data.detail,
       data.cliente,
       data.client,
@@ -1272,7 +1236,7 @@ function hasRenderableDetail(
   return Boolean(
     getClienteId(current) ||
     cleanText(
-      first(
+      firstNonEmpty(
         current.nombreFiscal,
         current.razonSocial,
         current.displayName,
@@ -1307,7 +1271,7 @@ function getContact(
     getRaw(detail);
 
   return safeObject(
-    first(
+    firstNonEmpty(
       detail.contacto,
       detail.contact,
       raw.contacto,
@@ -1325,7 +1289,7 @@ function getClienteId(
     getRaw(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.clienteId,
       detail.id,
       detail.clientId,
@@ -1352,7 +1316,7 @@ function getCodigoCliente(
     getRaw(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.code,
       detail.codigo,
       raw.code,
@@ -1370,7 +1334,7 @@ function getUserId(
     getRaw(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.userId,
       detail.usuarioId,
 
@@ -1400,7 +1364,7 @@ function getDisplayName(
     getContact(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.nombreFiscal,
       detail.displayName,
       detail.fullName,
@@ -1432,7 +1396,7 @@ function getFiscalName(
     getRaw(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.nombreFiscal,
       raw.nombreFiscal,
       raw.razonSocial,
@@ -1451,7 +1415,7 @@ function getCommercialName(
     getRaw(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.nombreComercial,
       raw.nombreComercial,
       raw.commercialName,
@@ -1471,7 +1435,7 @@ function getContactName(
     getContact(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.nombreContacto,
       detail.contactoNombre,
 
@@ -1522,7 +1486,7 @@ function getBillingEmail(
 
   const billing =
     safeObject(
-      first(
+      firstNonEmpty(
         raw.billing,
         raw.facturacion,
         {}
@@ -1550,7 +1514,7 @@ function getPhone(
     getContact(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.phone,
       detail.telefono,
       detail.contactoPhone,
@@ -1577,7 +1541,7 @@ function getUsername(
     getContact(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.username,
       raw.username,
       raw.usernameLower,
@@ -1599,7 +1563,7 @@ function getNif(
     getRaw(detail);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.nif,
       detail.cif,
       detail.taxId,
@@ -1622,7 +1586,7 @@ function getType(
 
   const type =
     slugKey(
-      first(
+      firstNonEmpty(
         detail.tipo,
         detail.type,
         detail.clienteTipo,
@@ -1701,7 +1665,7 @@ function getStatus(
 
   const explicit =
     slugKey(
-      first(
+      firstNonEmpty(
         detail.status,
         detail.estado,
         detail.state,
@@ -1770,7 +1734,7 @@ function getStatus(
 
   const blocked =
     parseBoolean(
-      first(
+      firstNonEmpty(
         detail.blocked,
         raw.blocked,
         null
@@ -1780,7 +1744,7 @@ function getStatus(
 
   const disabled =
     parseBoolean(
-      first(
+      firstNonEmpty(
         detail.disabled,
         raw.disabled,
         null
@@ -1790,7 +1754,7 @@ function getStatus(
 
   const active =
     parseBoolean(
-      first(
+      firstNonEmpty(
         detail.active,
         detail.isActive,
         detail.enabled,
@@ -1894,7 +1858,7 @@ function getCreatedAt(
   const raw =
     getRaw(detail);
 
-  return first(
+  return firstNonEmpty(
     detail.createdAt,
 
     raw.createdAt,
@@ -1910,7 +1874,7 @@ function getUpdatedAt(
   const raw =
     getRaw(detail);
 
-  return first(
+  return firstNonEmpty(
     detail.lastActivityAt,
     detail.updatedAt,
 
@@ -1932,7 +1896,7 @@ function getMainAddress(
 
   const nested =
     safeObject(
-      first(
+      firstNonEmpty(
         detail.direccion,
         detail.address,
         raw.direccion,
@@ -1945,7 +1909,7 @@ function getMainAddress(
     ...nested,
 
     calle:
-      first(
+      firstNonEmpty(
         nested.calle,
         nested.street,
         raw.calle,
@@ -1953,7 +1917,7 @@ function getMainAddress(
       ),
 
     cp:
-      first(
+      firstNonEmpty(
         nested.cp,
         nested.postalCode,
         raw.cp,
@@ -1961,7 +1925,7 @@ function getMainAddress(
       ),
 
     ciudad:
-      first(
+      firstNonEmpty(
         nested.ciudad,
         nested.city,
         detail.ciudad,
@@ -1972,7 +1936,7 @@ function getMainAddress(
       ),
 
     provincia:
-      first(
+      firstNonEmpty(
         nested.provincia,
         nested.province,
         raw.provincia,
@@ -1980,7 +1944,7 @@ function getMainAddress(
       ),
 
     pais:
-      first(
+      firstNonEmpty(
         nested.pais,
         nested.country,
         raw.pais,
@@ -1997,7 +1961,7 @@ function getExplicitFiscalAddress(
 
   const address =
     safeObject(
-      first(
+      firstNonEmpty(
         detail.direccionFiscal,
         raw.direccionFiscal,
         {}
@@ -2017,7 +1981,7 @@ function getExplicitServiceAddress(
 
   const address =
     safeObject(
-      first(
+      firstNonEmpty(
         detail.direccionServicio,
         raw.direccionServicio,
         {}
@@ -2059,7 +2023,7 @@ function getCurrency(
 
   const billing =
     safeObject(
-      first(
+      firstNonEmpty(
         raw.billing,
         raw.facturacion,
         {}
@@ -2067,7 +2031,7 @@ function getCurrency(
     );
 
   return cleanText(
-    first(
+    firstNonEmpty(
       detail.currency,
       detail.moneda,
 
@@ -2092,7 +2056,7 @@ function getTicketsCount(
   return Math.max(
     0,
     number(
-      first(
+      firstNonEmpty(
         detail.ticketsCount,
         detail.incidenciasCount,
         detail.ticketCount,
@@ -2120,7 +2084,7 @@ function getInvoicesCount(
   return Math.max(
     0,
     number(
-      first(
+      firstNonEmpty(
         detail.invoicesCount,
         detail.facturasCount,
         detail.invoiceCount,
@@ -2146,7 +2110,7 @@ function getTotalAmount(
     getRaw(detail);
 
   return number(
-    first(
+    firstNonEmpty(
       detail.totalAmount,
       detail.totalImporte,
       detail.facturasTotal,
@@ -2205,7 +2169,7 @@ function getOptionalStats(
       ),
 
     lastTicketAt:
-      first(
+      firstNonEmpty(
         detail.lastTicketAt,
         raw.lastTicketAt,
         stats.lastTicketAt,
@@ -2213,7 +2177,7 @@ function getOptionalStats(
       ),
 
     lastInvoiceAt:
-      first(
+      firstNonEmpty(
         detail.lastInvoiceAt,
         raw.lastInvoiceAt,
         stats.lastInvoiceAt,
@@ -2252,7 +2216,7 @@ function getAuditEntries(
     getRaw(detail);
 
   const audit =
-    first(
+    firstNonEmpty(
       detail.audit,
       raw.audit,
       []
@@ -2270,7 +2234,7 @@ function getPermissions(
     getRaw(detail);
 
   return arrayFrom(
-    first(
+    firstNonEmpty(
       detail.permissions,
       raw.permissions,
       []
@@ -3013,7 +2977,7 @@ function renderBillingBlock(
 
   const currency =
     cleanText(
-      first(
+      firstNonEmpty(
         billing.currency,
         billing.moneda,
 
@@ -3162,7 +3126,7 @@ function renderBillingBlock(
 
   const payment =
     cleanText(
-      first(
+      firstNonEmpty(
         billing
           .formaPagoDefault,
 
@@ -3226,7 +3190,7 @@ function renderBillingBlock(
 
   const account =
     cleanText(
-      first(
+      firstNonEmpty(
         billing
           .cuentaPagoDefault,
 
@@ -3555,7 +3519,7 @@ function renderPrivacyBlock(
                     const text =
                       cleanText(
                         isObject(permission)
-                          ? first(
+                          ? firstNonEmpty(
                               permission.name,
                               permission.key,
                               permission.code,
@@ -3592,7 +3556,7 @@ function normalizeAuditEntry(
   return {
     id:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.id,
           raw.eventId,
           `audit_${index}`
@@ -3602,7 +3566,7 @@ function normalizeAuditEntry(
 
     event:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.event,
           raw.type,
           raw.action,
@@ -3613,7 +3577,7 @@ function normalizeAuditEntry(
 
     source:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.source,
           raw.by,
           raw.actor,
@@ -3623,7 +3587,7 @@ function normalizeAuditEntry(
       ),
 
     at:
-      first(
+      firstNonEmpty(
         raw.at,
         raw.createdAt,
         raw.date,
@@ -3633,7 +3597,7 @@ function normalizeAuditEntry(
 
     schemaVersion:
       cleanText(
-        first(
+        firstNonEmpty(
           raw.schemaVersion,
           raw.version,
           ""
@@ -4550,7 +4514,7 @@ async function onBridgeClick(
       ?.stopPropagation?.();
 
     const value =
-      first(
+      firstNonEmpty(
         target
           ?.dataset
           ?.copyValue,

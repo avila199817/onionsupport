@@ -4,6 +4,7 @@ import { escapeHtml } from "../../core/escape-html.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { clamp } from "../../core/numbers.js";
 /* =========================================================
    Onion Support - Servidor Template
    Archivo: /src/views/server/server.template.js
@@ -88,28 +89,6 @@ function safeNumber(
     ? parsed
     : fallback;
 }
-
-function clamp(
-  value = 0,
-  min = 0,
-  max = 100
-) {
-  const numeric =
-    safeNumber(
-      value,
-      min
-    );
-
-  return Math.min(
-    Math.max(
-      numeric,
-      min
-    ),
-    max
-  );
-}
-
-
 
 function attr(value = "") {
   return escapeHtml(

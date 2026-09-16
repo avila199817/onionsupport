@@ -34,7 +34,7 @@ import {
   fetchUsuariosRequest,
   normalizeUsuarioModel,
 } from "../usuarios/usuarios.api.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 
 export const CLIENTES_CREATE_CONTROLLER_VERSION =
   "clientes.create-controller.v1.single-owner";
@@ -49,18 +49,9 @@ function isBrowser() {
 }
 
 
-function first(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
-    return value;
-  }
-  return null;
-}
-
 function safeError(error = null, fallback = "No se pudo crear el cliente.") {
   return cleanText(
-    first(
+    firstNonBlank(
       error?.message,
       error?.data?.message,
       error?.payload?.message,
@@ -97,7 +88,7 @@ function normalizeSearchUser(value = {}) {
   let normalized = raw;
   try { normalized = normalizeUsuarioModel(raw); } catch { /* raw fallback */ }
 
-  const userId = cleanText(first(
+  const userId = cleanText(firstNonBlank(
     normalized.userId,
     normalized.id,
     normalized.uid,
@@ -107,7 +98,7 @@ function normalizeSearchUser(value = {}) {
     raw.usuarioId,
     ""
   ), "");
-  const clienteId = cleanText(first(
+  const clienteId = cleanText(firstNonBlank(
     normalized.clienteId,
     normalized.clientId,
     normalized.customerId,
@@ -116,7 +107,7 @@ function normalizeSearchUser(value = {}) {
     raw.customerId,
     ""
   ), "");
-  const displayName = cleanText(first(
+  const displayName = cleanText(firstNonBlank(
     normalized.displayName,
     normalized.fullName,
     normalized.name,
@@ -126,14 +117,14 @@ function normalizeSearchUser(value = {}) {
     userId,
     "Usuario"
   ), "Usuario");
-  const email = normalizeEmail(first(
+  const email = normalizeEmail(firstNonBlank(
     normalized.email,
     normalized.emailLower,
     raw.email,
     raw.emailLower,
     ""
   ));
-  const phone = cleanText(first(
+  const phone = cleanText(firstNonBlank(
     normalized.phone,
     normalized.telefono,
     normalized.mobile,
@@ -141,14 +132,14 @@ function normalizeSearchUser(value = {}) {
     raw.telefono,
     ""
   ), "");
-  const username = cleanText(first(
+  const username = cleanText(firstNonBlank(
     normalized.username,
     normalized.usernameLower,
     raw.username,
     raw.usernameLower,
     ""
   ), "").toLowerCase();
-  const avatarUrl = cleanText(first(
+  const avatarUrl = cleanText(firstNonBlank(
     normalized.avatarUrl,
     normalized.avatar,
     normalized.picture,
@@ -268,7 +259,7 @@ export function createClientesCreateController({
       destroyed,
       userSearchLoading: createModal.userSearch.loading,
       selectedUserId: cleanText(
-        first(
+        firstNonBlank(
           createModal.userSearch.selectedUser?.userId,
           createModal.form.userId,
           ""
@@ -555,7 +546,7 @@ export function createClientesCreateController({
       });
       if (seq !== createSeq || destroyed || !createModal.open) return false;
 
-      const createdId = cleanText(first(
+      const createdId = cleanText(firstNonBlank(
         created?.clienteId,
         created?.id,
         created?.data?.clienteId,

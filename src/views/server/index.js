@@ -53,8 +53,9 @@ import renderServerTemplate, {
   renderAccessDeniedState,
 } from "./server.template.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject, isFunction } from "../../core/objects.js";
+import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
+import { clamp } from "../../core/numbers.js";
 
 
 /* =========================================================
@@ -127,42 +128,6 @@ function isNode(value) {
 
 
 
-function first(...values) {
-  for (const value of values) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
 function number(
   value = 0,
   fallback = 0
@@ -183,27 +148,13 @@ function number(
     : fallback;
 }
 
-function clamp(
-  value = 0,
-  min = 0,
-  max = 1
-) {
-  return Math.min(
-    Math.max(
-      number(value, min),
-      min
-    ),
-    max
-  );
-}
-
 function safeError(
   error = null,
   fallback =
     "No se pudo consultar el estado del servidor."
 ) {
   return cleanText(
-    first(
+    firstNonEmpty(
       error?.data?.message,
       error?.payload?.message,
       error?.response?.data
@@ -322,7 +273,7 @@ function getCurrentRole(
     );
 
   return AppCore.normalizeRole(
-    first(
+    firstNonEmpty(
       context.role,
       context.rol,
       context.user?.role,
@@ -448,7 +399,7 @@ function routePathFromContext(
   context = {}
 ) {
   return cleanText(
-    first(
+    firstNonEmpty(
       context.canonicalPath,
       context.routePath,
       context.route?.path,
@@ -1616,7 +1567,7 @@ function createController(
 
     const action =
       cleanText(
-        first(
+        firstNonEmpty(
           element.getAttribute(
             "data-server-action"
           ),
@@ -1643,7 +1594,7 @@ function createController(
 
     const serviceId =
       cleanText(
-        first(
+        firstNonEmpty(
           element.getAttribute(
             "data-server-detail-id"
           ),

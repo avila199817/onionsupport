@@ -13,17 +13,8 @@ import { userNameFromIdentity } from "../../core/user-identity.js";
 import {
   resolveAvatarPresentation,
 } from "../../features/avatar-system/identity.js";
-import {
-  attr,
-  cleanText,
-  escapeHtml,
-  first,
-  isObject,
-  normalizeKey,
-  safeArray,
-  safeImageSrc,
-} from "./home.template.foundation.js";
-import { safeObject } from "../../core/objects.js";
+import { attr, cleanText, escapeHtml, isObject, normalizeKey, safeArray, safeImageSrc } from "./home.template.foundation.js";
+import { safeObject, firstNonEmpty } from "../../core/objects.js";
 
 export const HOME_ENTITY_RELATION_VERSION =
   "home.entity-relation.v2-global-avatar-authority";
@@ -126,7 +117,7 @@ function firstPathAcross(source = {}, paths = []) {
   const root = safeObject(source);
   const raw = safeObject(root.raw);
 
-  return first(
+  return firstNonEmpty(
     firstPath(root, paths),
     firstPath(raw, paths),
     null
@@ -239,7 +230,7 @@ function unwrapIncidencia(source = {}) {
   const root = safeObject(source);
 
   return safeObject(
-    first(
+    firstNonEmpty(
       root.ticket,
       root.incidencia,
       root.item,
@@ -255,7 +246,7 @@ function unwrapIncidencia(source = {}) {
 
 function incidenciaRelation(source = {}) {
   const root = unwrapIncidencia(source);
-  const declared = safeObject(first(root.relation, root.entityRelation, root.requester, {}));
+  const declared = safeObject(firstNonEmpty(root.relation, root.entityRelation, root.requester, {}));
   const requesterSnapshot = safeObject(root.requesterSnapshot);
   const cliente = safeObject(root.cliente);
   const receptor = safeObject(root.receptor);
@@ -264,10 +255,10 @@ function incidenciaRelation(source = {}) {
   const name = userNameFromIdentity(root) || userNameFromIdentity(declared) ||
     userNameFromIdentity(requesterSnapshot) || userNameFromIdentity(cliente) ||
     userNameFromIdentity(receptor) || userNameFromIdentity(user) ||
-    cleanText(first(root.requesterName, root.clientName, root.clienteNombre), "");
+    cleanText(firstNonEmpty(root.requesterName, root.clientName, root.clienteNombre), "");
 
   const email = normalizedEmail(
-    first(
+    firstNonEmpty(
       declared.email,
       declared.emailLower,
       root.email,
@@ -304,8 +295,8 @@ function incidenciaRelation(source = {}) {
     kind: "solicitante",
     name,
     email,
-    userId: first(declared.userId, root.userId, root.usuarioId, root.ownerUserId, requesterSnapshot.userId, cliente.userId, receptor.userId, user.userId, user.id, ""),
-    username: first(declared.username, root.username, root.requesterUsername, requesterSnapshot.username, cliente.username, receptor.username, user.username, ""),
+    userId: firstNonEmpty(declared.userId, root.userId, root.usuarioId, root.ownerUserId, requesterSnapshot.userId, cliente.userId, receptor.userId, user.userId, user.id, ""),
+    username: firstNonEmpty(declared.username, root.username, root.requesterUsername, requesterSnapshot.username, cliente.username, receptor.username, user.username, ""),
     avatarUrl,
   });
 }
@@ -313,10 +304,10 @@ function incidenciaRelation(source = {}) {
 function facturaRelation(source = {}) {
   const root = safeObject(source);
   const raw = safeObject(root.raw);
-  const declared = safeObject(first(root.relation, root.entityRelation, root.customer, {}));
+  const declared = safeObject(firstNonEmpty(root.relation, root.entityRelation, root.customer, {}));
 
   const company = cleanText(
-    first(
+    firstNonEmpty(
       declared.companyName,
       declared.razonSocial,
       declared.company,
@@ -327,7 +318,7 @@ function facturaRelation(source = {}) {
   );
 
   const contact = cleanText(
-    first(
+    firstNonEmpty(
       declared.displayName,
       declared.fullName,
       declared.contactName,
@@ -340,7 +331,7 @@ function facturaRelation(source = {}) {
   );
 
   const email = normalizedEmail(
-    first(
+    firstNonEmpty(
       declared.email,
       declared.emailLower,
       firstPathAcross(root, INVOICE_EMAIL_PATHS),
@@ -362,20 +353,20 @@ function facturaRelation(source = {}) {
         ? contact
         : "",
     email,
-    userId: first(declared.userId, firstPathAcross(root, ["userId", "usuarioId", "cliente.userId", "clienteSnapshot.userId"]), ""),
-    username: first(declared.username, firstPathAcross(root, ["username", "cliente.username", "clienteSnapshot.username"]), ""),
+    userId: firstNonEmpty(declared.userId, firstPathAcross(root, ["userId", "usuarioId", "cliente.userId", "clienteSnapshot.userId"]), ""),
+    username: firstNonEmpty(declared.username, firstPathAcross(root, ["username", "cliente.username", "clienteSnapshot.username"]), ""),
     avatarUrl,
   });
 }
 
 function genericRelation(source = {}, kind = "relacion") {
   const root = safeObject(source);
-  const declared = safeObject(first(root.relation, root.entityRelation, {}));
+  const declared = safeObject(firstNonEmpty(root.relation, root.entityRelation, {}));
 
   const name = kind === "usuario"
     ? userNameFromIdentity(root) || userNameFromIdentity(declared)
     : cleanText(
-    first(
+    firstNonEmpty(
       declared.displayName,
       declared.fullName,
       declared.name,
@@ -391,7 +382,7 @@ function genericRelation(source = {}, kind = "relacion") {
   );
 
   const email = normalizedEmail(
-    first(
+    firstNonEmpty(
       declared.email,
       declared.emailLower,
       root.email,
@@ -418,8 +409,8 @@ function genericRelation(source = {}, kind = "relacion") {
     kind,
     name,
     email,
-    userId: first(declared.userId, root.userId, root.usuarioId, kind === "usuario" ? root.id : "", ""),
-    username: first(declared.username, root.username, ""),
+    userId: firstNonEmpty(declared.userId, root.userId, root.usuarioId, kind === "usuario" ? root.id : "", ""),
+    username: firstNonEmpty(declared.username, root.username, ""),
     avatarUrl,
   });
 }

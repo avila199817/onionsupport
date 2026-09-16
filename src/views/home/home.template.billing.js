@@ -4,20 +4,7 @@ import { getFacturaEntityId } from "../../core/entity-identity.js";
    Shared by /src/views/home/home.template.js
 ========================================================= */
 
-import {
-  attr,
-  cleanText,
-  escapeHtml,
-  first,
-  formatDate,
-  formatMoney,
-  hasAmount,
-  icon,
-  invoiceDisplayId,
-  isGenericInvoiceTitle,
-  isObject,
-  safeRoute,
-} from "./home.template.foundation.js";
+import { attr, cleanText, escapeHtml, formatDate, formatMoney, hasAmount, icon, invoiceDisplayId, isGenericInvoiceTitle, isObject, safeRoute } from "./home.template.foundation.js";
 import {
   actionButton,
   emptyState,
@@ -36,6 +23,7 @@ import {
 } from "./home.template.relation.js";
 
 import { billingOverview } from "./home.template.billing-overview.js";
+import { firstNonEmpty } from "../../core/objects.js";
 
 function invoiceItem(invoice = {}) {
   const source = isObject(invoice) ? invoice : {};
@@ -44,7 +32,7 @@ function invoiceItem(invoice = {}) {
   const interactive = Boolean(id);
 
   const concept = cleanText(
-    first(source.concepto, source.title, source.titulo, source.name, source.nombre, ""),
+    firstNonEmpty(source.concepto, source.title, source.titulo, source.name, source.nombre, ""),
     ""
   );
 
@@ -52,7 +40,7 @@ function invoiceItem(invoice = {}) {
   const label = usefulConcept ? concept : "Factura";
 
   const rawStatus = cleanText(
-    first(
+    firstNonEmpty(
       source.paymentStatus,
       source.estadoPago,
       source.status,
@@ -62,7 +50,7 @@ function invoiceItem(invoice = {}) {
     "issued"
   );
 
-  const amount = first(
+  const amount = firstNonEmpty(
     source.total,
     source.totalFactura,
     source.invoiceAmount,
@@ -72,8 +60,8 @@ function invoiceItem(invoice = {}) {
     null
   );
 
-  const currency = cleanText(first(source.currency, source.moneda, "EUR"), "EUR");
-  const date = first(
+  const currency = cleanText(firstNonEmpty(source.currency, source.moneda, "EUR"), "EUR");
+  const date = firstNonEmpty(
     source.updatedAt,
     source.issuedAt,
     source.fechaEmision,

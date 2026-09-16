@@ -37,7 +37,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { renderModalCloseButton, renderModalShell, renderModalState } from "../../features/entity-overlay/modal-host.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
@@ -87,42 +87,6 @@ function cleanMultiline(
    NO aplanar arrays.
    lineas/impuestos/relations son valores completos.
 */
-function first(...values) {
-  for (const value of values) {
-    if (
-      value === undefined ||
-      value === null
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
 function number(
   value = 0,
   fallback = 0
@@ -1872,7 +1836,7 @@ function pickTicketIdFromArray(
     }
 
     const candidate =
-      first(
+      firstNonEmpty(
         item.ticketId,
         item.incidenciaId,
         item.id,
@@ -2025,7 +1989,7 @@ function getFacturaIncidenciaId(
 
   for (const source of sources) {
     const arrayCandidate =
-      first(
+      firstNonEmpty(
         pickTicketIdFromArray(
           source.ticketIds
         ),
@@ -2187,7 +2151,7 @@ function getLineaConcepto(
   linea = {}
 ) {
   return cleanText(
-    first(
+    firstNonEmpty(
       linea?.concepto,
       linea?.descripcionCorta,
       linea?.descriptionShort,
@@ -2203,7 +2167,7 @@ function getLineaDescripcion(
   linea = {}
 ) {
   return cleanMultiline(
-    first(
+    firstNonEmpty(
       linea?.descripcion,
       linea?.detalle,
       linea?.description,
@@ -2218,7 +2182,7 @@ function getLineaCantidad(
   linea = {}
 ) {
   return number(
-    first(
+    firstNonEmpty(
       linea?.cantidad,
       linea?.qty,
       linea?.quantity,
@@ -2232,7 +2196,7 @@ function getLineaUnitario(
   linea = {}
 ) {
   return number(
-    first(
+    firstNonEmpty(
       linea?.precioUnitario,
       linea?.importeUnitario,
       linea?.unitPrice,
@@ -2247,7 +2211,7 @@ function getLineaSubtotal(
   linea = {}
 ) {
   const explicit =
-    first(
+    firstNonEmpty(
       linea?.subtotal,
       linea?.base,
       linea?.importeBase,
@@ -2276,7 +2240,7 @@ function getLineaIvaPct(
   linea = {}
 ) {
   return number(
-    first(
+    firstNonEmpty(
       linea?.ivaPorcentaje,
       linea?.porcentajeIva,
       linea?.ivaRate,
@@ -2290,7 +2254,7 @@ function getLineaIrpfPct(
   linea = {}
 ) {
   return number(
-    first(
+    firstNonEmpty(
       linea?.irpfPorcentaje,
       linea?.porcentajeIrpf,
       linea?.irpfRate,
@@ -2333,7 +2297,7 @@ function normalizeTaxLine(
 
   const tipo =
     cleanText(
-      first(
+      firstNonEmpty(
         impuesto.tipo,
         impuesto.taxType,
         impuesto.nombre,
@@ -2351,7 +2315,7 @@ function normalizeTaxLine(
 
     porcentaje:
       number(
-        first(
+        firstNonEmpty(
           impuesto.porcentaje,
           impuesto.percent,
           impuesto.rate,
@@ -2362,7 +2326,7 @@ function normalizeTaxLine(
 
     base:
       number(
-        first(
+        firstNonEmpty(
           impuesto.base,
           impuesto.taxBase,
           impuesto.baseAmount
@@ -2372,7 +2336,7 @@ function normalizeTaxLine(
 
     importe:
       number(
-        first(
+        firstNonEmpty(
           impuesto.importe,
           impuesto.amount,
           impuesto.total,
@@ -2383,7 +2347,7 @@ function normalizeTaxLine(
 
     sign:
       cleanText(
-        first(
+        firstNonEmpty(
           impuesto.sign,
           impuesto.tipoOperacion
         ),
@@ -2428,7 +2392,7 @@ function getObjectTax(
 
   const importe =
     number(
-      first(
+      firstNonEmpty(
         obj.importe,
         obj.amount,
         obj.total,
@@ -2439,7 +2403,7 @@ function getObjectTax(
 
   const porcentaje =
     number(
-      first(
+      firstNonEmpty(
         obj.porcentaje,
         obj.percent,
         obj.rate,
@@ -2450,7 +2414,7 @@ function getObjectTax(
 
   const base =
     number(
-      first(
+      firstNonEmpty(
         obj.base,
         obj.taxBase,
         obj.baseAmount
@@ -3172,7 +3136,7 @@ function renderAvatar(
 ) {
   const name =
     cleanText(
-      first(
+      firstNonEmpty(
         getClienteEmpresa(factura),
         getClienteNombre(factura)
       ),

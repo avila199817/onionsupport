@@ -5,22 +5,7 @@ import { getIncidenciaEntityId, getFacturaEntityId } from "../../core/entity-ide
    Shared by /src/views/home/home.template.js
 ========================================================= */
 
-import {
-  attr,
-  cleanText,
-  escapeHtml,
-  first,
-  formatDate,
-  icon,
-  invoiceDisplayId,
-  isGenericInvoiceTitle,
-  isObject,
-  normalizeKey,
-  safeArray,
-  safeDisplayId,
-  ticketDisplayId,
-  visibleText,
-} from "./home.template.foundation.js";
+import { attr, cleanText, escapeHtml, formatDate, icon, invoiceDisplayId, isGenericInvoiceTitle, isObject, normalizeKey, safeArray, safeDisplayId, ticketDisplayId, visibleText } from "./home.template.foundation.js";
 import {
   emptyState,
   entityIdBadge,
@@ -33,6 +18,7 @@ import {
   renderHomeEntityRelation,
   resolveHomeEntityRelation,
 } from "./home.template.relation.js";
+import { firstNonEmpty } from "../../core/objects.js";
 
 function activityIcon(type = "") {
   const key = normalizeKey(type);
@@ -58,12 +44,12 @@ function activityEntityId(type = "", source = {}) {
   const entityType = overlayEntityType(type);
   const raw = isObject(source) ? source : {};
 
-  if (entityType === "factura") return cleanText(first(raw.entityId, getFacturaEntityId(raw)), "");
-  if (entityType === "incidencia") return cleanText(first(raw.entityId, getIncidenciaEntityId(raw)), "");
+  if (entityType === "factura") return cleanText(firstNonEmpty(raw.entityId, getFacturaEntityId(raw)), "");
+  if (entityType === "incidencia") return cleanText(firstNonEmpty(raw.entityId, getIncidenciaEntityId(raw)), "");
 
   if (entityType === "cliente") {
     return safeDisplayId(
-      first(
+      firstNonEmpty(
         raw.entityId,
         raw.clienteId,
         raw.clientId,
@@ -77,7 +63,7 @@ function activityEntityId(type = "", source = {}) {
 
   if (entityType === "usuario") {
     return safeDisplayId(
-      first(
+      firstNonEmpty(
         raw.entityId,
         raw.usuarioId,
         raw.userId,
@@ -214,7 +200,7 @@ function relationSourceForActivity(
 
 function activityItem(item = {}, vm = {}) {
   const source = isObject(item) ? item : {};
-  const type = normalizeKey(first(source.type, source.tipo, "activity"));
+  const type = normalizeKey(firstNonEmpty(source.type, source.tipo, "activity"));
   const entityType = overlayEntityType(type);
   const isInvoice = entityType === "factura";
   const entityId = activityEntityId(entityType, source);
@@ -228,7 +214,7 @@ function activityItem(item = {}, vm = {}) {
   );
 
   const rawTitle = visibleText(
-    first(
+    firstNonEmpty(
       source.title,
       source.titulo,
       source.subject,
@@ -241,7 +227,7 @@ function activityItem(item = {}, vm = {}) {
 
   const canonicalInvoiceTitle = isInvoice
     ? visibleText(
-        first(
+        firstNonEmpty(
           relationSource.concepto,
           relationSource.concept,
           relationSource.description,
@@ -266,8 +252,8 @@ function activityItem(item = {}, vm = {}) {
       ? canonicalInvoiceTitle || "Factura"
       : rawTitle;
 
-  const rawStatus = cleanText(first(source.status, source.estado, source.text, ""), "");
-  const date = first(
+  const rawStatus = cleanText(firstNonEmpty(source.status, source.estado, source.text, ""), "");
+  const date = firstNonEmpty(
     source.date,
     source.fecha,
     source.updatedAt,
@@ -276,7 +262,7 @@ function activityItem(item = {}, vm = {}) {
     ""
   );
 
-  const displayId = cleanText(first(source.displayId,
+  const displayId = cleanText(firstNonEmpty(source.displayId,
     isInvoice ? invoiceDisplayId(relationSource) : ticketDisplayId(relationSource), entityId), "");
   const relation = resolveHomeEntityRelation(entityType, relationSource);
   const relationHtml = renderHomeEntityRelation(relation);

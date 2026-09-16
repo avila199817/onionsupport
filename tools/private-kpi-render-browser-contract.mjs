@@ -20,13 +20,14 @@ if (!facturasOnly) {
     assert.ok(to > from, `Controller end boundary: ${end}`);
     return source.slice(from, to);
   };
-  // cleanText is no longer a controller helper: the closure binds the same
-  // canonical import the controller does.
+  // cleanText and firstNonEmpty are no longer controller helpers: the closure
+  // binds the same canonical imports the controller does.
   assert.match(source, /^import \{ cleanText \} from "\.\.\/\.\.\/core\/presentation-text\.js";$/m, "Controller imports the canonical cleanText");
+  assert.match(source, /^import \{[^}]*\bfirstNonEmpty\b[^}]*\} from "\.\.\/\.\.\/core\/objects\.js";$/m, "Controller imports the canonical firstNonEmpty");
   const helpers = [
     'import { cleanText } from "/src/core/presentation-text.js";',
+    'import { firstNonEmpty } from "/src/core/objects.js";',
     extract("function isBrowser()", "function isDomNode("),
-    extract("function first(...values)", "function redact("),
   ].join("\n");
   const patch = extract("  function activeElementInside(", "  function syncCreateAlerts(");
   assert.match(patch, /function patchListDom\(/);

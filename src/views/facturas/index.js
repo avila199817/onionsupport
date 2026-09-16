@@ -64,9 +64,10 @@ import {
   FACTURA_MODAL_ACTIONS,
   renderFacturasDetailModal,
 } from "./facturas.template.modal.js";
-import { isObject, safeObject, isFunction } from "../../core/objects.js";
+import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { clamp } from "../../core/numbers.js";
 
 export const FACTURAS_INDEX_VERSION =
   "facturas.index.productivo.v22.stable-create-client-relations";
@@ -143,27 +144,11 @@ function multilineValue(value = "") {
 }
 
 /* No aplanar arrays de dominio. */
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
-    return value;
-  }
-
-  return null;
-}
-
 function number(value = 0, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function clamp(value = 0, min = 0, max = 1) {
-  return Math.min(Math.max(value, min), max);
 }
 
 function parseBoolean(value, fallback = false) {
@@ -368,7 +353,7 @@ function getCurrentRole() {
 
   return (
     AppCore.normalizeRole(
-      first(
+      firstNonEmpty(
         AppCore.getCurrentRole?.(),
         state.role,
         state.rol,
@@ -407,7 +392,7 @@ function getFacturaLabel(item = {}) {
   const raw = safeObject(item);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       raw.numeroFacturaLegal,
       raw.numeroFactura,
       raw.number,
@@ -424,7 +409,7 @@ function getFacturaEmail(item = {}) {
   const raw = safeObject(item);
 
   return cleanText(
-    first(
+    firstNonEmpty(
       raw.sentTo,
       raw.enviadoA,
       raw.recipientEmail,
@@ -445,7 +430,7 @@ function isFacturaSent(item = {}) {
   const raw = safeObject(item);
 
   if (
-    first(
+    firstNonEmpty(
       raw.sentAt,
       raw.fechaEnvio,
       raw.emailSentAt,
@@ -457,7 +442,7 @@ function isFacturaSent(item = {}) {
     return true;
   }
 
-  const explicit = first(
+  const explicit = firstNonEmpty(
     raw.sent,
     raw.isSent,
     raw.emailSent,
@@ -471,7 +456,7 @@ function isFacturaSent(item = {}) {
   }
 
   const status = slugKey(
-    first(raw.estado, raw.status, raw.invoiceStatus, "")
+    firstNonEmpty(raw.estado, raw.status, raw.invoiceStatus, "")
   );
 
   return ["enviada", "enviado", "sent"].includes(status);
@@ -481,7 +466,7 @@ function isFacturaPaidState(item = {}) {
   const raw = safeObject(item);
 
   const status = slugKey(
-    first(
+    firstNonEmpty(
       raw.paymentStatus,
       raw.estadoPago,
       raw.payment?.status,
@@ -725,7 +710,7 @@ function normalizeClientCandidate(raw = {}) {
     name: item.nombreFiscal,
     nombre: item.nombreFiscal,
     displayName: item.nombreFiscal,
-    subtitle: cleanText(first(item.email, item.telefono, item.nif, item.clienteId), ""),
+    subtitle: cleanText(firstNonEmpty(item.email, item.telefono, item.nif, item.clienteId), ""),
   };
 }
 
@@ -733,14 +718,14 @@ function normalizeTicketCandidate(raw = {}) {
   const item = safeObject(raw);
 
   const id = cleanText(
-    first(item.ticketId, item.incidenciaId, item.id, item.code, item.numero),
+    firstNonEmpty(item.ticketId, item.incidenciaId, item.id, item.code, item.numero),
     ""
   );
 
   if (!id) return null;
 
   const subject = cleanText(
-    first(
+    firstNonEmpty(
       item.subject,
       item.asunto,
       item.title,
@@ -752,12 +737,12 @@ function normalizeTicketCandidate(raw = {}) {
   );
 
   const status = cleanText(
-    first(item.status, item.estado, item.state),
+    firstNonEmpty(item.status, item.estado, item.state),
     ""
   );
 
   const category = cleanText(
-    first(item.category, item.categoria, item.tipo),
+    firstNonEmpty(item.category, item.categoria, item.tipo),
     ""
   );
 
@@ -770,13 +755,13 @@ function normalizeTicketCandidate(raw = {}) {
     asunto: subject,
     title: subject,
     clienteId: cleanText(
-      first(item.clienteId, item.clientId, item.customerId,
+      firstNonEmpty(item.clienteId, item.clientId, item.customerId,
         item.cliente?.clienteId, item.cliente?.id, item.client?.clienteId,
         item.client?.id, item.clienteRef?.clienteId, item.clienteRef?.id),
       ""
     ),
     userId: cleanText(
-      first(item.userId, item.usuarioId, item.userRef?.userId,
+      firstNonEmpty(item.userId, item.usuarioId, item.userRef?.userId,
         item.userRef?.id, item.user?.userId, item.user?.id),
       ""
     ),
@@ -827,7 +812,7 @@ function selectedClienteIds(clients = []) {
     ...new Set(
       arrayFrom(clients)
         .map((item) =>
-          cleanText(first(item.clienteId, item.id), "")
+          cleanText(firstNonEmpty(item.clienteId, item.id), "")
         )
         .filter(Boolean)
     ),
@@ -1123,7 +1108,7 @@ function getFacturaPdfFilename(
   const data = safeObject(payload, {});
 
   const filename = cleanText(
-    first(
+    firstNonEmpty(
       data.filename,
       data.fileName,
       data.name,
@@ -1182,7 +1167,7 @@ function pickFacturaPdfUrl(payload = null, mode = "view") {
 
   return safeDocumentUrl(
     cleanText(
-      first(
+      firstNonEmpty(
         download ? data.downloadUrl : data.viewUrl,
         data.signedUrl,
         data.sasUrl,
@@ -1612,7 +1597,7 @@ function exportCsv(rows = []) {
     [
       getFacturaLabel(item),
       cleanText(
-        first(
+        firstNonEmpty(
           item.clientName,
           item.clienteNombre,
           item.clienteName,
@@ -1622,7 +1607,7 @@ function exportCsv(rows = []) {
         ""
       ),
       cleanText(
-        first(
+        firstNonEmpty(
           item.clienteEmail,
           item.emailCliente,
           item.clientEmail,
@@ -1631,10 +1616,10 @@ function exportCsv(rows = []) {
         ),
         ""
       ),
-      cleanText(first(item.paymentStatus, item.estadoPago), ""),
-      cleanText(first(item.total, item.amount, item.importe), ""),
+      cleanText(firstNonEmpty(item.paymentStatus, item.estadoPago), ""),
+      cleanText(firstNonEmpty(item.total, item.amount, item.importe), ""),
       cleanText(
-        first(
+        firstNonEmpty(
           item.ticketId,
           item.incidenciaId,
           item.relatedTicketId
@@ -1642,7 +1627,7 @@ function exportCsv(rows = []) {
         ""
       ),
       cleanText(
-        first(
+        firstNonEmpty(
           item.issuedAt,
           item.fechaFactura,
           item.fechaEmision,
@@ -1700,7 +1685,7 @@ function ticketIndexFromNode(node = null) {
 
 function facturaIdFromNode(node = null) {
   return cleanText(
-    first(
+    firstNonEmpty(
       node?.dataset?.facturaId,
       node?.dataset?.invoiceId,
       node?.dataset?.id,
@@ -2533,7 +2518,7 @@ function createFacturasController(host = null, context = {}) {
     const previousTotalKnown = totalKnown;
     total = Math.max(
       number(
-        first(
+        firstNonEmpty(
           response.total,
           response.remoteCount,
           response.totalMatched,
@@ -2554,7 +2539,7 @@ function createFacturasController(host = null, context = {}) {
     page = Math.max(
       DEFAULT_PAGE,
       number(
-        first(
+        firstNonEmpty(
           response.page,
           response.paging?.page,
           requestedPage
@@ -2563,7 +2548,7 @@ function createFacturasController(host = null, context = {}) {
       )
     );
 
-    const responseHasMore = first(
+    const responseHasMore = firstNonEmpty(
       response.hasMore,
       response.more,
       response.canLoadMore,
@@ -2583,7 +2568,7 @@ function createFacturasController(host = null, context = {}) {
       ? Math.max(
           page + 1,
           number(
-            first(
+            firstNonEmpty(
               response.nextPage,
               response.paging?.nextPage,
               page + 1
@@ -3459,7 +3444,7 @@ function createFacturasController(host = null, context = {}) {
       }
 
       const rows = arrayFrom(
-        first(
+        firstNonEmpty(
           response?.items,
           response?.facturas,
           response?.data,
@@ -3469,7 +3454,7 @@ function createFacturasController(host = null, context = {}) {
       );
       const normalizedRows = mergeFacturas([], rows, { append: false });
       const responseAdvertisesMore = parseBoolean(
-        first(
+        firstNonEmpty(
           response?.hasMore,
           response?.more,
           response?.canLoadMore,
@@ -3511,7 +3496,7 @@ function createFacturasController(host = null, context = {}) {
       const responseTotal = Math.max(
         0,
         number(
-          first(
+          firstNonEmpty(
             response?.total,
             response?.remoteCount,
             response?.totalMatched,
@@ -4023,23 +4008,23 @@ function createFacturasController(host = null, context = {}) {
       ivaRate: taxProfile.ivaRate,
       irpfRate: taxProfile.irpfRate,
       clienteId: cleanText(
-        first(primary?.clienteId, primary?.id, ""),
+        firstNonEmpty(primary?.clienteId, primary?.id, ""),
         ""
       ),
       clienteUserId: cleanText(
-        first(primary?.userId, ""),
+        firstNonEmpty(primary?.userId, ""),
         ""
       ),
       clienteNombre: cleanText(
-        first(primary?.name, primary?.displayName, ""),
+        firstNonEmpty(primary?.name, primary?.displayName, ""),
         ""
       ),
       clienteEmail: cleanText(
-        first(primary?.email, ""),
+        firstNonEmpty(primary?.email, ""),
         ""
       ),
       clienteAvatar: cleanText(
-        first(primary?.avatarUrl, primary?.avatar, ""),
+        firstNonEmpty(primary?.avatarUrl, primary?.avatar, ""),
         ""
       ),
     };
@@ -4049,7 +4034,7 @@ function createFacturasController(host = null, context = {}) {
     const primary = createModal.selectedTickets[0] || null;
 
     const id = cleanText(
-      first(
+      firstNonEmpty(
         primary?.ticketId,
         primary?.incidenciaId,
         primary?.id,
@@ -4063,7 +4048,7 @@ function createFacturasController(host = null, context = {}) {
       ticketId: id,
       incidenciaId: id,
       incidenciaSubject: cleanText(
-        first(
+        firstNonEmpty(
           primary?.subject,
           primary?.asunto,
           primary?.title,
@@ -4650,7 +4635,7 @@ function createFacturasController(host = null, context = {}) {
 
       return {
         id: cleanText(
-          first(
+          firstNonEmpty(
             arrayFrom(createModal.form.lineas)[index]?.id,
             `linea-${index + 1}`
           ),
@@ -4689,7 +4674,7 @@ function createFacturasController(host = null, context = {}) {
         createModal.selectedTickets
           .map((ticket) =>
             cleanText(
-              first(
+              firstNonEmpty(
                 ticket.ticketId,
                 ticket.incidenciaId,
                 ticket.id
@@ -4702,7 +4687,7 @@ function createFacturasController(host = null, context = {}) {
     ];
 
     const clienteId = cleanText(
-      first(
+      firstNonEmpty(
         primaryCliente?.clienteId,
         primaryCliente?.id,
         form.clienteId
@@ -4711,7 +4696,7 @@ function createFacturasController(host = null, context = {}) {
     );
 
     const userId = cleanText(
-      first(
+      firstNonEmpty(
         primaryCliente?.userId,
         form.clienteUserId
       ),
@@ -4719,7 +4704,7 @@ function createFacturasController(host = null, context = {}) {
     );
 
     const clienteNombre = cleanText(
-      first(
+      firstNonEmpty(
         primaryCliente?.name,
         primaryCliente?.displayName,
         form.clienteNombre
@@ -4728,7 +4713,7 @@ function createFacturasController(host = null, context = {}) {
     );
 
     const clienteEmail = cleanText(
-      first(
+      firstNonEmpty(
         primaryCliente?.email,
         form.clienteEmail
       ),
@@ -4736,7 +4721,7 @@ function createFacturasController(host = null, context = {}) {
     ).toLowerCase();
 
     const clienteAvatar = cleanText(
-      first(
+      firstNonEmpty(
         primaryCliente?.avatarUrl,
         primaryCliente?.avatar,
         form.clienteAvatar
@@ -4745,7 +4730,7 @@ function createFacturasController(host = null, context = {}) {
     );
 
     const ticketId = cleanText(
-      first(
+      firstNonEmpty(
         primaryTicket?.ticketId,
         primaryTicket?.incidenciaId,
         primaryTicket?.id,
@@ -4756,7 +4741,7 @@ function createFacturasController(host = null, context = {}) {
     );
 
     const incidenciaSubject = cleanText(
-      first(
+      firstNonEmpty(
         primaryTicket?.subject,
         primaryTicket?.asunto,
         form.incidenciaSubject,
@@ -4821,13 +4806,13 @@ function createFacturasController(host = null, context = {}) {
 
         return {
           id: cleanText(
-            first(linea.id, `linea-${index + 1}`),
+            firstNonEmpty(linea.id, `linea-${index + 1}`),
             `linea-${index + 1}`
           ),
           lineNumber: index + 1,
           concepto: cleanText(linea.concepto, ""),
           descripcion: cleanText(
-            first(linea.descripcion, linea.concepto),
+            firstNonEmpty(linea.descripcion, linea.concepto),
             ""
           ),
           cantidad: number(linea.cantidad, 0),
@@ -5477,7 +5462,7 @@ function createFacturasController(host = null, context = {}) {
 
     if (isBrowser()) {
       const amount = number(
-        first(
+        firstNonEmpty(
           before.total,
           before.totalFactura,
           before.amount,
@@ -5488,7 +5473,7 @@ function createFacturasController(host = null, context = {}) {
       );
 
       const currency = cleanText(
-        first(before.currency, before.moneda, "EUR"),
+        firstNonEmpty(before.currency, before.moneda, "EUR"),
         "EUR"
       ).toUpperCase();
 

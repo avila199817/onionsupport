@@ -40,9 +40,11 @@
 
 import Http from "../../core/http.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject, safeObject, isFunction } from "../../core/objects.js";
+import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { clamp } from "../../core/numbers.js";
+import { nowIso } from "../../core/clock.js";
 
 
 /* =========================================================
@@ -132,42 +134,6 @@ const serverState = {
 
 
 
-function first(...values) {
-  for (const value of values) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
 function number(
   value = 0,
   fallback = 0
@@ -186,29 +152,6 @@ function number(
   return Number.isFinite(parsed)
     ? parsed
     : fallback;
-}
-
-function clamp(
-  value = 0,
-  min = 0,
-  max = 1
-) {
-  return Math.min(
-    Math.max(
-      number(value, min),
-      min
-    ),
-    max
-  );
-}
-
-function nowIso() {
-  try {
-    return new Date()
-      .toISOString();
-  } catch {
-    return "";
-  }
 }
 
 function performanceNow() {
@@ -235,7 +178,7 @@ function safeError(
     "No se pudo consultar el estado del servidor."
 ) {
   return cleanText(
-    first(
+    firstNonEmpty(
       error?.data?.message,
       error?.payload?.message,
       error?.response?.data
@@ -1144,7 +1087,7 @@ function unwrapHealthResponse(
       Esto solo tolera wrappers del core Http/proxies.
     */
     const nested =
-      first(
+      firstNonEmpty(
         current.data,
         current.payload,
         current.result,
@@ -1183,7 +1126,7 @@ function healthFromLegacyResults(
   ) {
     const candidate =
       safeObject(
-        first(
+        firstNonEmpty(
           result?.data,
           result?.response,
           {}
@@ -1401,7 +1344,7 @@ function buildServices({
 
   const apiStatus =
     normalizeStatus(
-      first(
+      firstNonEmpty(
         api.status,
         source.status,
         source.ok === true
@@ -1701,7 +1644,7 @@ export function normalizeServerSnapshot(
   */
   const db =
     safeObject(
-      first(
+      firstNonEmpty(
         source.db,
         infrastructure.cosmos,
         infrastructure.database,
@@ -1746,7 +1689,7 @@ export function normalizeServerSnapshot(
 
   const backendStatus =
     normalizeStatus(
-      first(
+      firstNonEmpty(
         source.status,
         source.ok === true
           ? "healthy"
@@ -1775,7 +1718,7 @@ export function normalizeServerSnapshot(
     null;
 
   const memoryUsedBytes =
-    first(
+    firstNonEmpty(
       mbToBytes(
         ram.usedMB
       ),
@@ -1785,7 +1728,7 @@ export function normalizeServerSnapshot(
     );
 
   const memoryTotalBytes =
-    first(
+    firstNonEmpty(
       mbToBytes(
         ram.totalMB
       ),
@@ -1811,14 +1754,14 @@ export function normalizeServerSnapshot(
     );
 
   const eventLoopLagMs =
-    first(
+    firstNonEmpty(
       eventLoop.lagMs,
       eventLoop.lag,
       null
     );
 
   const apiLatencyMs =
-    first(
+    firstNonEmpty(
       source.api?.latencyMs,
       source.api?.latency,
       transportLatencyMs,
@@ -1826,7 +1769,7 @@ export function normalizeServerSnapshot(
     );
 
   const dbLatencyMs =
-    first(
+    firstNonEmpty(
       db.latencyMs,
       db.latency,
       null
@@ -1834,7 +1777,7 @@ export function normalizeServerSnapshot(
 
   const uptimeSeconds =
     number(
-      first(
+      firstNonEmpty(
         source.uptimeSeconds,
         runtime.process
           ?.uptimeSeconds,
@@ -2632,7 +2575,7 @@ export async function fetchServerLivenessRequest(
 
     uptimeSec:
       number(
-        first(
+        firstNonEmpty(
           source.uptimeSec,
           source.uptimeSeconds,
           0

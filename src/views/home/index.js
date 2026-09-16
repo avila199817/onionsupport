@@ -38,7 +38,8 @@ import {
   renderHomeTemplate,
   renderHomeErrorState,
 } from "./home.template.js";
-import { isObject, safeObject, isFunction } from "../../core/objects.js";
+import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
+import { nowMs } from "../../core/clock.js";
 
 export const HOME_INDEX_VERSION = "home.index.v13-persisted-onboarding";
 export const HOME_VIEW_VERSION = HOME_INDEX_VERSION;
@@ -93,30 +94,13 @@ function isDomNode(value = null) {
 
 
 /* No aplanar arrays: pueden ser datos válidos completos. */
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
-
-    return value;
-  }
-
-  return null;
-}
-
 function hasContent(value = null) {
   return isObject(value) && Object.keys(value).length > 0;
 }
 
-function now() {
-  return Date.now();
-}
-
 function safeError(error = null, fallback = "No se pudo cargar el inicio.") {
   const message = cleanText(
-    first(
+    firstNonEmpty(
       error?.message,
       error?.data?.message,
       error?.payload?.message,
@@ -154,7 +138,7 @@ function getCoreState() {
 }
 
 function cloneRuntimeUser(state = {}) {
-  const rawUser = first(
+  const rawUser = firstNonEmpty(
     state.user,
     state.currentUser,
     state.session?.user,
@@ -183,7 +167,7 @@ function getCurrentRole(
   user = getCurrentUser(context, state)
 ) {
   const safeUser = safeObject(user, {});
-  return AppCore.normalizeRole(first(
+  return AppCore.normalizeRole(firstNonEmpty(
     safeUser.role, safeUser.rol, safeUser.roles,
     state.role, state.rol, state.roles, "user"
   )) || "user";
@@ -207,16 +191,16 @@ function getRoutes(context = {}) {
 
   return {
     home: safeRoute(
-      first(custom.home, ROUTES?.privateHome, ROUTES?.dashboard, "/dashboard"),
+      firstNonEmpty(custom.home, ROUTES?.privateHome, ROUTES?.dashboard, "/dashboard"),
       "/dashboard"
     ),
-    incidencias: safeRoute(first(custom.incidencias, ROUTES?.incidencias, "/incidencias"), "/incidencias"),
-    facturas: safeRoute(first(custom.facturas, ROUTES?.facturas, "/facturas"), "/facturas"),
-    clientes: safeRoute(first(custom.clientes, ROUTES?.clientes, "/clientes"), "/clientes"),
-    usuarios: safeRoute(first(custom.usuarios, ROUTES?.usuarios, "/usuarios"), "/usuarios"),
-    servidor: safeRoute(first(custom.servidor, ROUTES?.servidor, "/servidor"), "/servidor"),
-    cuenta: safeRoute(first(custom.cuenta, ROUTES?.cuenta, "/cuenta"), "/cuenta"),
-    ajustes: safeRoute(first(custom.ajustes, ROUTES?.ajustes, "/ajustes"), "/ajustes"),
+    incidencias: safeRoute(firstNonEmpty(custom.incidencias, ROUTES?.incidencias, "/incidencias"), "/incidencias"),
+    facturas: safeRoute(firstNonEmpty(custom.facturas, ROUTES?.facturas, "/facturas"), "/facturas"),
+    clientes: safeRoute(firstNonEmpty(custom.clientes, ROUTES?.clientes, "/clientes"), "/clientes"),
+    usuarios: safeRoute(firstNonEmpty(custom.usuarios, ROUTES?.usuarios, "/usuarios"), "/usuarios"),
+    servidor: safeRoute(firstNonEmpty(custom.servidor, ROUTES?.servidor, "/servidor"), "/servidor"),
+    cuenta: safeRoute(firstNonEmpty(custom.cuenta, ROUTES?.cuenta, "/cuenta"), "/cuenta"),
+    ajustes: safeRoute(firstNonEmpty(custom.ajustes, ROUTES?.ajustes, "/ajustes"), "/ajustes"),
   };
 }
 
@@ -257,7 +241,7 @@ function getContextDashboard(context = {}, options = {}) {
   const ctx = safeObject(context);
   const opts = safeObject(options);
 
-  return first(
+  return firstNonEmpty(
     opts.dashboard,
     opts.homeDashboard,
     opts.home,
@@ -500,7 +484,7 @@ function createHomeController(host = null, context = {}) {
     if (destroyed || !host) return false;
 
     const data = safeObject(extra);
-    lastRenderAt = now();
+    lastRenderAt = nowMs();
 
     setHostFlags(host, {
       mounted,
@@ -538,7 +522,7 @@ function createHomeController(host = null, context = {}) {
     loading = false;
     refreshing = false;
     error = safeError(message, "No se pudo cargar el inicio.");
-    lastRenderAt = now();
+    lastRenderAt = nowMs();
 
     setHostFlags(host, {
       mounted,

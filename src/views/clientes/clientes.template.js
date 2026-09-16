@@ -15,6 +15,7 @@ import { safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 import { coercedNumber } from "../../core/numbers.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
+import { CURRENCY_POLICIES, formatCurrency, formatDecimal } from "../../core/format.js";
 
 export {
   normalizeClienteModel,
@@ -70,24 +71,11 @@ function attrExact(value = "") {
 }
 
 function formatNumber(value = 0) {
-  try {
-    return new Intl.NumberFormat("es-ES").format(coercedNumber(value, 0));
-  } catch {
-    return String(coercedNumber(value, 0));
-  }
+  return formatDecimal(coercedNumber(value, 0));
 }
 
 function formatMoney(value = 0) {
-  try {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: "EUR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(coercedNumber(value, 0));
-  } catch {
-    return `${coercedNumber(value, 0).toFixed(2).replace(".", ",")} €`;
-  }
+  return formatCurrency(coercedNumber(value, 0), "EUR", CURRENCY_POLICIES.standard);
 }
 
 function formatDateShort(value = null) {

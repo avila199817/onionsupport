@@ -14,6 +14,7 @@ import { escapeHtml } from "../../core/escape-html.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { finiteNumber } from "../../core/numbers.js";
+import { CURRENCY_POLICIES, formatCurrency } from "../../core/format.js";
 
 
 export const SERVER_TEMPLATE_VERSION =
@@ -33,21 +34,10 @@ function attr(value = "") {
 function formatMoney(value, currency = "EUR", options = {}) {
   const number = finiteNumber(value, null);
   if (number === null) return "—";
-
   const code = /^[A-Z]{3}$/.test(cleanText(currency, "").toUpperCase())
     ? cleanText(currency).toUpperCase()
     : "EUR";
-
-  try {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: code,
-      minimumFractionDigits: options.compact ? 2 : 2,
-      maximumFractionDigits: options.compact ? 2 : 4,
-    }).format(number);
-  } catch {
-    return `${number.toFixed(2)} ${code}`;
-  }
+  return formatCurrency(number, code, options.compact ? CURRENCY_POLICIES.standard : CURRENCY_POLICIES.precise);
 }
 
 function formatPercent(value) {

@@ -42,6 +42,7 @@ import { arrayFrom } from "../../core/arrays.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { labelKey } from "../../core/slug-key.js";
 import { TIMESTAMP_POLICIES, toDate } from "../../core/dates.js";
+import { CURRENCY_POLICIES, currencyCode, formatCurrency } from "../../core/format.js";
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
   "facturas.template.modal.productivo.v4.admin-payment";
@@ -469,34 +470,8 @@ function firstUrl(
    FORMATTERS
 ========================================================= */
 
-function formatMoney(
-  value = 0,
-  currency = DEFAULT_CURRENCY
-) {
-  const amount =
-    number(value, 0);
-
-  const code =
-    cleanText(
-      currency,
-      DEFAULT_CURRENCY
-    ).toUpperCase();
-
-  try {
-    return new Intl.NumberFormat(
-      "es-ES",
-      {
-        style: "currency",
-        currency: code,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }
-    ).format(amount);
-  } catch {
-    return `${amount
-      .toFixed(2)
-      .replace(".", ",")} ${code}`;
-  }
+function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
+  return formatCurrency(number(value, 0), currencyCode(currency, DEFAULT_CURRENCY), CURRENCY_POLICIES.standard);
 }
 
 function formatPercent(

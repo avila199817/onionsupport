@@ -24,6 +24,7 @@ import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
+import { CURRENCY_POLICIES, formatCurrency } from "../../core/format.js";
 export const FACTURAS_CREATE_TEMPLATE_VERSION =
   "facturas.template.create.v7.multi-line-billing";
 
@@ -198,16 +199,7 @@ function safeImageSrc(value = "") {
 }
 
 function formatMoney(value = 0) {
-  try {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: "EUR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(number(value, 0));
-  } catch {
-    return `${number(value, 0).toFixed(2).replace(".", ",")} €`;
-  }
+  return formatCurrency(number(value, 0), "EUR", CURRENCY_POLICIES.standard);
 }
 
 function icon(name = "") {

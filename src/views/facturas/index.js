@@ -71,6 +71,7 @@ import { clamp } from "../../core/numbers.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { redactSecrets } from "../../core/redact.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { CURRENCY_POLICIES, formatCurrency } from "../../core/format.js";
 
 export const FACTURAS_INDEX_VERSION =
   "facturas.index.productivo.v22.stable-create-client-relations";
@@ -2908,20 +2909,8 @@ function createFacturasController(host = null, context = {}) {
 
     const breakdown = getFacturaCreateBreakdown(createModal.form);
 
-    const formatMoney = (value = 0) => {
-      try {
-        return new Intl.NumberFormat("es-ES", {
-          style: "currency",
-          currency: "EUR",
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        }).format(number(value, 0));
-      } catch {
-        return `${number(value, 0)
-          .toFixed(2)
-          .replace(".", ",")} €`;
-      }
-    };
+    const formatMoney = (value = 0) =>
+      formatCurrency(number(value, 0), "EUR", CURRENCY_POLICIES.standard);
 
     const base = createModalHost.querySelector(
       "[data-role='base-preview-inline']"
@@ -5415,20 +5404,7 @@ function createFacturasController(host = null, context = {}) {
         "EUR"
       ).toUpperCase();
 
-      let formattedAmount = "";
-
-      try {
-        formattedAmount = new Intl.NumberFormat("es-ES", {
-          style: "currency",
-          currency,
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        }).format(amount);
-      } catch {
-        formattedAmount = `${amount
-          .toFixed(2)
-          .replace(".", ",")} ${currency}`;
-      }
+      const formattedAmount = formatCurrency(amount, currency, CURRENCY_POLICIES.standard);
 
       const abort = new AbortController();
       paymentConfirmationAbort = abort;

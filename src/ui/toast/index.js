@@ -17,7 +17,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject } from "../../core/objects.js";
 import { redactSecrets } from "../../core/redact.js";
 
-export const TOAST_VERSION = "toast.minimal.v1";
+const TOAST_VERSION = "toast.minimal.v1";
 
 const CONTAINER_ID = "toast-container";
 const MAX_TOASTS = 5;

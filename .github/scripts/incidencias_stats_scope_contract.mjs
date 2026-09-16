@@ -19,8 +19,7 @@ const card = (html, key) => {
     text: markup.match(/class="incidencias-stat-text">([^<]*)/)?.[1],
   };
 };
-const loadedLabels = ["Abiertas cargadas", "Cerradas cargadas", "Urgentes cargadas", "Importe cargado"];
-const completeLabels = ["Abiertas", "Cerradas", "Urgentes", "Importe asociado"];
+const cardLabels = ["Abiertas", "Cerradas", "Urgentes", "Importe"];
 const loadedText = ["Solicitudes activas entre las incidencias ya cargadas.", "Casos cerrados entre las incidencias ya cargadas.", "Prioridades altas entre las incidencias ya cargadas.", "Suma asociada únicamente a las incidencias ya cargadas."];
 const completeText = ["Solicitudes activas, pendientes o en proceso.", "Casos resueltos o cerrados.", "Incidencias con prioridad alta.", "Ordenar incidencias de mayor a menor importe."];
 for (const render of [renderIncidenciasTemplate, renderIncidenciasLoadingState]) {
@@ -32,7 +31,7 @@ for (const render of [renderIncidenciasTemplate, renderIncidenciasLoadingState])
     const cards = keys.map((key) => card(html, key));
     const scopes = keys.map((key) => statsPartial && (key === "amount" || !filterFacetsExact) ? "loaded" : "complete");
     assert.deepEqual(cards.map(({ scope }) => scope), scopes);
-    assert.deepEqual(cards.map(({ label }, index) => label), scopes.map((scope, index) => (scope === "loaded" ? loadedLabels : completeLabels)[index]));
+    assert.deepEqual(cards.map(({ label }) => label), cardLabels);
     assert.deepEqual(cards.map(({ text }, index) => text), scopes.map((scope, index) => (scope === "loaded" ? loadedText : completeText)[index]));
     const values = cards.map(({ value }) => value);
     expectedValues ??= values;
@@ -54,11 +53,11 @@ const exact = buildIncidenciasFilterFacetPresentation(responses, { universeStats
 const exactHtml = fromFacets(exact);
 assert.match(exactHtml, /22 solicitudes registradas/);
 assert.equal(card(exactHtml, "closed").label, "Cerradas", "A complete selected filter does not change the aggregate universe");
-assert.equal(card(exactHtml, "amount").label, "Importe cargado");
+assert.equal(card(exactHtml, "amount").label, "Importe");
 for (const flags of [{ totalKnown: false }, { totalIsLowerBound: true }, { total: null }, { meta: { totalKnown: false } }, { pagination: { totalIsLowerBound: true } }]) {
   const uncertain = buildIncidenciasFilterFacetPresentation({ ...responses, open: { ...responses.open, ...flags } }, { universeStats: stats, universeLoaded: 8 });
   const html = fromFacets(uncertain);
-  assert.equal(card(html, "open").label, "Abiertas cargadas", "Unknown/lower-bound remote facets remain loaded");
+  assert.equal(card(html, "open").label, "Abiertas", "Unknown/lower-bound remote facets keep the plain card label");
   assert.equal(card(html, "open").value, "1", "Remote minima cannot replace the loaded count");
 }
 const zeroStats = Object.fromEntries(Object.keys(stats).map((key) => [key, 0]));
@@ -66,7 +65,7 @@ const zero = buildIncidenciasFilterFacetPresentation(Object.fromEntries(Object.k
 const zeroHtml = fromFacets(zero, { items: [], total: 0 });
 assert.equal(card(zeroHtml, "open").label, "Abiertas");
 assert.equal(card(zeroHtml, "open").value, "0", "An exact empty universe preserves explicit zero");
-assert.equal(card(zeroHtml, "amount").label, "Importe asociado");
+assert.equal(card(zeroHtml, "amount").label, "Importe");
 
 /*
   Shared-invoice contract:

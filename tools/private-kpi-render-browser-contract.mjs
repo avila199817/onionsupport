@@ -169,9 +169,8 @@ try {
       return snapshots;
     });
     assert.deepEqual(incidents.map(({ scope }) => scope), ["loaded", "loaded", "complete", "loaded"]);
-    const loadedLabels = ["Abiertas cargadas", "Cerradas cargadas", "Urgentes cargadas", "Importe cargado"];
-    const completeLabels = ["Abiertas", "Cerradas", "Urgentes", "Importe asociado"];
-    assert.deepEqual(incidents.map(({ cards }) => cards.map(({ label }) => label)), [loadedLabels, [...completeLabels.slice(0, 3), "Importe cargado"], completeLabels, loadedLabels]);
+    const cardLabels = ["Abiertas", "Cerradas", "Urgentes", "Importe"];
+    assert.deepEqual(incidents.map(({ cards }) => cards.map(({ label }) => label)), [cardLabels, cardLabels, cardLabels, cardLabels]);
     assert.deepEqual(incidents.map(({ cards }) => cards.map(({ scope }) => scope)), [
       ["loaded", "loaded", "loaded", "loaded"], ["complete", "complete", "complete", "loaded"],
       ["complete", "complete", "complete", "complete"], ["loaded", "loaded", "loaded", "loaded"],

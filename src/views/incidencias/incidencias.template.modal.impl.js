@@ -45,6 +45,7 @@ import {
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
   "incidencias.template.modal.extreme.v36-owned-attachment-delete-confirm";
@@ -845,25 +846,6 @@ function formatRelativeDate(
   }
 
   return formatDate(raw);
-}
-
-function toTimestamp(value = "") {
-  const raw =
-    firstNonEmpty(
-      value,
-      ""
-    );
-
-  if (!raw) {
-    return 0;
-  }
-
-  const ms =
-    new Date(raw).getTime();
-
-  return Number.isFinite(ms)
-    ? ms
-    : 0;
 }
 
 /* =========================================================
@@ -1986,10 +1968,12 @@ function getTimeline(
       .sort(
         (a, b) =>
           toTimestamp(
-            b.createdAt
+            b.createdAt,
+            TIMESTAMP_POLICIES.epoch
           ) -
           toTimestamp(
-            a.createdAt
+            a.createdAt,
+            TIMESTAMP_POLICIES.epoch
           )
       );
   }
@@ -2049,10 +2033,12 @@ function getTimeline(
   ].sort(
     (a, b) =>
       toTimestamp(
-        b.createdAt
+        b.createdAt,
+        TIMESTAMP_POLICIES.epoch
       ) -
       toTimestamp(
-        a.createdAt
+        a.createdAt,
+        TIMESTAMP_POLICIES.epoch
       )
   );
 }

@@ -5,6 +5,7 @@ import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { clamp, finiteNumber } from "../../core/numbers.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 /* =========================================================
    Onion Support - Servidor Template
    Archivo: /src/views/server/server.template.js
@@ -79,74 +80,11 @@ function attr(value = "") {
   );
 }
 
-function toTimestamp(
-  value = null
-) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return 0;
-  }
-
-  if (value instanceof Date) {
-    const ms =
-      value.getTime();
-
-    return Number.isFinite(ms)
-      ? ms
-      : 0;
-  }
-
-  if (
-    typeof value === "number" &&
-    Number.isFinite(value)
-  ) {
-    if (value <= 0) {
-      return 0;
-    }
-
-    return value > 9_999_999_999
-      ? value
-      : value * 1000;
-  }
-
-  const raw =
-    cleanText(
-      value,
-      ""
-    );
-
-  if (!raw) {
-    return 0;
-  }
-
-  const numeric =
-    Number(raw);
-
-  if (
-    Number.isFinite(numeric) &&
-    numeric > 0
-  ) {
-    return numeric > 9_999_999_999
-      ? numeric
-      : numeric * 1000;
-  }
-
-  const parsed =
-    Date.parse(raw);
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : 0;
-}
-
 function formatDateTime(
   value = null
 ) {
   const timestamp =
-    toTimestamp(value);
+    toTimestamp(value, TIMESTAMP_POLICIES.epoch);
 
   if (!timestamp) {
     return "—";

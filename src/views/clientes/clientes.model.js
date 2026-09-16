@@ -15,6 +15,7 @@ import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 
 export const CLIENTES_MODEL_VERSION =
   "clientes.model.v1.single-authority";
@@ -372,17 +373,7 @@ export function getClienteStableId(item = {}) {
 
 function sortTimestamp(item = {}) {
   const current = normalizeClienteModel(item);
-  const value = firstNonBlank(current.lastActivityAt, current.updatedAt, current.createdAt, 0);
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value > 9_999_999_999 ? value : value * 1000;
-  }
-  const text = cleanText(value, "");
-  const numeric = Number(text);
-  if (/^[+\-]?\d+(?:\.\d+)?$/.test(text) && Number.isFinite(numeric)) {
-    return numeric > 9_999_999_999 ? numeric : numeric * 1000;
-  }
-  const parsed = Date.parse(text);
-  return Number.isFinite(parsed) ? parsed : 0;
+  return toTimestamp(firstNonBlank(current.lastActivityAt, current.updatedAt, current.createdAt, 0), TIMESTAMP_POLICIES.epoch);
 }
 
 export function normalizeClientesCollection(items = []) {

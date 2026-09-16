@@ -14,6 +14,7 @@ import {
 import { safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 import { coercedNumber } from "../../core/numbers.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 
 export {
   normalizeClienteModel,
@@ -89,23 +90,8 @@ function formatMoney(value = 0) {
   }
 }
 
-function toTimestamp(value = null) {
-  if (value === null || value === undefined || value === "") return 0;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value > 9_999_999_999 ? value : value * 1000;
-  }
-  const raw = cleanText(value, "");
-  if (!raw) return 0;
-  const numeric = Number(raw);
-  if (/^[+-]?\d+(?:\.\d+)?$/.test(raw) && Number.isFinite(numeric)) {
-    return numeric > 9_999_999_999 ? numeric : numeric * 1000;
-  }
-  const parsed = Date.parse(raw);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function formatDateShort(value = null) {
-  const timestamp = toTimestamp(value);
+  const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!timestamp) return "—";
   try {
     return new Intl.DateTimeFormat("es-ES", {
@@ -119,7 +105,7 @@ function formatDateShort(value = null) {
 }
 
 function formatTimeShort(value = null) {
-  const timestamp = toTimestamp(value);
+  const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!timestamp) return "";
   try {
     return new Intl.DateTimeFormat("es-ES", {
@@ -132,7 +118,7 @@ function formatTimeShort(value = null) {
 }
 
 function formatDateTime(value = null) {
-  const timestamp = toTimestamp(value);
+  const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!timestamp) return "—";
   try {
     return new Intl.DateTimeFormat("es-ES", {
@@ -148,7 +134,7 @@ function formatDateTime(value = null) {
 }
 
 function formatRelativeDate(value = null) {
-  const timestamp = toTimestamp(value);
+  const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!timestamp) return "Sin actualización";
   const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000));
   if (minutes < 1) return "Ahora mismo";

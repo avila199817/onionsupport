@@ -30,6 +30,7 @@ import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { coercedNumber } from "../../core/numbers.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 
 
 export const USUARIOS_TEMPLATE_VERSION =
@@ -76,14 +77,6 @@ const TABLE_SCALE = "110";
 function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
 }
-function toTimestamp(value = null) {
-  if (value === null || value === undefined || value === "") return 0;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value > 9_999_999_999 ? value : value * 1000;
-  }
-  const parsed = Date.parse(cleanText(value, ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
 function normalizeSortOrder(value = USUARIOS_DEFAULT_SORT_ORDER) {
   const normalized = slugKey(value || USUARIOS_DEFAULT_SORT_ORDER);
   return ["asc", "ascending", "oldest", "antiguos", "antiguo"].includes(normalized)
@@ -98,7 +91,7 @@ function sortOrderValue(input = {}) {
   );
 }
 function sessionStartTimestamp(item = {}) {
-  return toTimestamp(item?.lastLoginAt);
+  return toTimestamp(item?.lastLoginAt, TIMESTAMP_POLICIES.epoch);
 }
 function sortBySessionStart(items = [], order = USUARIOS_DEFAULT_SORT_ORDER) {
   const direction = normalizeSortOrder(order) === "asc" ? 1 : -1;
@@ -114,8 +107,8 @@ function sortBySessionStart(items = [], order = USUARIOS_DEFAULT_SORT_ORDER) {
       return (leftLogin - rightLogin) * direction;
     }
 
-    const leftCreated = toTimestamp(left?.createdAt);
-    const rightCreated = toTimestamp(right?.createdAt);
+    const leftCreated = toTimestamp(left?.createdAt, TIMESTAMP_POLICIES.epoch);
+    const rightCreated = toTimestamp(right?.createdAt, TIMESTAMP_POLICIES.epoch);
     if (leftCreated !== rightCreated) return rightCreated - leftCreated;
 
     return getId(left).localeCompare(getId(right), "es", {
@@ -137,7 +130,7 @@ function formatNumber(value = 0) {
   }
 }
 function formatDateTime(value = null) {
-  const timestamp = toTimestamp(value);
+  const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!timestamp) return "—";
   try {
     return new Intl.DateTimeFormat("es-ES", {
@@ -152,7 +145,7 @@ function formatDateTime(value = null) {
   }
 }
 function formatDateShort(value = null) {
-  const timestamp = toTimestamp(value);
+  const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!timestamp) return "—";
   try {
     return new Intl.DateTimeFormat("es-ES", {
@@ -165,7 +158,7 @@ function formatDateShort(value = null) {
   }
 }
 function formatRelativeDate(value = null) {
-  const timestamp = toTimestamp(value);
+  const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.epoch);
   if (!timestamp) return "Sin actividad";
   const diffMinutes = Math.round((Date.now() - timestamp) / 60_000);
   if (diffMinutes < 1) return "Ahora mismo";

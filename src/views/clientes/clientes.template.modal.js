@@ -7,6 +7,7 @@ import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
+import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 /* =========================================================
    Onion Support - Clientes Detail Template
    Archivo: /src/views/clientes/clientes.template.modal.js
@@ -689,82 +690,13 @@ function formatMoney(
   }
 }
 
-function toTimestamp(
-  value = null
-) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return 0;
-  }
-
-  if (
-    value instanceof Date
-  ) {
-    const ms =
-      value.getTime();
-
-    return Number.isFinite(ms)
-      ? ms
-      : 0;
-  }
-
-  if (
-    typeof value === "number" &&
-    Number.isFinite(value)
-  ) {
-    return value >
-      9_999_999_999
-        ? value
-        : value * 1000;
-  }
-
-  const raw =
-    cleanText(
-      value,
-      ""
-    );
-
-  if (!raw) {
-    return 0;
-  }
-
-  if (
-    /^[+\-]?\d+(?:\.\d+)?$/.test(
-      raw
-    )
-  ) {
-    const numeric =
-      Number(raw);
-
-    if (
-      Number.isFinite(
-        numeric
-      )
-    ) {
-      return numeric >
-        9_999_999_999
-          ? numeric
-          : numeric * 1000;
-    }
-  }
-
-  const parsed =
-    Date.parse(raw);
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : 0;
-}
-
 function formatDate(
   value = null
 ) {
   const timestamp =
     toTimestamp(
-      value
+      value,
+      TIMESTAMP_POLICIES.epoch
     );
 
   if (!timestamp) {
@@ -801,7 +733,8 @@ function formatShortDate(
 ) {
   const timestamp =
     toTimestamp(
-      value
+      value,
+      TIMESTAMP_POLICIES.epoch
     );
 
   if (!timestamp) {
@@ -836,7 +769,8 @@ function formatRelativeDate(
 ) {
   const timestamp =
     toTimestamp(
-      value
+      value,
+      TIMESTAMP_POLICIES.epoch
     );
 
   if (!timestamp) {

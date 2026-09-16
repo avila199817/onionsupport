@@ -77,6 +77,7 @@ import {
 import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 export const USUARIOS_MODULE_NAME = "usuarios";
 export const USUARIOS_VIEW_NAME = "UsuariosView";
@@ -172,21 +173,6 @@ function normalizeAction(value = "") {
 }
 function normalizeSessionSortOrder(value = USUARIOS_DEFAULT_SORT_ORDER) {
   return slugKey(value) === "asc" ? "asc" : "desc";
-}
-function safeError(error = null, fallback = "No se pudieron cargar los usuarios.") {
-  return cleanText(
-    firstNonEmpty(
-      error?.message,
-      error?.data?.message,
-      error?.payload?.message,
-      error?.response?.data?.message,
-      error?.response?.message,
-      error?.error,
-      error?.code,
-      fallback
-    ),
-    fallback
-  );
 }
 function cloneItems(items = []) {
   return safeArray(items).map((item) => ({ ...safeObject(item) }));
@@ -938,7 +924,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       return items;
     } catch (loadError) {
       if (destroyed || epoch !== queryEpoch) return items;
-      error = safeError(loadError);
+      error = errorMessage(loadError, "No se pudieron cargar los usuarios.", ERROR_MESSAGE_POLICIES.messageFirst);
       loading = false;
       refreshing = false;
       if (keepVisibleRows && !keepAccumulatedPages) {
@@ -1046,7 +1032,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         return items.length;
       } catch (pageError) {
         if (!destroyed && epoch === queryEpoch) {
-          loadMoreError = safeError(pageError, "No se pudieron cargar más usuarios.");
+          loadMoreError = errorMessage(pageError, "No se pudieron cargar más usuarios.", ERROR_MESSAGE_POLICIES.messageFirst);
           showToast(loadMoreError, "error");
           render();
         }
@@ -1204,7 +1190,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         return normalized;
       } catch (detailError) {
         if (destroyed || request.signal.aborted || epoch !== detailEpoch || !routeActive()) return null;
-        if (!cached) showToast(safeError(detailError, "No se pudo abrir el usuario."), "error");
+        if (!cached) showToast(errorMessage(detailError, "No se pudo abrir el usuario.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
         return cached;
       } finally {
         if (detailRequest === request) detailRequest = null;
@@ -1242,7 +1228,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       return normalized;
     } catch (refreshError) {
       if (!request.signal.aborted && epoch === detailRefreshEpoch && !destroyed) {
-        showToast(safeError(refreshError, "No se pudo actualizar el usuario."), "error");
+        showToast(errorMessage(refreshError, "No se pudo actualizar el usuario.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
       }
       return null;
     } finally {
@@ -1269,7 +1255,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       if (!createOpen) createOpen = emitEvent("usuarios:create:open", { source: USUARIOS_INDEX_SOURCE });
       return createOpen;
     } catch (createError) {
-      showToast(safeError(createError, "No se pudo abrir el alta de usuario."), "error");
+      showToast(errorMessage(createError, "No se pudo abrir el alta de usuario.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
       return false;
     } finally {
       creating = false;
@@ -1302,7 +1288,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       showToast(`CSV generado con ${items.length} usuarios cargados.`, "success");
       return true;
     } catch (exportError) {
-      showToast(safeError(exportError, "No se pudo exportar el CSV."), "error");
+      showToast(errorMessage(exportError, "No se pudo exportar el CSV.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
       return false;
     } finally {
       exporting = false;

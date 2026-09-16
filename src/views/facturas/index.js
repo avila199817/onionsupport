@@ -70,6 +70,7 @@ import { slugKey } from "../../core/slug-key.js";
 import { clamp } from "../../core/numbers.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { redactSecrets } from "../../core/redact.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 export const FACTURAS_INDEX_VERSION =
   "facturas.index.productivo.v22.stable-create-client-relations";
@@ -151,20 +152,6 @@ function number(value = 0, fallback = 0) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function safeError(
-  error = null,
-  fallback = "No se pudieron cargar las facturas."
-) {
-  return cleanText(
-    error?.message ||
-      error?.data?.message ||
-      error?.payload?.message ||
-      error?.response?.message ||
-      fallback,
-    fallback
-  );
 }
 
 function nextFrame(callback = null) {
@@ -873,7 +860,7 @@ async function searchClients(query = "") {
         "views.facturas.client-search"
       );
 
-      if (response?.ok === false) throw new Error(safeError(response, "No se pudo buscar cliente."));
+      if (response?.ok === false) throw new Error(errorMessage(response, "No se pudo buscar cliente.", ERROR_MESSAGE_POLICIES.messageFirst));
       const items = dedupeClients(unwrapList(response));
       if (items.length) return items;
     } catch (error) {
@@ -909,7 +896,7 @@ async function searchTickets(query = "", selectedClientes = []) {
         ...scopes[index],
       }, "views.facturas.ticket-search");
       if (response?.ok === false) {
-        throw new Error(safeError(response, "No se pudieron cargar incidencias."));
+        throw new Error(errorMessage(response, "No se pudieron cargar incidencias.", ERROR_MESSAGE_POLICIES.messageFirst));
       }
       pages[index] = unwrapList(response);
     }
@@ -3603,7 +3590,7 @@ function createFacturasController(host = null, context = {}) {
         return null;
       }
 
-      const message = safeError(loadError);
+      const message = errorMessage(loadError, "No se pudieron cargar las facturas.", ERROR_MESSAGE_POLICIES.messageFirst);
       if (append && items.length) {
         loadMoreError = message;
         error = "";
@@ -4109,10 +4096,7 @@ function createFacturasController(host = null, context = {}) {
       createModal.clientSearch.loading = false;
       createModal.clientSearch.results = [];
       createModal.clientSearch.empty = false;
-      createModal.clientSearch.error = safeError(
-        searchError,
-        "No se pudo buscar cliente."
-      );
+      createModal.clientSearch.error = errorMessage(searchError, "No se pudo buscar cliente.", ERROR_MESSAGE_POLICIES.messageFirst);
 
       patchCreateClientSearchDom();
       return false;
@@ -4420,10 +4404,7 @@ function createFacturasController(host = null, context = {}) {
 
       createModal.ticketSearch.loading = false;
       createModal.ticketSearch.empty = false;
-      createModal.ticketSearch.error = safeError(
-        searchError,
-        "No se pudieron cargar incidencias."
-      );
+      createModal.ticketSearch.error = errorMessage(searchError, "No se pudieron cargar incidencias.", ERROR_MESSAGE_POLICIES.messageFirst);
 
       patchCreateTicketSearchDom();
       return [];
@@ -4917,10 +4898,7 @@ function createFacturasController(host = null, context = {}) {
     } catch (createError) {
       creating = false;
       createModal.submitting = false;
-      createModal.serverError = safeError(
-        createError,
-        "No se pudo crear la factura."
-      );
+      createModal.serverError = errorMessage(createError, "No se pudo crear la factura.", ERROR_MESSAGE_POLICIES.messageFirst);
 
       renderCreateModal({
         immediate: true,
@@ -5092,7 +5070,7 @@ function createFacturasController(host = null, context = {}) {
       openingFacturaId = "";
 
       setDetailFeedback(
-        safeError(detailError, "No se pudo cargar el detalle de la factura. Puedes reintentarlo."),
+        errorMessage(detailError, "No se pudo cargar el detalle de la factura. Puedes reintentarlo.", ERROR_MESSAGE_POLICIES.messageFirst),
         "error"
       );
       return false;
@@ -5187,10 +5165,7 @@ function createFacturasController(host = null, context = {}) {
       closePendingWindow(popup);
       viewingFacturaId = "";
 
-      const message = safeError(
-        pdfError,
-        "No se pudo abrir el PDF."
-      );
+      const message = errorMessage(pdfError, "No se pudo abrir el PDF.", ERROR_MESSAGE_POLICIES.messageFirst);
 
       if (detailMatchesFactura(id)) {
         detailModal.viewingFacturaId = "";
@@ -5273,10 +5248,7 @@ function createFacturasController(host = null, context = {}) {
     } catch (downloadError) {
       downloadingFacturaId = "";
 
-      const message = safeError(
-        downloadError,
-        "No se pudo descargar la factura."
-      );
+      const message = errorMessage(downloadError, "No se pudo descargar la factura.", ERROR_MESSAGE_POLICIES.messageFirst);
 
       if (detailMatchesFactura(id)) {
         detailModal.downloadingFacturaId = "";
@@ -5385,12 +5357,7 @@ function createFacturasController(host = null, context = {}) {
     } catch (sendError) {
       sendingFacturaId = "";
 
-      const message = safeError(
-        sendError,
-        alreadySent
-          ? "No se pudo reenviar la factura."
-          : "No se pudo enviar la factura."
-      );
+      const message = errorMessage(sendError, alreadySent ? "No se pudo reenviar la factura." : "No se pudo enviar la factura.", ERROR_MESSAGE_POLICIES.messageFirst);
 
       if (detailMatchesFactura(id)) {
         detailModal.sendingFacturaId = "";
@@ -5545,10 +5512,7 @@ function createFacturasController(host = null, context = {}) {
     } catch (paymentError) {
       markingPaidFacturaId = "";
 
-      const message = safeError(
-        paymentError,
-        "No se pudo registrar el pago de la factura."
-      );
+      const message = errorMessage(paymentError, "No se pudo registrar el pago de la factura.", ERROR_MESSAGE_POLICIES.messageFirst);
 
       if (detailMatchesFactura(id)) {
         detailModal.markingPaidFacturaId = "";

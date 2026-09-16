@@ -40,6 +40,7 @@ import { onDomainChanged } from "../../core/domain-events.js";
 import { captureUserProfileScope, isUserProfileScopeCurrent } from "../../features/user-profile/index.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 export const CUENTA_INDEX_VERSION =
   "cuenta.index.productivo.v8.canonical-surface";
@@ -77,19 +78,6 @@ function isDomNode(value) {
 
 function hasContent(value) {
   return isObject(value) && Object.keys(value).length > 0;
-}
-
-function safeError(error = null, fallback = "No se pudo procesar la cuenta.") {
-  return cleanText(firstNonEmpty(
-    error?.data?.message,
-    error?.payload?.message,
-    error?.response?.data?.message,
-    error?.response?.message,
-    error?.message,
-    error?.error,
-    error?.code,
-    fallback
-  ), fallback);
 }
 
 function safeErrorCode(error = null) {
@@ -440,7 +428,7 @@ function createCuentaController(host, context = {}) {
       if (destroyed || sequence !== loadSequence || !ownsSession()) return null;
       loading = false;
       if (!hadItem) {
-        error = safeError(loadError, "No se pudo cargar la cuenta.");
+        error = errorMessage(loadError, "No se pudo cargar la cuenta.", ERROR_MESSAGE_POLICIES.payloadFirst);
         errorCode = safeErrorCode(loadError);
         renderNow({ force: true });
       }
@@ -498,7 +486,7 @@ function createCuentaController(host, context = {}) {
     } catch (actionError) {
       if (destroyed || sequence !== actionSequence || !ownsSession()) return null;
       setActionBusy("avatar", false);
-      setFeedback({ nextError: safeError(actionError, "No se pudo cambiar la foto."), nextErrorCode: safeErrorCode(actionError) });
+      setFeedback({ nextError: errorMessage(actionError, "No se pudo cambiar la foto.", ERROR_MESSAGE_POLICIES.payloadFirst), nextErrorCode: safeErrorCode(actionError) });
       return null;
     }
   }
@@ -518,7 +506,7 @@ function createCuentaController(host, context = {}) {
     } catch (actionError) {
       if (destroyed || sequence !== actionSequence || !ownsSession()) return null;
       setActionBusy("avatar", false);
-      setFeedback({ nextError: safeError(actionError, "No se pudo eliminar la foto."), nextErrorCode: safeErrorCode(actionError) });
+      setFeedback({ nextError: errorMessage(actionError, "No se pudo eliminar la foto.", ERROR_MESSAGE_POLICIES.payloadFirst), nextErrorCode: safeErrorCode(actionError) });
       return null;
     }
   }
@@ -567,7 +555,7 @@ function createCuentaController(host, context = {}) {
       if (destroyed || sequence !== actionSequence || !ownsSession()) return false;
       clearSensitiveInputs(host);
       setActionBusy("password", false);
-      setFeedback({ nextError: safeError(actionError, "No se pudo cambiar la contraseña."), nextErrorCode: safeErrorCode(actionError) });
+      setFeedback({ nextError: errorMessage(actionError, "No se pudo cambiar la contraseña.", ERROR_MESSAGE_POLICIES.payloadFirst), nextErrorCode: safeErrorCode(actionError) });
       return false;
     }
   }
@@ -605,7 +593,7 @@ function createCuentaController(host, context = {}) {
       if (destroyed || sequence !== actionSequence || !ownsSession()) return false;
       clearSensitiveInputs(host);
       setActionBusy("deactivate", false);
-      setFeedback({ nextError: safeError(actionError, "No se pudo desactivar la cuenta."), nextErrorCode: safeErrorCode(actionError) });
+      setFeedback({ nextError: errorMessage(actionError, "No se pudo desactivar la cuenta.", ERROR_MESSAGE_POLICIES.payloadFirst), nextErrorCode: safeErrorCode(actionError) });
       return false;
     }
   }

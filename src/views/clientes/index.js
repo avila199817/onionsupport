@@ -32,6 +32,7 @@ import {
 import { createClientesCreateController } from "./clientes.create-controller.js";
 import { isObject, safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 export const CLIENTES_MODULE_NAME = "clientes";
 export const CLIENTES_VIEW_NAME = "ClientesView";
@@ -69,22 +70,6 @@ function number(value = 0, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-
-function safeError(error = null, fallback = "No se pudieron cargar los clientes.") {
-  return cleanText(
-    firstNonBlank(
-      error?.message,
-      error?.data?.message,
-      error?.payload?.message,
-      error?.response?.data?.message,
-      error?.response?.message,
-      error?.error,
-      error?.code,
-      fallback
-    ),
-    fallback
-  );
-}
 
 function errorCode(error = null) {
   return cleanText(
@@ -784,7 +769,7 @@ function createClientesController(host = null, initialContext = {}) {
       syncInfiniteObserver();
       return true;
     } catch (renderError) {
-      error = safeError(renderError, "No se pudo renderizar la vista de clientes.");
+      error = errorMessage(renderError, "No se pudo renderizar la vista de clientes.", ERROR_MESSAGE_POLICIES.messageFirst);
       root.textContent = error;
       return false;
     }
@@ -1058,7 +1043,7 @@ function createClientesController(host = null, initialContext = {}) {
         return requestPage({ append: false, silent: false });
       }
 
-      const message = safeError(loadError);
+      const message = errorMessage(loadError, "No se pudieron cargar los clientes.", ERROR_MESSAGE_POLICIES.messageFirst);
       if (append && items.length) {
         loadMoreError = message;
         error = "";
@@ -1381,7 +1366,7 @@ function createClientesController(host = null, initialContext = {}) {
         return seq === detailSeq && alive() && detailModalOpen;
       } catch (detailError) {
         if (seq === detailSeq && alive() && !isAbortError(detailError) && !request?.signal.aborted) {
-          showToast(safeError(detailError, "No se pudo abrir el cliente."), "error");
+          showToast(errorMessage(detailError, "No se pudo abrir el cliente.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
         }
         return false;
       } finally {
@@ -1420,7 +1405,7 @@ async function openCreate() {
       return ensureCreateController().open() !== false;
     } catch (createError) {
       showToast(
-        safeError(createError, "No se pudo abrir la creación de cliente."),
+        errorMessage(createError, "No se pudo abrir la creación de cliente.", ERROR_MESSAGE_POLICIES.messageFirst),
         "error"
       );
       return false;

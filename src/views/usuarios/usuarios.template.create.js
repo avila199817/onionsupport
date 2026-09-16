@@ -50,6 +50,7 @@ import {
 import { isObject, safeObject, isFunction } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 /* =========================================================
    META / CONSTANTS
@@ -155,22 +156,6 @@ function normalizeEmail(value = "") {
 function attr(value = "") {
   return escapeHtml(
     cleanText(value, "")
-  );
-}
-
-function safeError(
-  error = null,
-  fallback = "No se pudo crear el usuario."
-) {
-  return cleanText(
-    error?.data?.message ||
-      error?.payload?.message ||
-      error?.response?.data?.message ||
-      error?.response?.message ||
-      error?.message ||
-      error?.error ||
-      fallback,
-    fallback
   );
 }
 
@@ -1493,10 +1478,7 @@ function creationFailureMessage(
     );
   }
 
-  return safeError(
-    error,
-    "No se pudo crear el usuario."
-  );
+  return errorMessage(error, "No se pudo crear el usuario.", ERROR_MESSAGE_POLICIES.payloadFirst);
 }
 
 export async function submit(

@@ -16,6 +16,7 @@ import { loadUsuarioDetail, normalizeUsuarioModel } from "../usuarios/usuarios.a
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 export const EMPLEADOS_VIEW_VERSION = "empleados.view.v5.usuarios-parity-current-employee";
 export const EMPLEADOS_VIEW_NAME = "EmpleadosView";
@@ -114,16 +115,7 @@ function applyEmployeeCopy(root) {
   root.dataset.view = "empleados";
 }
 
-function errorText(error) {
-  return cleanText(firstNonEmpty(
-    error?.message,
-    error?.data?.message,
-    error?.payload?.message,
-    error?.response?.message,
-    error?.code,
-    "No se pudo actualizar el empleado."
-  ), "No se pudo actualizar el empleado.");
-}
+const ERROR_FALLBACK = "No se pudo actualizar el empleado.";
 
 function showToast(message, type = "info") {
   const text = cleanText(message, "");
@@ -261,7 +253,7 @@ export function EmpleadosView(host = null, context = {}) {
       lastSyncAt = Date.now();
       return employee;
     } catch (requestError) {
-      if (!destroyed && epoch === loadEpoch) error = errorText(requestError);
+      if (!destroyed && epoch === loadEpoch) error = errorMessage(requestError, ERROR_FALLBACK, ERROR_MESSAGE_POLICIES.messageFirst);
       return employee;
     } finally {
       if (!destroyed && epoch === loadEpoch) {
@@ -290,7 +282,7 @@ export function EmpleadosView(host = null, context = {}) {
       return employee;
     } catch (requestError) {
       if (!destroyed && epoch === detailEpoch) {
-        error = errorText(requestError);
+        error = errorMessage(requestError, ERROR_FALLBACK, ERROR_MESSAGE_POLICIES.messageFirst);
         showToast(error, "error");
       }
       return null;

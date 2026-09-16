@@ -21,6 +21,7 @@ import {
 import { cleanText } from "../../core/presentation-text.js";
 import { safeObject, firstNonBlank } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 export const FACTURAS_PAID_CONFIRM_VERSION =
   "facturas.paid-confirm.v2.verified-resumable";
@@ -469,10 +470,7 @@ async function openDialog(node = null) {
   } catch (error) {
     if (!state?.open || seq !== dialogLookupSeq) return false;
     state.loading = false;
-    state.error = cleanText(
-      firstNonBlank(error?.message, error?.data?.message, "No se pudo cargar la factura."),
-      "No se pudo cargar la factura."
-    );
+    state.error = errorMessage(error, "No se pudo cargar la factura.", ERROR_MESSAGE_POLICIES.messageFirst);
     render({ focus: true });
     return false;
   }
@@ -525,15 +523,7 @@ async function executePayment() {
     if (!state?.open || state.facturaId !== id) return false;
 
     state.submitting = false;
-    state.error = cleanText(
-      firstNonBlank(
-        error?.message,
-        error?.data?.message,
-        error?.payload?.message,
-        "No se pudo completar la operación."
-      ),
-      "No se pudo completar la operación."
-    );
+    state.error = errorMessage(error, "No se pudo completar la operación.", ERROR_MESSAGE_POLICIES.messageFirst);
 
     try {
       const latest = await getFacturaById(id, { force: true, cache: false });

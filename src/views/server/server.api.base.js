@@ -45,6 +45,7 @@ import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { clamp } from "../../core/numbers.js";
 import { nowIso } from "../../core/clock.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 
 /* =========================================================
@@ -172,26 +173,7 @@ function performanceNow() {
   return Date.now();
 }
 
-function safeError(
-  error = null,
-  fallback =
-    "No se pudo consultar el estado del servidor."
-) {
-  return cleanText(
-    firstNonEmpty(
-      error?.data?.message,
-      error?.payload?.message,
-      error?.response?.data
-        ?.message,
-      error?.response?.message,
-      error?.message,
-      error?.error,
-      error?.code,
-      fallback
-    ),
-    fallback
-  );
-}
+const ERROR_FALLBACK = "No se pudo consultar el estado del servidor.";
 
 function createContractError(
   code = "SERVER_CONTRACT_ERROR",
@@ -1038,7 +1020,7 @@ export async function probeEndpointGroup(
       data: null,
 
       error:
-        safeError(error),
+        errorMessage(error, ERROR_FALLBACK, ERROR_MESSAGE_POLICIES.payloadFirst),
 
       tried: [
         endpoint,
@@ -1048,7 +1030,7 @@ export async function probeEndpointGroup(
         {
           endpoint,
           message:
-            safeError(error),
+            errorMessage(error, ERROR_FALLBACK, ERROR_MESSAGE_POLICIES.payloadFirst),
         },
       ],
     };
@@ -2672,7 +2654,7 @@ export async function loadServerSnapshot(
       return snapshot;
     } catch (error) {
       setError(
-        safeError(error)
+        errorMessage(error, ERROR_FALLBACK, ERROR_MESSAGE_POLICIES.payloadFirst)
       );
 
       throw error;

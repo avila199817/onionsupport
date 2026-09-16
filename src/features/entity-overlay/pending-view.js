@@ -1,15 +1,10 @@
 import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { renderModalCloseButton, renderModalShell, renderModalState } from "./modal-host.js";
-import { redactSecrets } from "../../core/redact.js";
 export { cleanText };
 
 /* The shared surface owns imports and loading failures only. Entity data
    and commands always render through the canonical domain controller. */
-export function safeError(error) {
-  return redactSecrets(cleanText(error?.message || error?.data?.message || error?.code, "No se pudo cargar el detalle.")).slice(0, 500);
-}
-
 /* Pending and failed detail sessions render through the same shell as every
    domain dialog; only the body state and the dispatcher actions are specific. */
 export function renderDetailPending({ type, id, error = "" }) {

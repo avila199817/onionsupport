@@ -44,6 +44,7 @@ import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { clamp } from "../../core/numbers.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 /* =========================================================
    META / CONFIG
@@ -478,24 +479,7 @@ function toTimestamp(value = null) {
    ERROR CONTRACT
 ========================================================= */
 
-function safeError(
-  error = null,
-  fallback = "Error de API de usuarios."
-) {
-  return cleanText(
-    firstNonEmpty(
-      error?.message,
-      error?.data?.message,
-      error?.payload?.message,
-      error?.response?.data?.message,
-      error?.response?.message,
-      error?.error,
-      error?.code,
-      fallback
-    ),
-    fallback
-  );
-}
+const ERROR_FALLBACK = "Error de API de usuarios.";
 
 function getErrorCode(
   source = null,
@@ -590,10 +574,7 @@ function createResponseError(
       source,
       fallbackCode
     ),
-    safeError(
-      source,
-      fallbackMessage
-    ),
+    errorMessage(source, fallbackMessage, ERROR_MESSAGE_POLICIES.messageFirst),
     getErrorStatus(
       source,
       fallbackStatus
@@ -5083,10 +5064,7 @@ export async function loadUsuarios({
           ) {
             lastError = error;
             setError(
-              safeError(
-                error,
-                "No se pudieron cargar los usuarios."
-              )
+              errorMessage(error, "No se pudieron cargar los usuarios.", ERROR_MESSAGE_POLICIES.messageFirst)
             );
           }
 
@@ -5321,9 +5299,7 @@ export function getUsuariosStateSnapshot() {
 
     lastError:
       lastError
-        ? safeError(
-            lastError
-          )
+        ? errorMessage(lastError, ERROR_FALLBACK, ERROR_MESSAGE_POLICIES.messageFirst)
         : "",
   };
 }
@@ -5546,9 +5522,7 @@ export function getUsuariosApiSnapshot() {
 
     lastError:
       lastError
-        ? safeError(
-            lastError
-          )
+        ? errorMessage(lastError, ERROR_FALLBACK, ERROR_MESSAGE_POLICIES.messageFirst)
         : "",
 
     inflightDetailCount:

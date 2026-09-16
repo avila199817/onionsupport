@@ -14,6 +14,7 @@ import * as Base from "./server.api.base.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 export const SERVER_API_VERSION =
   "server.api.backend-contract.v3.health-plus-costs";
@@ -48,18 +49,6 @@ function safeNumber(value = null, fallback = null) {
   if (value === null || value === undefined || value === "") return fallback;
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
-}
-
-function safeError(error = null) {
-  return cleanText(
-    error?.data?.message ||
-      error?.payload?.message ||
-      error?.response?.message ||
-      error?.message ||
-      error?.code ||
-      "No se pudo consultar el coste de Azure.",
-    "No se pudo consultar el coste de Azure."
-  );
 }
 
 function unwrapResponse(payload) {
@@ -308,7 +297,7 @@ export async function loadServerCosts(options = {}) {
       costState.lastSyncAt = Date.now();
       return snapshot;
     } catch (error) {
-      costState.error = safeError(error);
+      costState.error = errorMessage(error, "No se pudo consultar el coste de Azure.", ERROR_MESSAGE_POLICIES.payloadFirst);
 
       if (previous) {
         return {

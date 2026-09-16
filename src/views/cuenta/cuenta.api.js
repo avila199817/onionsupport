@@ -40,6 +40,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
 export const CUENTA_API_VERSION =
   "cuenta.api.backend-contract.v5-canonical-runtime";
@@ -188,21 +189,8 @@ function getErrorCode(error = null) {
   ), "");
 }
 
-function normalizeErrorMessage(error = null, fallback = "Error de cuenta.") {
-  return cleanText(firstNonEmpty(
-    error?.payload?.message,
-    error?.data?.message,
-    error?.response?.data?.message,
-    error?.response?.message,
-    error?.message,
-    error?.error,
-    error?.code,
-    fallback
-  ), fallback);
-}
-
 function createCuentaError(error = null, fallback = "Error de cuenta.") {
-  const normalized = new Error(normalizeErrorMessage(error, fallback));
+  const normalized = new Error(errorMessage(error, fallback, ERROR_MESSAGE_POLICIES.payloadFirst));
   normalized.name = "CuentaApiError";
   normalized.code = getErrorCode(error) || "CUENTA_API_ERROR";
   normalized.status = getErrorStatus(error);

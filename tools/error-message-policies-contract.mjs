@@ -94,7 +94,10 @@ for (const file of sourceFiles(SRC_ROOT)) {
   consumers[path] = distinct[0];
 }
 assert.deepEqual(definers.sort(), [AUTHORITY, ...LOCAL_DEFINERS].sort(), "errorMessage is defined only in core/errors.js and the two listed locals (envelope reader, presentation mapper)");
-assert.deepEqual(consumers, CONSUMERS, "each consumer uses the order measured before the migration; moving one is a decision");
+// The next unit composes the three API records (Facturas, Home, Incidencias) over errorMessage as messageFirst consumers.
+const ARRIVING_CONSUMERS = Object.freeze({ "src/views/facturas/facturas.api.base.js": "messageFirst", "src/views/home/home.api.js": "messageFirst", "src/views/incidencias/incidencias.api.impl.js": "messageFirst" });
+for (const [path, order] of Object.entries(consumers)) assert.equal(order, CONSUMERS[path] ?? ARRIVING_CONSUMERS[path], `${path}: uses the order measured before the migration (${order}); moving one is a decision`);
+for (const path of Object.keys(CONSUMERS)) assert.ok(path in consumers, `${path}: still a consumer of the authority`);
 assert.deepEqual(chainsOutside, [], "no module reads data/payload message chains outside the authority and the two listed local extractors");
 for (const path of LOCAL_EXTRACTORS) assert.ok(CHAIN_FINGERPRINT.test(readFileSync(join(SRC_ROOT, path.slice("src/".length)), "utf8")), `${path} still carries its own extractor (drop it from the list when it converges)`);
 

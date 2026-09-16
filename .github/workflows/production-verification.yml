@@ -114,6 +114,26 @@ jobs:
           lfs: false
           persist-credentials: false
 
+      # Two checkouts with two different jobs, and the difference matters:
+      #
+      #   verification-tooling/  the already-deployed, trusted revision. It holds the code
+      #                          that INSPECTS production, so it is never this PR's code.
+      #   workflow-tooling/      this workflow's own revision. It holds the code that
+      #                          INTERPRETS this workflow's own bookkeeping -- two run ids
+      #                          and one boolean -- and never touches production.
+      #
+      # The classifier belongs to the second: the trusted revision predates it by
+      # construction, so looking for it there is a bootstrapping error.
+      - name: Checkout workflow-owned policy
+        if: github.event_name != 'workflow_run'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: workflow-tooling
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+
       - name: Checkout expected production revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -359,7 +379,7 @@ jobs:
             NEWEST_SHA="${newest_sha}" \
             NEWEST_RUN_ID="${newest_run_id}" \
             node --input-type=module -e '
-              import { classifyProductionSkew } from "./verification-tooling/tools/production-baseline-policy.mjs";
+              import { classifyProductionSkew } from "./workflow-tooling/tools/production-baseline-policy.mjs";
               const run = (sha, id) => ({ sha, runId: Number(id), conclusion: "success" });
               process.stdout.write(classifyProductionSkew({
                 baseline: run(process.env.BASELINE_SHA, process.env.BASELINE_RUN_ID),

@@ -263,23 +263,20 @@ function routeScopes(pathname = activeRoutePathname()) {
   return scopes;
 }
 
+/* La lista está declarada en orden, así que el resultado ya es estable y sirve de clave
+   para saber si el conjunto montado ha cambiado. */
 function mountedScopes() {
-  const scopes = new Set();
-  if (!isBrowser()) return scopes;
+  if (!isBrowser()) return [];
 
-  for (const { scope, selector } of MOUNTED_SCOPE_SELECTORS) {
-    try {
-      if (document.querySelector(selector)) scopes.add(scope);
-    } catch {
-      /* Un selector no soportado nunca impide calcular el resto del ámbito. */
-    }
-  }
-
-  return scopes;
-}
-
-function mountedScopeKey() {
-  return [...mountedScopes()].sort().join(",");
+  return MOUNTED_SCOPE_SELECTORS
+    .filter(({ selector }) => {
+      try {
+        return Boolean(document.querySelector(selector));
+      } catch {
+        return false;
+      }
+    })
+    .map(({ scope }) => scope);
 }
 
 /* El ámbito real: donde estamos MÁS lo que está montado. */
@@ -458,13 +455,13 @@ function installRouteObserver() {
 
   lastCommittedHost = currentCommittedRouteHost();
 
-  lastMountedScopes = mountedScopeKey();
+  lastMountedScopes = mountedScopes().join(",");
 
   routeObserver = new MutationObserver((mutations) => {
     /* Un portal de dominio recién montado activa su ámbito aunque la ruta no lo nombre. Se
        compara el conjunto, no el nodo: reabrir el mismo detalle no vuelve a disparar nada. */
     if (mutations.some(mutationTouchesDomainPortal)) {
-      const mounted = mountedScopeKey();
+      const mounted = mountedScopes().join(",");
 
       if (mounted && mounted !== lastMountedScopes) {
         lastMountedScopes = mounted;
@@ -582,7 +579,7 @@ export function getAppEnhancementsSnapshot() {
     version: APP_ENHANCEMENTS_VERSION,
     routePathname: activeRoutePathname(),
     routeScopes: Object.freeze([...routeScopes()]),
-    mountedScopes: Object.freeze([...mountedScopes()]),
+    mountedScopes: Object.freeze(mountedScopes()),
     activeScopes: Object.freeze([...activeScopes()]),
     initialRouteLoads,
     lazyRouteLoads,

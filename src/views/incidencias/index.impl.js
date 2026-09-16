@@ -1990,6 +1990,264 @@ export function createIncidenciasController(
     return true;
   }
 
+  /* Reconcile the attachment list card by card instead of replacing the whole slot.
+   *
+   * Opening the viewer, moving to the next attachment and closing it all re-render the
+   * owner, because the previewed file and the "which card is busy" markers belong to its
+   * view model. The slot was replaced whole every time, so every card -- and its thumbnail
+   * -- was destroyed and rebuilt for a change that concerned one card, or none at all.
+   *
+   * Only the cards whose markup really differs are replaced. When the set of attachments
+   * itself changed, there is nothing to reconcile card by card and the caller falls back to
+   * replacing the slot.
+   */
+  /* WHO OWNS WHAT INSIDE AN ATTACHMENT CARD
+   *
+   * The template owns the card: the action, the labels, the busy state, the permissions.
+   * The preview features own the THUMBNAIL. For an image the template already declares the
+   * frame (data-modal-thumb-frame + <img src>) and the feature only tracks its loading
+   * state; for a video or any other type the template emits a plain square with
+   * data-renderable-thumbnail="false" and `incidencias-video-preview` UPGRADES that button
+   * in place into a hydrated frame with the decoded first frame inside.
+   *
+   * So a hydrated video thumb can never equal its freshly rendered template counterpart.
+   * Before this, that made the card differ on EVERY render, so it was rebuilt every time --
+   * and rebuilding it threw the decoded frame away, and the feature had to hydrate again.
+   *
+   * The rule here: a thumb the feature hydrated beyond what the template claims is
+   * feature-owned. It is matched by the attachment's own id, never by position, and it is
+   * MOVED into the new card rather than copied -- so no listener is duplicated and no second
+   * copy of it exists. Everything the template owns is taken from the NEW render, including
+   * on the moved node itself, so a stale label, a stale busy state or a withdrawn permission
+   * cannot survive. Only the rendered frame, which the feature caches and invalidates by its
+   * own key, is kept.
+   */
+  const THUMB_FRAME = "[data-modal-thumb-frame='true']";
+  const THUMB_ID = "data-attachment-id";
+  const THUMB_IMAGE = "[data-modal-thumb-img='true']";
+
+  /* Attributes the TEMPLATE owns on a thumb button. Whatever happens to the node, these come
+     from the incoming render, never from the mounted one. */
+  const THUMB_TEMPLATE_ATTRIBUTES = Object.freeze([
+    "class",
+    "aria-label",
+    "aria-busy",
+    "aria-disabled",
+    "disabled",
+    "title",
+    "data-detail-action",
+    "data-renderable-thumbnail",
+  ]);
+
+  /* Loading state of a thumb. Always the feature's, on any frame: the template never knows
+     whether the image has decoded yet. */
+  const THUMB_STATE_ATTRIBUTES = Object.freeze([
+    "data-preview-state",
+    "data-thumb-error",
+    "data-video-thumb-hydrating",
+  ]);
+
+  /* Hydrated by a feature beyond the template's claim: the template says it renders no
+     thumbnail for this attachment, yet the mounted button carries a frame. */
+  function hydratedBeyondTemplate(
+    live = null,
+    incoming = null
+  ) {
+    return Boolean(
+      live?.matches?.(THUMB_FRAME) &&
+      incoming &&
+      incoming.getAttribute("data-renderable-thumbnail") === "false"
+    );
+  }
+
+  /* Pair the mounted thumbs with the incoming ones by the attachment they belong to -- by its
+     own id, never by position within the card. */
+  function pairThumbs(
+    current = null,
+    next = null
+  ) {
+    const pairs = [];
+    if (!current || !next) return pairs;
+
+    for (const live of current.querySelectorAll(THUMB_FRAME)) {
+      const id = live.getAttribute(THUMB_ID);
+      if (!id) continue;
+
+      const incoming =
+        next.querySelector(
+          `[${THUMB_ID}="${escapeCssAttribute(id)}"]`
+        );
+
+      if (!incoming) continue;
+
+      pairs.push({
+        live,
+        incoming,
+        upgraded: hydratedBeyondTemplate(live, incoming),
+      });
+    }
+
+    return pairs;
+  }
+
+  function applyTemplateAttributes(
+    live = null,
+    incoming = null
+  ) {
+    if (!live || !incoming) return false;
+
+    for (const name of THUMB_TEMPLATE_ATTRIBUTES) {
+      const value = incoming.getAttribute(name);
+
+      if (value === null) {
+        live.removeAttribute(name);
+      } else {
+        live.setAttribute(name, value);
+      }
+    }
+
+    return true;
+  }
+
+  /* Does this card differ in anything the TEMPLATE owns? Asked by normalizing the
+     feature-owned hydration away, never by comparing the two raw markups. */
+  function cardChangedBeyondThumbnail(
+    current = null,
+    next = null
+  ) {
+    const pairs = pairThumbs(current, next);
+
+    if (!pairs.length) {
+      return current.outerHTML !== next.outerHTML;
+    }
+
+    const probe = current.cloneNode(true);
+
+    for (const { live, incoming, upgraded } of pairs) {
+      const id = live.getAttribute(THUMB_ID);
+      const mirror =
+        probe.querySelector(
+          `[${THUMB_ID}="${escapeCssAttribute(id)}"]`
+        );
+
+      if (!mirror) continue;
+
+      if (upgraded) {
+        /* The whole frame is the feature's work; the template claims none. */
+        mirror.replaceWith(incoming.cloneNode(true));
+        continue;
+      }
+
+      /* The template declares this frame; only its loading state is the feature's. */
+      for (const name of THUMB_STATE_ATTRIBUTES) {
+        const value = incoming.getAttribute(name);
+
+        if (value === null) {
+          mirror.removeAttribute(name);
+        } else {
+          mirror.setAttribute(name, value);
+        }
+      }
+    }
+
+    return probe.outerHTML !== next.outerHTML;
+  }
+
+  function patchAttachmentCards(
+    currentRoot = null,
+    nextRoot = null
+  ) {
+    if (!currentRoot || !nextRoot) return false;
+
+    const CARD = ".incidencias-modal-attachment-card[data-attachment-id]";
+
+    const currentCards =
+      new Map(
+        Array.from(
+          currentRoot.querySelectorAll(CARD),
+          (node) => [node.dataset.attachmentId, node]
+        )
+      );
+
+    const nextCards =
+      Array.from(
+        nextRoot.querySelectorAll(CARD)
+      );
+
+    if (nextCards.length !== currentCards.size) return false;
+
+    for (const next of nextCards) {
+      if (!currentCards.has(next.dataset.attachmentId)) return false;
+    }
+
+    for (const next of nextCards) {
+      const current =
+        currentCards.get(
+          next.dataset.attachmentId
+        );
+
+      const pairs = pairThumbs(current, next);
+
+      /* Logically unchanged: the only difference is hydration the feature owns. Keep the
+         card, keep its identity, keep its decoded frame. */
+      if (!cardChangedBeyondThumbnail(current, next)) {
+        for (const { live, incoming, upgraded } of pairs) {
+          if (upgraded) applyTemplateAttributes(live, incoming);
+        }
+        continue;
+      }
+
+      /* Focus inside the card being replaced would be lost, and the card that opened the
+         viewer is exactly the one that holds it. Sync its attributes instead. */
+      if (activeElementInside(current)) {
+        syncAttributes(current, next);
+        continue;
+      }
+
+      const replacement = next.cloneNode(true);
+
+      /* Something the template owns really changed, so the card is replaced -- but the
+         hydrated thumb is MOVED across instead of being thrown away and rebuilt. */
+      for (const { live, incoming, upgraded } of pairs) {
+        const id = live.getAttribute(THUMB_ID);
+        const placeholder =
+          replacement.querySelector(
+            `[${THUMB_ID}="${escapeCssAttribute(id)}"]`
+          );
+
+        if (!placeholder) continue;
+
+        if (upgraded) {
+          applyTemplateAttributes(live, incoming);
+          placeholder.replaceWith(live);
+          continue;
+        }
+
+        /* A frame the template declares: its markup is the template's, but the <img> inside
+           has already been decoded by the browser. Moving it across avoids a needless
+           thumbnail reset -- and only when the source is literally the same one, so a
+           replaced file or an expired link can never be kept on screen. */
+        const liveImage =
+          live.querySelector(THUMB_IMAGE);
+
+        const nextImage =
+          placeholder.querySelector(THUMB_IMAGE);
+
+        if (
+          liveImage &&
+          nextImage &&
+          liveImage.getAttribute("src") === nextImage.getAttribute("src")
+        ) {
+          nextImage.replaceWith(liveImage);
+        }
+      }
+
+      current.replaceWith(replacement);
+    }
+
+    return true;
+  }
+
   function syncInputValue(
     currentRoot = null,
     nextRoot = null,
@@ -2995,7 +3253,8 @@ export function createIncidenciasController(
       ) {
         if (
           options.preserveAttachmentList === true &&
-          selector === "[data-modal-files-slot='true']"
+          selector === "[data-modal-files-slot='true']" &&
+          patchAttachmentCards(currentRoot, nextRoot)
         ) {
           continue;
         }
@@ -5795,8 +6054,12 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     detailModal.feedbackType =
       "info";
 
+    /* Abrir, avanzar y cerrar el visor no cambian los adjuntos: sólo cambia cuál está
+       ocupado o previsualizado. Reconciliar la lista tarjeta a tarjeta deja vivas las que
+       no cambian -- y con ellas sus miniaturas -- en lugar de reconstruirlas todas. */
     renderModals({
       immediate: true,
+      preserveAttachmentList: true,
     });
 
     try {
@@ -5901,6 +6164,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
       renderModals({
         immediate: true,
+        preserveAttachmentList: true,
       });
 
       /*
@@ -5931,6 +6195,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
       renderModals({
         immediate: true,
+        preserveAttachmentList: true,
       });
 
       return false;
@@ -5966,6 +6231,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
     renderModals({
       immediate: true,
+      preserveAttachmentList: true,
     });
 
     try {
@@ -5988,6 +6254,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
       renderModals({
         immediate: true,
+        preserveAttachmentList: true,
       });
 
       return true;
@@ -6001,8 +6268,11 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       detailModal.feedbackType =
         "error";
 
+      /* Descargar un adjunto tampoco cambia los adjuntos: sólo marca cuál está ocupado.
+         Mismo criterio que abrir y cerrar el visor. */
       renderModals({
         immediate: true,
+        preserveAttachmentList: true,
       });
 
       return false;
@@ -6290,6 +6560,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
       renderModals({
         immediate: true,
+        preserveAttachmentList: true,
         focusSelector:
           "[data-modal-files-slot='true'] button, [data-incidencias-modal-panel='true']",
       });
@@ -6309,6 +6580,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
     renderModals({
       immediate: true,
+      preserveAttachmentList: true,
       focusSelector:
         "[data-modal-files-slot='true'] button",
     });

@@ -42,11 +42,6 @@
 
 
 /* =========================================================
-   AVATAR
-========================================================= */
-
-
-/* =========================================================
    TITLE / CHIPS
 ========================================================= */
 
@@ -545,7 +540,6 @@
   .facturas-detail-modal-root { --fdm-section-radius: var(--radius-md); }
 
   .facturas-detail-header { gap: 10px; }
-
   .facturas-detail-title { font-size: clamp(19px, 6.4vw, 25px); }
   .facturas-detail-subtitle { font-size: 10.5px; }
 
@@ -603,7 +597,7 @@
   .facturas-detail-description,
   .facturas-detail-linea,
   .facturas-detail-feedback,
-  .facturas-detail-btn,
+  .facturas-detail-btn { forced-color-adjust: auto; }
 }
 
 @media print {

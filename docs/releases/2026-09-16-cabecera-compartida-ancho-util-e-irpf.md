@@ -108,10 +108,28 @@ Una retención sólo se acredita con datos suyos: su importe, su tipo, su propia
 
 ---
 
+## D · Una regla que dejó de existir al retirar un selector
+
+Revisando el diff antes de fusionar apareció un defecto mío. La hoja de Facturas tenía esto:
+
+```css
+@media (forced-colors: active) {
+  .facturas-detail-section,
+  …
+  .facturas-detail-btn,
+  .facturas-detail-avatar { forced-color-adjust: auto; }
+}
+```
+
+Al retirar `.facturas-detail-avatar` se fue con él **el bloque de declaraciones**, y la lista quedó terminada en coma seguida de `}`. Un navegador descarta la regla entera: las ocho superficies del detalle perdían `forced-color-adjust: auto` en modo alto contraste.
+
+Ni el build, ni `check:dist`, ni los 23 contratos de navegador, ni CI lo rechazaron: la hoja se compiló y se sirvió sin protesta. Corregido dejando la declaración en el último selector que queda, y añadido `tools/css-block-integrity-contract.mjs` a `validate:source`: recorre las 80 hojas de `src/css` y `src/features`, exige llaves equilibradas y rechaza cualquier lista de selectores que termine en coma. Negativa comprobada por separado: reintroducir la coma colgante hace fallar el contrato por nombre de fichero.
+
 ## Pruebas
 
 - `tools/detail-header-parity-contract.mjs` (`test:browser:ui`): 7 comprobaciones sobre las dos cabeceras a 1280/900/390 px — misma variante y mismas dimensiones, hueco reservado antes de la imagen, foto válida/ausente/fallida, identidad sin nombre, nombres largos, dos entidades seguidas sin herencia, ninguna hoja de dominio dimensionando su propio avatar, y el ancho útil del cuerpo frente a su pista y a su tope.
 - `tools/factura-tax-visibility-contract.mjs` (`validate:source`): las cinco políticas como pruebas ejecutables, más el IVA canónico y la invariante de documento intacto.
+- `tools/css-block-integrity-contract.mjs` (`validate:source`): sintaxis de bloque en las 80 hojas del proyecto.
 
 Batería local sobre el commit del PR: `validate` en verde (sin cota superada y sin cambio de superficie exportada), `build:repro` idéntico, y 22 de 23 contratos de navegador en verde. El que falla es el conocido de este entorno, `tools/private-domain-contracts.mjs --browser` → *«SPA document-pdf: usable viewer and explicit close: page.waitForEvent: Timeout 10000ms exceeded»*, **idéntico sobre `main` limpio** (48 PASS / 1 FAIL en ambos) y en verde dentro de CI. No se presenta como prueba local superada.
 
@@ -122,6 +140,7 @@ Negativas verificadas por separado:
 | reintroducir un tamaño de avatar propio de Facturas | *«escritorio: mismas dimensiones de avatar»* |
 | volver a acreditar el IRPF con la base general | *«sin ningún campo de retención: la tarjeta de IRPF no debe existir»* |
 | volver a pintar un cero real como cero negativo | *«enabled:true con importe 0: un cero real no lleva signo negativo»* |
+| dejar una lista de selectores terminada en coma | *«una lista de selectores termina en coma antes de `}` — la regla entera se descarta»* |
 
 ### Sobre la medida del scroll al abrir el perfil del técnico
 

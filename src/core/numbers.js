@@ -11,10 +11,11 @@
 //   optional fields whose "nothing" must stay the fallback, often null
 //   (Server, Home, the technician profile, the canonical invoice).
 //
-// Four modules still carry finiteNumber's body under value = 0 (the Server
-// view and base API, the Facturas view, the Usuarios API): there undefined
-// is 0 while null and "" are the fallback. They stay listed in the contract
-// until that difference is decided (docs/FRONTEND_SHARED_SYSTEMS.md).
+// Three modules still carry finiteNumber's body under value = 0 (the Server
+// view and base API, the Usuarios API): there undefined is 0 while null and
+// "" are the fallback. They stay listed in the contract until the reachable
+// differences (live cadence, request timeouts) are decided
+// (docs/FRONTEND_SHARED_SYSTEMS.md).
 // Amount parsers (currency symbols, decimal comma) and integer policies
 // stay with their domains.
 export function coercedNumber(value = 0, fallback = 0) {

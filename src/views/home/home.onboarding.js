@@ -10,7 +10,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject } from "../../core/objects.js";
 import { errorCode } from "../../core/errors.js";
 
-export const HOME_ONBOARDING_VERSION = "home.onboarding.v1.persisted-step-state";
+const HOME_ONBOARDING_VERSION = "home.onboarding.v1.persisted-step-state";
 export const HOME_ONBOARDING_ENDPOINT = "/api/users/me/onboarding";
 export const HOME_ONBOARDING_GUIDE_VERSION = 1;
 export const HOME_ONBOARDING_STEP = 1;
@@ -132,22 +132,4 @@ export async function saveHomeOnboardingChoice({
   }
 
   return normalizeHomeOnboarding(response?.onboarding);
-}
-
-export function getHomeOnboardingSnapshot() {
-  return Object.freeze({
-    version: HOME_ONBOARDING_VERSION,
-    endpoint: HOME_ONBOARDING_ENDPOINT,
-    guideVersion: HOME_ONBOARDING_GUIDE_VERSION,
-    availableStep: HOME_ONBOARDING_STEP,
-    actions: Object.freeze({ ...HOME_ONBOARDING_ACTIONS }),
-    policy: Object.freeze({
-      serverAuthoritative: true,
-      noDom: true,
-      noRouter: true,
-      noStorage: true,
-      noFetch: true,
-      boundedChoicePayload: true,
-    }),
-  });
 }

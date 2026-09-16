@@ -280,7 +280,7 @@ export function invoiceDisplayId(source = {}) {
   );
 }
 
-export function canonicalIconName(value = "activity") {
+function canonicalIconName(value = "activity") {
   const key = homeLabelKey(value);
   return ICON_ALIASES[key] || "activity";
 }

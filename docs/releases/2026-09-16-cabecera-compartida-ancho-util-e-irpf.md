@@ -6,62 +6,61 @@ Tres defectos del detalle de entidad, los tres de **presentación**. Ningún cá
 
 ## A · La misma responsabilidad se resolvía con dos variantes
 
-Facturas **sí** pintaba avatar — mi parte anterior dijo que no, a partir de un `grep` de la clase compartida, y era incorrecto. Lo que ocurría es que cada dominio tenía la suya.
+Facturas **sí** pintaba avatar — una parte anterior de mi trabajo dijo que no, a partir de un `grep` de la clase compartida, y era incorrecto. Lo que ocurría es que cada dominio tenía el suyo, de distinto tamaño.
 
-Medido con el mismo guion sobre las dos revisiones (fixture real `--serve`, modal abierto desde el botón del fixture):
+### Cómo se mide esto sin equivocarse
+
+Quien dibuja el avatar es `src/css/components/avatar-system.css`, que los dos entrypoints importan **en la capa `guardrails`, la última** del orden declarado en `app.css`. Una capa posterior gana a cualquier regla de `components/` o `views/` por específica que sea: el tamaño, el radio, el recorte, el color del fallback y el estado de la imagen los decide esa hoja y sólo esa.
+
+Mi primera medición cargó una lista de hojas elegida a mano **sin** esa hoja, y midió otra aplicación: allí el marco parecía obedecer a `detail-modal.css` (66×21 px en Incidencias, 58×58 en Facturas). Esas cifras no describían el producto. La medición buena carga los dos entrypoints reales y las hojas de ruta tal como las sirve el router, con sus capas. El contrato de esta unidad y la validación conjunta lo hacen ahora así.
+
+### Lo que había, medido en el producto
 
 | Anchura | Incidencias | Facturas |
 | --- | --- | --- |
-| 1280 px | **66×21 px**, radio 0 | 58×58 px, radio 13,72 px |
-| 900 px | **66×21 px**, radio 0 | 58×58 px, radio 13,72 px |
-| 390 px | 46×46 px, radio 0 | 46×46 px, radio 13,16 px |
+| 1280 px | hueco 66×56 px · avatar **56 px** circular | avatar **42 px** circular |
+| 900 px | hueco 66×56 px · avatar **56 px** | avatar **42 px** |
+| 390 px | hueco **46 px** con un avatar de **56** — se salía | avatar **42 px** |
 
-Los 66×**21** no son una errata: la autoridad daba tamaño al hueco a través de la columna de la rejilla del hero, pero **nunca al marco**, salvo dentro de dos media queries. Fuera de ellas el marco se encogía al texto de las iniciales y el avatar aparecía sin marco ni recorte. Se ve en la captura «antes».
-
-Y los tamaños de Facturas estaban escritos a mano cuatro veces (58/52/46/50 px) en sus propios cortes (820/560/390), distintos de los del shell (720/540).
+Tres desacuerdos en la misma cabecera: los dos dominios pintan identidades de distinto tamaño, el hueco que reserva la cabecera no vale lo que el avatar mide, y en móvil el avatar se sale de su columna.
 
 ### Cambio
 
-La autoridad estructural declara la variante **una vez**:
+- Facturas deja su variante propia y usa la compartida (`ui-detail-modal-avatar` + `ui-detail-modal-avatar-frame`), con los mismos atributos de identidad que ya usaba. Su hoja se queda **sin una sola regla** de avatar.
+- `detail-modal.css` deja de intentar dimensionar y recortar el marco: esas reglas eran letra muerta en el producto y fueron justo las que hicieron creer a un fixture incompleto que mandaba el shell. La autoridad estructural declara **el hueco**, no el dibujo.
+- El hueco deriva del mismo número que pinta el sistema de avatares: `--ui-detail-modal-avatar-size: var(--avatar-size-detail, 56px)`. Desaparecen los tamaños por anchura escritos a mano (58/54/46 px) y el token de radio, que ya no tenía consumidor.
 
-- `.ui-detail-modal-avatar` toma su tamaño del token `--ui-detail-modal-avatar-size`, el mismo que ya usaba la rejilla del hero, así que el hueco queda reservado antes de que llegue ninguna imagen.
-- `.ui-detail-modal-avatar-frame` ocupa ese hueco, recorta (`overflow: hidden`) y redondea con `--ui-detail-modal-avatar-radius`.
-- La imagen y el fallback comparten celda: mientras no hay foto, o si falla, el hueco ya está ocupado y la cabecera no se mueve.
-- Los tamaños por anchura se cambian **redefiniendo el token**, no repitiendo píxeles en dos selectores. Los valores visibles de ≤720 px (54 px) y ≤540 px (46 px) se conservan exactamente; lo que cambia es dónde se declaran.
-
-Facturas consume esa variante y retira la suya; su hoja se queda **sin una sola regla** de tamaño de avatar. Ambos detalles se registran además en el sistema global de avatares (`data-avatar-host`), que ya usaba Facturas: es aditivo — corrige atributos e iniciales y gestiona el estado de la imagen — y no reconstruye nodos.
-
-**No se propaga `data-modal-hero`.** Un contrato correcto rechazó añadirlo a Facturas porque rompía la simetría entre su estado de carga y su estado listo. Al mirarlo, ese marcador tiene **un productor y cero consumidores**: la unificación es de variante, no de marcador, así que se quitó en vez de relajar el contrato.
-
-**El contrato de identidad viaja con la variante.** `avatar_runtime_dom_contract.mjs` localizaba el avatar del detalle de Facturas por su clase propia, `.facturas-detail-avatar`. Al retirarla, sus cuatro casos dejaron de encontrar nodo y el contrato cayó con un `TypeError` sin atribución — lo detectó la batería local y lo repitió CI. Los cuatro pasan ahora por el marcador semántico que ya usaba Incidencias, `[data-modal-avatar-frame='true']`: misma responsabilidad, mismo marcador. Y el bucle del contrato falla **por nombre** (`«<caso>: ningún elemento coincide con <selector>»`) en lugar de reventar varias líneas más abajo. La clase `facturas-detail-identity` se retira también: no quedaba ninguna regla que la usara, la rejilla la declara `ui-detail-modal-hero`.
-
-### Resultado medido
+### Resultado medido en el producto
 
 | Anchura | Incidencias | Facturas |
 | --- | --- | --- |
-| 1280 px | 66×66, radio 21 px | **66×66, radio 21 px** |
-| 900 px | 66×66, radio 21 px | **66×66, radio 21 px** |
-| 390 px | 46×46, radio 14 px | **46×46, radio 14 px** |
+| 1280 px | hueco = avatar **56×56 px**, circular | **idéntico** |
+| 900 px | hueco = avatar **56×56 px** | **idéntico** |
+| 390 px | hueco = avatar **56×56 px** | **idéntico** |
 
-Con foto válida, ausente o fallida el hueco es el mismo 66×66 en los tres casos. Sin nombre utilizable, las dos cabeceras caen en el fallback del sistema. Con nombres de 92 caracteres no hay desbordamiento ni solape y el cierre sigue alcanzable a 1280 px y a 390 px. Al abrir dos entidades seguidas la identidad declarada cambia y **no queda la fotografía de la anterior**.
+Ni holgura en escritorio ni desbordamiento en móvil, y la misma identidad visual en los dos detalles. Con foto válida, ausente o fallida el hueco no cambia. Sin nombre utilizable, las dos cabeceras caen en el fallback del sistema. Con nombres de 92 caracteres no hay desbordamiento ni solape y el cierre sigue alcanzable a 1280 px y a 390 px. Al abrir dos entidades seguidas la identidad declarada cambia y **no queda la fotografía de la anterior**.
+
+**No se propaga `data-modal-hero`.** Un contrato correcto rechazó añadirlo a Facturas porque rompía la simetría entre su estado de carga y su estado listo. Al mirarlo, ese marcador tiene **un productor y cero consumidores**: la unificación es de variante, no de marcador, así que se quitó en vez de relajar el contrato.
+
+**El contrato de identidad viaja con la variante.** `avatar_runtime_dom_contract.mjs` localizaba el avatar del detalle de Facturas por su clase propia, `.facturas-detail-avatar`. Al retirarla, sus cuatro casos dejaron de encontrar nodo y el contrato cayó con un `TypeError` sin atribución — lo detectó la batería local y lo repitió CI. Los cuatro pasan ahora por el marcador semántico que ya usaba Incidencias, `[data-modal-avatar-frame='true']`: misma responsabilidad, mismo marcador. Y el bucle del contrato falla **por nombre** en lugar de reventar varias líneas más abajo. La clase `facturas-detail-identity` se retira también: no quedaba ninguna regla que la usara.
 
 ---
 
 ## B · El contenido de Facturas se encogía a su texto
 
-La causa no es el tope de legibilidad: `.facturas-detail-body` lleva `margin-inline: auto`, y en un ítem de rejilla los márgenes automáticos **anulan el estirado** y lo dejan a ancho de contenido. Comprobado en vivo, sin tocar ficheros: quitar el tope de 1180 px no cambiaba nada; declarar `inline-size: 100%` sí.
+`.facturas-detail-body` lleva `margin-inline: auto`, y en un ítem de rejilla los márgenes automáticos **anulan el estirado** y lo dejan a ancho de contenido. El tope de legibilidad de 1180 px no era la causa: comprobado en vivo, quitarlo no cambiaba nada; declarar `inline-size: 100%` sí. El tope **se conserva**. Sin anchos por factura, sin `!important` y sin variantes nuevas.
 
-El tope **no era la causa y se conserva**. Lo que se declara es que el cuerpo ocupe su pista hasta ese tope y siga centrado cuando la pista es más ancha. Sin anchos por factura, sin `!important` y sin variantes nuevas.
-
-Medido con el mismo guion sobre las dos revisiones (fixture real `tools/private-owner-modal-browser-contract.mjs --serve`, modal abierto desde el botón del fixture, ventana de 900 px de alto):
+Medido con el mismo guion sobre las dos revisiones, con los entrypoints reales:
 
 | Anchura | Pista | Cuerpo antes (`a93db093`) | Cuerpo después |
 | --- | --- | --- | --- |
-| 1280 px | 1230 px | 807 px | **1179 px** (el tope de 1180 px es ahora quien manda) |
+| 1280 px | 1230 px | 807 px | **1179 px** |
 | 900 px | 850 px | 611 px | **799 px** |
-| 390 px | 390 px | 356 px | 356 px — *sin cambio: a esa anchura ya mandaba el relleno* |
+| 390 px | 366 px | 332 px | 332 px — *sin cambio: a esa anchura ya mandaba el relleno* |
 
 Sin desbordamiento horizontal en ninguna de las tres.
+
+---
 
 ## C · IRPF: dos defectos de lectura, no de cálculo
 
@@ -125,7 +124,7 @@ Ni el build, ni `check:dist`, ni los 23 contratos de navegador, ni CI lo rechaza
 
 ## Pruebas
 
-- `tools/detail-header-parity-contract.mjs` (`test:browser:ui`): 7 comprobaciones sobre las dos cabeceras a 1280/900/390 px — misma variante y mismas dimensiones, hueco reservado antes de la imagen, foto válida/ausente/fallida, identidad sin nombre, nombres largos, dos entidades seguidas sin herencia, ninguna hoja de dominio dimensionando su propio avatar, y el ancho útil del cuerpo frente a su pista y a su tope.
+- `tools/detail-header-parity-contract.mjs` (`test:browser:ui`): 7 comprobaciones sobre las dos cabeceras a 1280/900/390 px, **cargando los dos entrypoints reales y las hojas de ruta con sus capas** — misma variante y mismas dimensiones, hueco igual al avatar que pinta el sistema, foto válida/ausente/fallida, identidad sin nombre, nombres largos, dos entidades seguidas sin herencia, ninguna hoja de dominio ni el propio shell dimensionando el marco, y el ancho útil del cuerpo frente a su pista y a su tope.
 - `tools/factura-tax-visibility-contract.mjs` (`validate:source`): las cinco políticas como pruebas ejecutables, más el IVA canónico y la invariante de documento intacto.
 - `tools/css-block-integrity-contract.mjs` (`validate:source`): sintaxis de bloque en las 80 hojas del proyecto.
 
@@ -135,7 +134,9 @@ Negativas verificadas por separado:
 
 | Regresión | Aserción |
 | --- | --- |
-| reintroducir un tamaño de avatar propio de Facturas | *«escritorio: mismas dimensiones de avatar»* |
+| reintroducir un tamaño de avatar propio de Facturas | *«… no puede dimensionar su propio avatar de cabecera»* |
+| que el shell vuelva a dimensionar o recortar el marco | *«detail-modal.css no puede dimensionar ni recortar el marco: lo hace el sistema de avatares»* |
+| que el hueco deje de valer lo que el avatar mide | *«el hueco reservado vale exactamente lo que el sistema de avatares pinta»* |
 | volver a acreditar el IRPF con la base general | *«sin ningún campo de retención: la tarjeta de IRPF no debe existir»* |
 | volver a pintar un cero real como cero negativo | *«enabled:true con importe 0: un cero real no lleva signo negativo»* |
 | dejar una lista de selectores terminada en coma | *«una lista de selectores termina en coma antes de `}` — la regla entera se descarta»* |
@@ -144,9 +145,14 @@ Negativas verificadas por separado:
 
 La primera pasada de la validación conjunta midió que el cuerpo del detalle pasaba de 120 px a 0 al abrir el perfil del técnico. **Era el arnés, no el producto.** El disparador vive en la parte alta del cuerpo (contenido 21–114 px): con el cuerpo desplazado 120 px queda fuera de la ventana visible, y `locator.click()` de Playwright lo arrastra a la vista *antes* de pulsar. Con un clic programático — mismo controlador delegado, sin desplazamiento automático — el scroll se conserva en 120 durante la apertura y tras el cierre; con un clic real de ratón a un desplazamiento en el que el disparador sigue visible, se conserva igual. El nodo del cuerpo es el mismo, sus ocho hijos son los mismos y sólo cambian atributos del disparador. El paso 6 de la validación conjunta mide ahora las dos formas y declara cuál es cuál.
 
+### Sobre una medición que describía otra aplicación
+
+Queda anotado porque cuesta de ver: un fixture que sirve una lista de hojas elegida a mano puede pasar todos sus contratos y describir una aplicación que no existe. Aquí faltaba `components/avatar-system.css` —la última capa— y con ella faltaba quien realmente dibuja el avatar. Las cifras de la primera versión de esta nota (66×21, 58×58) eran de ese mundo. El contrato y la validación conjunta cargan ahora `app.css` y `private.css`, que es lo que carga el área autenticada.
+
 ## Alcance declarado, no resuelto
 
 - `src/views/clientes/clientes.template.modal.js` tiene una **tercera** composición de cabecera (`clientes-modal-hero`) con sus propias clases. No entra aquí.
 - `patchDetailModalDom` de Incidencias sigue existiendo junto al parcheo compartido.
+- Los demás fixtures de navegador siguen sirviendo listas de hojas elegidas a mano. Aquí se ha corregido el de esta unidad y el de la validación conjunta; revisarlos todos es otra unidad.
 - No hay contrato permanente que fije «abrir y cerrar una capa apilada conserva el scroll del cuerpo»: hoy se mide en la validación conjunta, que no está versionada.
 - La tarjeta de IVA sigue pintándose aunque la factura no traiga dato de IVA, porque su base también cae en `baseImponible`. Es el mismo patrón que el del IRPF, pero la autorización de ocultar lo que no aplica era para el IRPF: se deja medido y sin tocar.

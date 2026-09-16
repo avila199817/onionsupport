@@ -8,19 +8,31 @@ import { chromium } from "playwright-core";
 // MISMA RESPONSABILIDAD, MISMA VARIANTE.
 //
 // La cabecera de un detalle de entidad tiene un avatar, un bloque de identidad y un cierre.
-// Incidencias y Facturas hacían lo mismo de dos maneras: Facturas con una variante propia
-// (58/52/46/50 px, radio 14 px) e Incidencias con la compartida, que además NO daba tamaño al
-// marco fuera de las media queries -- medido: 66x21 px en escritorio, sin recorte ni radio.
+// Incidencias y Facturas lo resolvían de dos maneras: medido en el producto, el avatar de
+// Facturas era un círculo de 42 px y el de Incidencias uno de 56 px, y el hueco reservado
+// por la cabecera no coincidía con ninguno de los dos (66x56 en escritorio, 46 en móvil con
+// un avatar de 56 que se salía).
+//
+// Quien dibuja el avatar es components/avatar-system.css, en la capa `guardrails`, la
+// ÚLTIMA: gana a cualquier regla de tamaño o radio de components/ o views/ por especificidad
+// que tenga. Por eso este contrato carga los DOS entrypoints reales y las hojas de ruta tal
+// como las sirve el router, con sus capas: una lista de hojas elegida a mano mide otra
+// aplicación -- sin avatar-system.css el marco parecía obedecer a detail-modal.css.
 //
 // Aquí se exige que la MISMA responsabilidad se resuelva con la MISMA variante: mismas
-// dimensiones, mismo recorte, mismo fallback, mismo hueco reservado antes de cargar la imagen.
+// dimensiones, mismo recorte, mismo fallback, y el hueco EXACTAMENTE igual al avatar que el
+// sistema pinta -- ni holgura en escritorio ni desbordamiento en móvil.
 // No se exige que las dos cabeceras digan lo mismo: cada dominio conserva sus identificadores.
 const ROOT = resolve(fileURLToPath(new URL("../", import.meta.url)));
-const CSS = [
-  "src/css/tokens/variables.css", "src/css/tokens/light.css", "src/css/core/guardrails.css",
-  "src/css/components/ui.css", "src/css/components/detail-modal.css",
-  "src/css/views/incidencias/detail.css", "src/css/views/facturas/detail.css",
-];
+// LOS DOS ENTRYPOINTS REALES, CON SUS CAPAS.
+//
+// Una lista de hojas elegidas a mano midió otra aplicación: sin
+// components/avatar-system.css --la ÚLTIMA capa, `guardrails`-- el marco del avatar
+// parecía obedecer a detail-modal.css, y en el producto no lo hace. app.css declara el
+// orden de capas y los tokens; private.css añade el shell modal y el sistema de avatares
+// exactamente como los carga el área autenticada.
+const CSS = ["src/css/app.css", "src/css/private.css",
+  "src/css/views/incidencias/detail.css", "src/css/views/facturas/detail.css"];
 
 const { renderIncidenciasDetailModal } = await import("../src/views/incidencias/incidencias.template.modal.js");
 const { renderFacturasDetailModal } = await import("../src/views/facturas/facturas.template.modal.js");
@@ -130,6 +142,12 @@ try {
     assert.deepEqual(medido["fac-base"].marco, medido["inc-base"].marco, `${label}: mismo marco`);
     assert.equal(medido["fac-base"].radio, medido["inc-base"].radio, `${label}: mismo recorte`);
     assert.equal(medido["fac-base"].avatar.w, medido["fac-base"].avatar.h, `${label}: el avatar es cuadrado`);
+    for (const name of ["inc-base", "fac-base"]) {
+      assert.deepEqual(
+        medido[name].avatar, medido[name].marco,
+        `${label} · ${name}: el hueco reservado vale exactamente lo que el sistema de avatares pinta`
+      );
+    }
     console.log(`PASS 1 · ${label}: avatar ${medido["inc-base"].avatar.w}x${medido["inc-base"].avatar.h} r=${medido["inc-base"].radio} idéntico en los dos detalles`);
     await page.close();
   }
@@ -204,7 +222,7 @@ try {
     await page.close();
   }
 
-  // 6 · Ninguna hoja de dominio vuelve a declarar una variante propia de avatar de cabecera.
+  // 6 · Una sola autoridad dibuja el avatar; la cabecera sólo reserva su hueco.
   {
     for (const sheet of ["src/css/views/facturas/detail.css", "src/css/views/incidencias/detail.css"]) {
       const css = await readFile(resolve(ROOT, sheet), "utf8");
@@ -212,10 +230,22 @@ try {
       const dimensiona = bloques.filter((bloque) => /(?:inline-size|block-size|width|height)\s*:\s*\d+px/u.test(bloque));
       assert.deepEqual(dimensiona, [], `6 · ${sheet} no puede dimensionar su propio avatar de cabecera`);
     }
+
+    // El shell reserva el hueco; si además intentara dimensionar o recortar el marco,
+    // escribiría reglas muertas: `guardrails` llega después y gana.
     const authority = await readFile(resolve(ROOT, "src/css/components/detail-modal.css"), "utf8");
-    assert.match(authority, /--ui-detail-modal-avatar-size/u, "6 · el tamaño sale de un token de la autoridad");
-    assert.match(authority, /--ui-detail-modal-avatar-radius/u, "6 · y el recorte también");
-    console.log("PASS 6 · una sola autoridad declara tamaño y recorte; ninguna hoja de dominio los repite");
+    const marco = authority.match(/\.ui-detail-modal-avatar-frame[^{]*\{[^}]*\}/gu) ?? [];
+    const pinta = marco.filter((bloque) => /(?:inline-size|block-size|width|height|border-radius|overflow)\s*:/u.test(bloque));
+    assert.deepEqual(pinta, [], "6 · detail-modal.css no puede dimensionar ni recortar el marco: lo hace el sistema de avatares");
+    assert.match(authority, /--ui-detail-modal-avatar-size/u, "6 · el hueco sale de un token de la autoridad");
+
+    const tokens = await readFile(resolve(ROOT, "src/css/tokens/variables.css"), "utf8");
+    assert.match(
+      tokens,
+      /--ui-detail-modal-avatar-size:\s*var\(--avatar-size-detail/u,
+      "6 · y ese token deriva del tamaño que declara el sistema de avatares"
+    );
+    console.log("PASS 6 · el sistema de avatares dibuja; la cabecera sólo reserva su hueco, derivado del mismo token");
   }
 
   // 7 · El cuerpo de Facturas ocupa su pista hasta el tope de legibilidad, sin encogerse a

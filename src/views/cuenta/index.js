@@ -42,10 +42,10 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 
-export const CUENTA_INDEX_VERSION =
+const CUENTA_INDEX_VERSION =
   "cuenta.index.productivo.v8.canonical-surface";
-export const CUENTA_VIEW_VERSION = CUENTA_INDEX_VERSION;
-export const CUENTA_INDEX_SOURCE = "views.cuenta.index";
+const CUENTA_VIEW_VERSION = CUENTA_INDEX_VERSION;
+const CUENTA_INDEX_SOURCE = "views.cuenta.index";
 
 export {
   CUENTA_API_VERSION,
@@ -871,7 +871,6 @@ export function CuentaView(host = null, context = {}) {
   return controller.mount(safeObject(context));
 }
 
-export const CuentaIndex = CuentaView;
 export const View = CuentaView;
 export const view = CuentaView;
 export const component = CuentaView;
@@ -893,39 +892,37 @@ export function refresh() {
 }
 export const reload = refresh;
 export const loadCuenta = refresh;
-export const refreshCuenta = refresh;
-
-export function updateTheme(value = "system") {
+function updateTheme(value = "system") {
   try { return lastInstance?.setTheme?.(value) ?? false; } catch { return false; }
 }
-export const updateCuentaTheme = updateTheme;
+const updateCuentaTheme = updateTheme;
 export const setTheme = updateTheme;
-export const setCuentaTheme = updateTheme;
+const setCuentaTheme = updateTheme;
 
-export function updateLanguage(value = "es") {
+function updateLanguage(value = "es") {
   try { return lastInstance?.setLocale?.(value) ?? false; } catch { return false; }
 }
-export const updateCuentaLanguage = updateLanguage;
-export const setLanguage = updateLanguage;
-export const setCuentaLanguage = updateLanguage;
+const updateCuentaLanguage = updateLanguage;
+const setLanguage = updateLanguage;
+const setCuentaLanguage = updateLanguage;
 
 export function changePassword(payload = null) {
   try { return lastInstance?.changePassword?.(payload) || null; } catch { return null; }
 }
-export const updatePassword = changePassword;
-export const savePassword = changePassword;
+const updatePassword = changePassword;
+const savePassword = changePassword;
 
-export function uploadAvatar(input = null) {
+function uploadAvatar(input = null) {
   try { return lastInstance?.uploadAvatar?.(input) || null; } catch { return null; }
 }
 export const uploadCuentaAvatar = uploadAvatar;
 
-export function deleteAvatar() {
+function deleteAvatar() {
   try { return lastInstance?.deleteAvatar?.() || null; } catch { return null; }
 }
 export const deleteCuentaAvatar = deleteAvatar;
 
-export function deactivateAccount(payload = null) {
+function deactivateAccount(payload = null) {
   try { return lastInstance?.deactivateAccount?.(payload) || null; } catch { return null; }
 }
 export const deactivateCuenta = deactivateAccount;
@@ -933,16 +930,7 @@ export const deactivateCuenta = deactivateAccount;
 export function getItem() {
   try { return lastInstance?.getItem?.() || null; } catch { return null; }
 }
-export const getCuenta = getItem;
-
-export function clearCuentaViewCache() {
-  try {
-    lastInstance?.resetPresentation?.();
-    return true;
-  } catch {
-    return false;
-  }
-}
+const getCuenta = getItem;
 
 export function getSnapshot() {
   if (lastInstance?.getSnapshot) return lastInstance.getSnapshot();

@@ -26,7 +26,7 @@ import { slugKey } from "../../core/slug-key.js";
 export const CUENTA_TEMPLATE_VERSION =
   "cuenta.template.productivo.v7.canonical-surface";
 
-export const CUENTA_TEMPLATE_CAPABILITIES = Object.freeze({
+const CUENTA_TEMPLATE_CAPABILITIES = Object.freeze({
   readSelf: true,
   changePassword: true,
   avatarUpload: true,
@@ -416,7 +416,7 @@ export function renderEmptyState(state = {}) {
   return renderErrorState("", state);
 }
 
-export function renderAvatarCard(detail = {}, state = {}) {
+function renderAvatarCard(detail = {}, state = {}) {
   const local = resolveState(state);
   const c = copyFor(local);
   const busy = local.saving && local.savingAction === "avatar";
@@ -474,7 +474,7 @@ export function renderAppearanceCard(detail = {}, state = {}) {
   `;
 }
 
-export function renderSecurityCard(detail = {}, state = {}) {
+function renderSecurityCard(detail = {}, state = {}) {
   void detail;
   const local = resolveState(state);
   const c = copyFor(local);
@@ -495,7 +495,7 @@ export function renderSecurityCard(detail = {}, state = {}) {
   `;
 }
 
-export function renderPaymentCard(detail = {}, state = {}) {
+function renderPaymentCard(detail = {}, state = {}) {
   void detail;
   const c = copyFor(state);
   return `
@@ -515,7 +515,7 @@ export function renderPaymentCard(detail = {}, state = {}) {
   `;
 }
 
-export function renderDeactivateCard(detail = {}, state = {}) {
+function renderDeactivateCard(detail = {}, state = {}) {
   const local = resolveState(state);
   const c = copyFor(local);
   const status = getStatus(detail, local);
@@ -535,7 +535,7 @@ export function renderDeactivateCard(detail = {}, state = {}) {
   `;
 }
 
-export function renderPanel({ item = null, state = {} } = {}) {
+function renderPanel({ item = null, state = {} } = {}) {
   const detail = isObject(item) ? item : null;
   const local = resolveState(state);
   if (local.loading && !detail) return renderLoadingState(local);
@@ -566,7 +566,7 @@ export function renderCuentaTemplate({ item = null, state = {} } = {}) {
   `;
 }
 
-export function getCuentaTemplateSnapshot({ item = null, state = {} } = {}) {
+function getCuentaTemplateSnapshot({ item = null, state = {} } = {}) {
   const local = resolveState(state);
   return {
     version: CUENTA_TEMPLATE_VERSION,

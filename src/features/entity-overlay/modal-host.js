@@ -11,7 +11,7 @@
    rendering here keeps it out of the public consent dialogs' closure and in
    one shared chunk for all private dialogs. */
 import { escapeHtml } from "../../core/escape-html.js";
-import { modalStackOwnsAttribute, restoreModalFocus } from "./modal-lifecycle.js";
+import { modalStackProtects, restoreModalFocus } from "./modal-lifecycle.js";
 
 export const MODAL_SHELL_VERSION = "ui-modal-shell.v1";
 
@@ -165,12 +165,12 @@ export function createModalHost({
 
 function syncAttributes(current, next) {
   for (const { name } of [...current.attributes]) {
-    // The stack owns isolation; a template render must never take it off a covered panel.
-    if (modalStackOwnsAttribute(name)) continue;
+    // The stack owns isolation; a template render must never take it off a COVERED panel.
+    if (modalStackProtects(current, name)) continue;
     if (!next.hasAttribute(name)) current.removeAttribute(name);
   }
   for (const { name, value } of [...next.attributes]) {
-    if (modalStackOwnsAttribute(name)) continue;
+    if (modalStackProtects(current, name)) continue;
     current.setAttribute(name, value);
   }
 }

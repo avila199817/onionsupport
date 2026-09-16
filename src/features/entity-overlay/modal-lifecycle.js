@@ -26,15 +26,124 @@ const documents = new WeakMap();
  * Both the shared host and the domain patchers skip these, so a re-render can never release
  * a panel the stack is still holding. Only the stack adds and removes them.
  */
-export const MODAL_STACK_OWNED_ATTRIBUTES = Object.freeze([
+const MODAL_STACK_HELD = "data-modal-stack-held";
+const MODAL_STACK_PREVIOUS_ARIA_HIDDEN = "data-modal-stack-previous-aria-hidden";
+
+const MODAL_STACK_OWNED_ATTRIBUTES = Object.freeze([
   "inert",
   "aria-hidden",
-  "data-media-viewer-background",
-  "data-viewer-previous-aria-hidden",
+  MODAL_STACK_HELD,
+  MODAL_STACK_PREVIOUS_ARIA_HIDDEN,
 ]);
 
-export function modalStackOwnsAttribute(name = "") {
+function modalStackOwnsAttribute(name = "") {
   return MODAL_STACK_OWNED_ATTRIBUTES.includes(String(name));
+}
+
+/* ...but ONLY on a panel the stack is holding right now.
+ *
+ * `aria-hidden` is an ordinary content attribute nearly everywhere else -- a decorative
+ * icon, a KPI card the template shows and hides -- so protecting it unconditionally would
+ * freeze legitimate state and is a bug of its own. The stack marks the panel it covers, and
+ * the marker is what scopes the protection: while it reads "true" the isolation is the
+ * stack's; once the stack releases, the marker reads "false" and an ordinary sync may clear
+ * everything, so no isolation marks survive a full close.
+ */
+function modalStackHoldsPanel(element = null) {
+  return element?.getAttribute?.(MODAL_STACK_HELD) === "true";
+}
+
+export function modalStackProtects(element = null, name = "") {
+  return modalStackHoldsPanel(element) && modalStackOwnsAttribute(name);
+}
+
+/* Taking and releasing the hold. ONE authority, used by every layer that covers a panel:
+ * the attachment viewer over an incidencia and the payment confirmation over a factura are
+ * the two today. Neither keeps its own copy of these rules.
+ */
+export function holdModalPanel(panel = null, { activeLayer = null } = {}) {
+  if (!panel?.setAttribute) return false;
+
+  /* Never isolate an ancestor of the layer that is now active: the new layer would make
+     itself unreachable. A covering layer is a sibling of what it covers, not a child. */
+  if (activeLayer && panel.contains?.(activeLayer)) return false;
+
+  /* Already held. Re-asserting the same attributes is a mutation the rest of the app can
+     observe, and asking for isolation we already have is how a content change starts
+     looking like a reopen. */
+  if (modalStackHoldsPanel(panel)) return true;
+
+  if (!panel.getAttribute(MODAL_STACK_PREVIOUS_ARIA_HIDDEN)) {
+    panel.setAttribute(
+      MODAL_STACK_PREVIOUS_ARIA_HIDDEN,
+      panel.getAttribute("aria-hidden") ?? "__missing__"
+    );
+  }
+
+  panel.setAttribute("aria-hidden", "true");
+
+  try {
+    panel.inert = true;
+  } catch {
+    panel.setAttribute("inert", "");
+  }
+
+  panel.setAttribute(MODAL_STACK_HELD, "true");
+  return true;
+}
+
+/* THE OPENER CAN BE REPLACED WHILE THE LAYER IS COVERING IT.
+ *
+ * A layer's opener lives inside the panel below it, and that panel may re-render while the
+ * layer covers it: the control the user pressed is then a detached node, and returning focus
+ * to it drops the focus on the body without a single error. So the layer hands over the
+ * attributes that name its opener and the live equivalent is looked up inside the panel that
+ * is being released -- and only then. Nothing is stolen back from anywhere else: this runs
+ * when the layer itself closes, and only when its own opener is already gone.
+ *
+ * A candidate is accepted only when its identity is UNAMBIGUOUS in that panel. Two controls
+ * sharing an attribute value is not a match, it is a guess, and the focus goes to the panel
+ * instead of to the wrong button.
+ */
+export function liveModalOpener(opener = null, { within = null, identity = ["id", "name", "href"] } = {}) {
+  if (!opener) return null;
+  if (opener.isConnected) return opener;
+  if (!within?.isConnected) return null;
+
+  for (const name of identity) {
+    const value = opener.getAttribute?.(name);
+    if (!value) continue;
+    const matches = [...within.querySelectorAll(`[${name}]`)].filter((node) => node.getAttribute(name) === value);
+    if (matches.length === 1) return matches[0];
+  }
+
+  return null;
+}
+
+export function releaseModalPanel(panel = null) {
+  if (!panel?.setAttribute) return false;
+
+  const previous = panel.getAttribute(MODAL_STACK_PREVIOUS_ARIA_HIDDEN);
+
+  try {
+    panel.inert = false;
+  } catch {
+    panel.removeAttribute("inert");
+  }
+
+  panel.removeAttribute("inert");
+  panel.setAttribute(MODAL_STACK_HELD, "false");
+
+  /* The state before the layer arrived, restored exactly: an aria-hidden the owner had is
+     put back, one it never had is removed rather than left reading "false". */
+  if (previous === "__missing__" || !previous) {
+    panel.removeAttribute("aria-hidden");
+  } else {
+    panel.setAttribute("aria-hidden", previous);
+  }
+
+  panel.removeAttribute(MODAL_STACK_PREVIOUS_ARIA_HIDDEN);
+  return true;
 }
 
 export function modalFocusableElements(panel) {

@@ -3,7 +3,7 @@ import { getFinalization, reconcilePaymentResult } from "./payment-state.js";
 import { renderReviewPanel } from "./review-panel.js";
 import { getFacturaReviews, requestFacturaReviews } from "../../views/facturas/facturas.reviews.api.js";
 import { AppCore } from "../../core/index.js";
-import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
+import { createModalLifecycle, holdModalPanel, liveModalOpener, releaseModalPanel, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 import { createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support · Facturas · Paid Confirmation Experience
@@ -42,6 +42,7 @@ let observer = null;
 let reconcileFrame = 0;
 let retryPollTimer = 0;
 let dialogLookupSeq = 0;
+let heldPanel = null;
 let reconcileLookupSeq = 0;
 let state = null;
 let reviewPollTimer = 0;
@@ -200,6 +201,13 @@ function ensureRoot() {
 
 function viewRoot() {
   return isBrowser() ? document.querySelector(VIEW_ROOT_SELECTOR) : null;
+}
+
+/* The panel this dialog covers. The trigger always lives inside the factura detail, so the
+   layer below is that detail's panel -- and it is a sibling of this dialog's root, never an
+   ancestor of it. */
+function coveredPanel() {
+  return isBrowser() ? document.querySelector(DETAIL_PANEL_SELECTOR) : null;
 }
 
 function detailRoot() {
@@ -407,21 +415,38 @@ function render({ focus = false } = {}) {
   if (!root) return false;
 
   renderModalContent(root, renderDialog(), { focusAttributes: ["id", "data-fpc-action"] });
-  if (state?.open) modalLifecycle.activate({ opener: state.opener });
-  else modalLifecycle.deactivate({ restoreFocus: false });
+
+  /* While this dialog covers the factura detail, the detail below stays isolated -- pointer,
+     keyboard and assistive technology alike -- through the SAME stack authority the
+     attachment viewer uses. No second copy of these rules lives here. */
+  if (state?.open) {
+    heldPanel = coveredPanel() || heldPanel;
+    holdModalPanel(heldPanel, { activeLayer: root });
+    modalLifecycle.activate({ opener: state.opener });
+  } else {
+    releaseModalPanel(heldPanel);
+    heldPanel = null;
+    modalLifecycle.deactivate({ restoreFocus: false });
+  }
   if (focus && state?.open) requestAnimationFrame(focusDialog);
   return true;
 }
 
 function closeDialog({ restoreFocus = true } = {}) {
   const opener = state?.opener || null;
+  /* The detail underneath may have re-rendered while this dialog covered it, replacing the
+     very control that opened it. The stack authority finds the live equivalent. */
+  const owner = heldPanel;
   clearTimeout(reviewPollTimer); reviewPollTimer = 0;
   state?.reviewController?.abort();
   state = null;
   dialogLookupSeq += 1;
   render();
 
-  if (restoreFocus) requestAnimationFrame(() => restoreModalFocus(opener));
+  if (restoreFocus) {
+    const target = liveModalOpener(opener, { within: owner, identity: ["data-factura-id", "data-facturas-action", "id"] }) || opener;
+    requestAnimationFrame(() => restoreModalFocus(target));
+  }
   return true;
 }
 

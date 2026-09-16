@@ -342,7 +342,7 @@ body.incidencias-media-viewer-open {
   padding: clamp(18px, 4vw, 34px);
 }
 
-[data-incidencias-modal-panel="true"][data-media-viewer-background="true"] {
+[data-incidencias-modal-panel="true"][data-modal-stack-held="true"] {
   user-select: none;
 }
 

@@ -1,4 +1,4 @@
-import { createModalLifecycle, modalFocusableElements, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
+import { createModalLifecycle, holdModalPanel, liveModalOpener, modalFocusableElements, releaseModalPanel, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 import { MODAL_SHELL_SELECTORS, renderModalShell } from "../entity-overlay/modal-host.js";
 import { cleanText } from "../../core/presentation-text.js";
 /* =========================================================
@@ -460,7 +460,14 @@ function finalizeReturnToTicket(
       ? resolveOpener(session, root)
       : null;
 
-    restoreModalFocus(opener);
+    /* An attachment card rebuilt while the viewer covered it would leave a detached opener;
+       the same stack rule finds the live control instead of dropping focus on the body. */
+    restoreModalFocus(
+      liveModalOpener(opener, {
+        within: root?.querySelector?.(PANEL) || null,
+        identity: ["data-attachment-id", "id"],
+      }) || opener
+    );
 
     restoreSessionScroll(session);
 
@@ -509,48 +516,12 @@ function setPanelInert(root = null, inert = true) {
   const panel = root?.querySelector?.(PANEL);
   if (!panel) return false;
 
-  if (inert) {
-    /* Already held. Changing file must not re-assert the isolation: re-writing the same
-       attributes is a mutation the rest of the app can observe, and asking for isolation we
-       already have is how a content change starts looking like a reopen. */
-    if (panel.dataset.mediaViewerBackground === "true") return true;
-
-    if (!panel.dataset.viewerPreviousAriaHidden) {
-      panel.dataset.viewerPreviousAriaHidden =
-        panel.getAttribute("aria-hidden") ?? "__missing__";
-    }
-
-    panel.setAttribute("aria-hidden", "true");
-
-    try {
-      panel.inert = true;
-    } catch {
-      panel.setAttribute("inert", "");
-    }
-
-    panel.dataset.mediaViewerBackground = "true";
-    return true;
-  }
-
-  const previous = panel.dataset.viewerPreviousAriaHidden;
-
-  try {
-    panel.inert = false;
-  } catch {
-    panel.removeAttribute("inert");
-  }
-
-  panel.removeAttribute("inert");
-  panel.dataset.mediaViewerBackground = "false";
-
-  if (previous === "__missing__" || !previous) {
-    panel.removeAttribute("aria-hidden");
-  } else {
-    panel.setAttribute("aria-hidden", previous);
-  }
-
-  delete panel.dataset.viewerPreviousAriaHidden;
-  return true;
+  /* The stack's hold and release live in ONE authority (modal-lifecycle.js), shared with
+     every other layer that covers a panel. The viewer only says which panel it covers and
+     which layer must stay reachable. */
+  return inert
+    ? holdModalPanel(panel, { activeLayer: activeViewer?.root === root ? activeViewer.layer : null })
+    : releaseModalPanel(panel);
 }
 
 function clearCloseTimer() {

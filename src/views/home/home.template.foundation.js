@@ -139,7 +139,7 @@ export function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
 }
 
-export function normalizeKey(value = "") {
+export function homeLabelKey(value = "") {
   return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
@@ -159,7 +159,7 @@ export function classNames(...values) {
 }
 
 export function statusKey(value = "") {
-  const key = normalizeKey(value);
+  const key = homeLabelKey(value);
 
   if (["closed", "resolved", "solved", "paid"].includes(key)) return "success";
   if (["pending", "unpaid", "pending_payment", "partial", "draft"].includes(key)) return "warning";
@@ -170,13 +170,13 @@ export function statusKey(value = "") {
 
 export function visibleStatus(value = "") {
   const raw = cleanText(value, "");
-  return STATUS_LABELS[normalizeKey(raw)] || raw || "Sin estado";
+  return STATUS_LABELS[homeLabelKey(raw)] || raw || "Sin estado";
 }
 
 export function visibleText(value = "", fallback = "") {
   const text = cleanText(value, "");
   if (!text) return fallback;
-  return STATUS_LABELS[normalizeKey(text)] || text;
+  return STATUS_LABELS[homeLabelKey(text)] || text;
 }
 
 export function isGenericInvoiceTitle(value = "") {
@@ -185,7 +185,7 @@ export function isGenericInvoiceTitle(value = "") {
     "factura_disponible",
     "factura_disponible_para_consulta",
     "factura_disponible_para_consulta.",
-  ].includes(normalizeKey(value));
+  ].includes(homeLabelKey(value));
 }
 
 export function hasAmount(value = null) {
@@ -351,7 +351,7 @@ export function invoiceDisplayId(source = {}) {
 }
 
 export function canonicalIconName(value = "activity") {
-  const key = normalizeKey(value);
+  const key = homeLabelKey(value);
   return ICON_ALIASES[key] || "activity";
 }
 

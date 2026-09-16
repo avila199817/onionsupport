@@ -4,7 +4,7 @@
 ========================================================= */
 
 import { userNameFromIdentity } from "../../core/user-identity.js";
-import { DEFAULT_ROUTES, cleanText, initialsFrom, isObject, normalizeKey, optionalNumber, safeArray, safeImageSrc } from "./home.template.foundation.js";
+import { DEFAULT_ROUTES, cleanText, initialsFrom, isObject, homeLabelKey, optionalNumber, safeArray, safeImageSrc } from "./home.template.foundation.js";
 import { clamp } from "../../core/numbers.js";
 import { firstNonEmpty } from "../../core/objects.js";
 
@@ -22,8 +22,8 @@ export function buildVm(input = {}) {
 
   const admin =
     dashboard.admin === true ||
-    normalizeKey(role) === "admin" ||
-    normalizeKey(user.role) === "admin";
+    homeLabelKey(role) === "admin" ||
+    homeLabelKey(user.role) === "admin";
 
   const routes = {
     ...DEFAULT_ROUTES,

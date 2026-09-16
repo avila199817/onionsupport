@@ -18,6 +18,7 @@ import { selectFacturasStats } from "./facturas.stats.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { clamp } from "../../core/numbers.js";
+import { labelKey } from "../../core/slug-key.js";
 
 export const FACTURAS_TEMPLATE_VERSION =
   "facturas.template.private.v7.admin-visual-parity";
@@ -148,17 +149,10 @@ function normalizeText(value = "") {
     .trim();
 }
 
-function normalizeKey(value = "") {
-  return normalizeText(value)
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
 function bool(value, fallback = false) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value === 1;
-  const key = normalizeKey(value);
+  const key = labelKey(value);
   if (["true", "1", "yes", "si", "on"].includes(key)) return true;
   if (["false", "0", "no", "off"].includes(key)) return false;
   return fallback;
@@ -225,7 +219,7 @@ function getRuntimeState(input = {}) {
 function isAdmin(input = {}) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
-  const role = normalizeKey(firstNonEmpty(
+  const role = labelKey(firstNonEmpty(
     data.role,
     data.rol,
     runtime.role,
@@ -441,7 +435,7 @@ function getPaymentRaw(item = {}) {
 }
 
 function getEstadoPagoKey(value = "") {
-  const key = normalizeKey(value);
+  const key = labelKey(value);
   if (["paid", "pagada", "pagado", "cobrada", "cobrado", "abonada", "abonado"].includes(key)) return "paid";
   if (["pending", "pendiente", "unpaid", "sin_pagar"].includes(key)) return "pending";
   if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
@@ -571,7 +565,7 @@ const canSendFactura = (item = {}) => hasPdf(item) && isValidEmail(getClientEmai
 ========================================================= */
 
 function normalizeFilter(value = "") {
-  const key = normalizeKey(value);
+  const key = labelKey(value);
   if (!key || ["all", "todo", "todos", "todas", "total"].includes(key)) return "all";
   if (["pending", "pendiente", "pendientes", "partial", "parcial", "draft", "borrador", "unpaid", "sin_pagar"].includes(key)) return "pending";
   if (["paid", "pagada", "pagado", "pagadas", "cobrada", "cobrado"].includes(key)) return "paid";
@@ -594,7 +588,7 @@ const getFilterLabel = (filter = "all") => FILTERS.find((item) => item.key === n
 const getSearchQuery = (input = {}) => cleanText(getRuntimeValue(input, ["search", "searchQuery", "query", "q", "term", "keyword", "facturasSearch"], ""), "");
 
 function normalizeSort(value = "") {
-  const key = normalizeKey(value);
+  const key = labelKey(value);
   return ["date_asc", "fecha_asc", "emission_asc", "issue_date_asc", "fecha_emision_asc", "oldest", "oldest_first", "menor_fecha"].includes(key)
     ? "date_asc"
     : "date_desc";

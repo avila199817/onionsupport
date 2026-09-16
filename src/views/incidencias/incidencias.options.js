@@ -9,6 +9,8 @@
    - Release 2026-09-06: precisión temporal visible HH:MM validada por contrato.
 ========================================================= */
 
+import { slugKey } from "../../core/slug-key.js";
+
 function option(value, label) {
   return Object.freeze({ value, label });
 }
@@ -37,17 +39,6 @@ export const INCIDENCIA_CATEGORY_OPTIONS = Object.freeze([
   option("documentation", "Documentación"),
   option("sales", "Ventas"),
 ]);
-
-function key(value = "") {
-  return String(value ?? "")
-    .trim()
-    .toLocaleLowerCase("es-ES")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
 
 const STATUS_ALIASES = Object.freeze({
   pending: "pending",
@@ -134,7 +125,7 @@ const CATEGORY_ALIASES = Object.freeze({
 });
 
 function normalizeWith(map, value, fallback = "") {
-  return map[key(value)] || fallback;
+  return map[slugKey(value)] || fallback;
 }
 
 export function normalizeIncidenciaStatus(value = "", fallback = "") {

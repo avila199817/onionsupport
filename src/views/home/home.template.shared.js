@@ -13,7 +13,7 @@ import {
   escapeHtml,
   formatDate,
   icon,
-  normalizeKey,
+  homeLabelKey,
   safeDisplayId,
   safeImageSrc,
   safeRoute,
@@ -55,7 +55,7 @@ export function statusBadge(value = "", fallback = "Sin estado") {
   const label = visibleStatus(value) || fallback;
   const tone = statusKey(value);
 
-  return `<span class="home-status home-status--${attr(tone)}" data-home-status="${attr(normalizeKey(value))}">${escapeHtml(label)}</span>`;
+  return `<span class="home-status home-status--${attr(tone)}" data-home-status="${attr(homeLabelKey(value))}">${escapeHtml(label)}</span>`;
 }
 
 export function entityIdBadge(kind = "ID", value = "") {
@@ -67,7 +67,7 @@ export function entityIdBadge(kind = "ID", value = "") {
   return `
     <span
       class="home-entity-id"
-      data-home-id-kind="${attr(normalizeKey(label) || "id")}"
+      data-home-id-kind="${attr(homeLabelKey(label) || "id")}"
       title="${attr(`${label} ${id}`)}"
     >${escapeHtml(id)}</span>
   `;

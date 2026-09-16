@@ -10,6 +10,7 @@
 import * as Base from "./facturas.api.base.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
+import { recordKey } from "../../core/slug-key.js";
 
 export * from "./facturas.api.base.js";
 
@@ -50,16 +51,6 @@ const FACTURA_TECHNICAL_TYPES = new Set([
   "invoice_create_operation",
   "factura_create_operation",
 ]);
-
-function recordKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s.-]+/g, "_")
-    .replace(/[^\w:]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
 
 function isBlob(value) {
   return typeof Blob !== "undefined" && value instanceof Blob;

@@ -57,16 +57,6 @@ function number(value = 0, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function directoryKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
 export function isInternalEmployeeUsuario(item = {}) {
   const source = safeObject(item);
 

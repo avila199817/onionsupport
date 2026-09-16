@@ -24,7 +24,7 @@ import { createAsyncScope } from "../../core/async-scope.js";
 import Http from "../../core/http.js";
 import AvatarSystem, { resolveAvatarPresentation } from "../avatar-system/index.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
-import { cleanText } from "../../core/presentation-text.js";
+import { cleanText, codeKey } from "../../core/presentation-text.js";
 import { safeObject, firstNonBlank } from "../../core/objects.js";
 
 /* Trusted verifier compatibility marker: the legacy tooltip dataset is retired
@@ -700,16 +700,14 @@ function status(form, message = "", type = "info") {
 }
 
 function normalizedErrorCode(error) {
-  return cleanText(firstNonBlank(
+  return codeKey(firstNonBlank(
     error?.code,
     error?.payload?.code,
     error?.payload?.error,
     error?.data?.code,
     error?.data?.error,
     ""
-  ))
-    .replace(/[\s-]+/g, "_")
-    .toUpperCase();
+  ));
 }
 
 function activeTicketConflict(error) {

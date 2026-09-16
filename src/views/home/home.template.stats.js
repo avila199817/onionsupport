@@ -10,7 +10,7 @@ import {
   formatMoney,
   formatNumber,
   icon,
-  normalizeKey,
+  homeLabelKey,
   safeRoute,
 } from "./home.template.foundation.js";
 import { avatar, loadingCards } from "./home.template.shared.js";
@@ -33,7 +33,7 @@ export function header(vm) {
 
 function statCard({ label, value, text, iconName, route, modifier }) {
   const href = safeRoute(route, "/");
-  const key = normalizeKey(modifier || label || "stat");
+  const key = homeLabelKey(modifier || label || "stat");
   const available = typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
   const formattedValue = available ? formatNumber(value) : "—";
   const description = available ? text : "No disponible";

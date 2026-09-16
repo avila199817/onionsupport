@@ -57,7 +57,7 @@ assert.equal(redactUrl(`  /r?Token=${SECRET}&access-token=${SECRET}&page=2  `), 
 assert.equal(redactUrl(`/r#access_token=${SECRET}`), "/r#access_token=***", "fragment assignments are masked by the pattern pass");
 assert.equal(redactUrl(`/activate-account/${SECRET}`), "/activate-account/***");
 assert.equal(redactUrl(`http://exa mple.com/?sas=${SECRET}`), "http://exa mple.com/?sas=***", "text the URL parser rejects falls back to the pattern pass");
-assert.equal(redactUrl("No se pudo cargar el inicio."), "/No%20se%20pudo%20cargar%20el%20inicio.", "inherited: text that is not a URL comes back as an encoded path (reported in the release note; redactSecrets is the pass for messages)");
+assert.equal(redactUrl("No se pudo cargar el inicio."), "/No%20se%20pudo%20cargar%20el%20inicio.", "text that is not a URL comes back as an encoded path: redactUrl is for routes and URLs only; messages, payload strings and hashes go through redactSecrets (http-error-payload-contract)");
 
 // Source: one definer, no inline copy of any pattern, callers import by name, entry and leaf import nothing.
 const SRC_ROOT = fileURLToPath(new URL("../src/", import.meta.url));

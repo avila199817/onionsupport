@@ -140,8 +140,10 @@ try {
         const detail = await page.locator(surface.host).evaluate((node) => ({ html: node.outerHTML, width: node.querySelector("img")?.naturalWidth }));
         throw new Error(`${surface.name}: ${JSON.stringify(detail)}; ${error.message}`);
       });
-      assert.equal(await page.locator(surface.host + " img").isVisible(), true, `${surface.name}: imagen visible`);
-      assert.equal(await page.locator(surface.host + " img").evaluate((node) => Number(getComputedStyle(node).opacity) > 0), true);
+      // The avatar system reveals the image from its load handler, which runs after
+      // image.complete turns true: wait for the visible state instead of reading it once.
+      await page.locator(surface.host + " img").waitFor({ state: "visible", timeout: 10000 }).catch(() => { throw new Error(`${surface.name}: imagen visible`); });
+      await page.waitForFunction((selector) => Number(getComputedStyle(document.querySelector(selector)?.querySelector("img"))?.opacity) > 0, surface.host, { timeout: 10000 }).catch(() => { throw new Error(`${surface.name}: imagen con opacidad`); });
     }
   }
   async function identities() {

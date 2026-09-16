@@ -24,7 +24,7 @@ import Http from "./http.js";
 import { userNameFromIdentity } from "./user-identity.js";
 import { cleanText, normalizeKey } from "./presentation-text.js";
 import { isObject, isFunction, firstNonBlank } from "./objects.js";
-import { SENSITIVE_QUERY_KEYS, redactTokenPaths, redactUrl } from "./redact.js";
+import { SENSITIVE_QUERY_KEYS, redactSecrets, redactTokenPaths, redactUrl } from "./redact.js";
 
 export const CORE_VERSION = "core.minimal.v9-specialized-snapshot";
 const RUNTIME_STATE_VERSION = "core.runtime-state.v2-dirty-guard";
@@ -129,7 +129,7 @@ function mutate(mutator = null, options = {}) {
 function safeError(error = null) {
   if (!error) return null;
   return {
-    name: cleanText(error?.name, "Error"), message: redactUrl(error?.message || String(error)),
+    name: cleanText(error?.name, "Error"), message: redactSecrets(cleanText(error?.message || String(error), "")),
     status: error?.status || error?.statusCode || error?.response?.status || null,
     code: cleanText(error?.code || error?.error || "", "") || null,
   };
@@ -137,7 +137,7 @@ function safeError(error = null) {
 function sanitizeObject(value, depth = 0) {
   if (depth > 6) return null;
   if (value === null || value === undefined) return value;
-  if (typeof value === "string") return redactUrl(value);
+  if (typeof value === "string") return redactSecrets(value);
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (["function", "symbol", "bigint"].includes(typeof value)) return undefined;
   if (Array.isArray(value)) return value.slice(0, 250).map((item) => sanitizeObject(item, depth + 1));
@@ -300,7 +300,7 @@ function safeSearch(value = "") {
 function safeHash(value = "") {
   const hash = cleanText(value, "");
   if (!hash || hash === "#" || /[\r\n\t\\]/.test(hash)) return "";
-  return redactUrl(hash.startsWith("#") ? hash : `#${hash.replace(/^#+/, "")}`);
+  return redactSecrets(hash.startsWith("#") ? hash : `#${hash.replace(/^#+/, "")}`);
 }
 function pathFromInput(value = ROOT_PATH) {
   const raw = cleanText(value, ROOT_PATH);

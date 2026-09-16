@@ -1,0 +1,36 @@
+# Presentación de errores por reglas ordenadas: `core/error-rules.js` y el catálogo de códigos del backend · 2026-09-16
+
+## Problema
+
+Cinco superficies decidían con lógica propia qué texto ve la persona ante un error: login (`authErrorMessage`), restablecimiento de contraseña (`tokenIsUnavailable` y `authErrorMessage`), activación de cuenta (`activationError`), soporte público (`errorMessage`) y alta de Usuarios (`creationFailureMessage`). Cada una encadenaba `if (status === … || code.includes(…))` a mano y comparaba códigos que el backend nunca emite (`RESET_TOKEN_EXPIRED`, `RESET_TOKEN_ALREADY_USED`, `TOKEN_INVALID`, `ACTIVE_TICKET_EXISTS`, `CREATE_USER_MAIL_FAILED`, sufijos en castellano), mientras un código real (`RESET_TOKEN_ALREADY_USED_OR_STALE`) no casaba con la expresión regular del restablecimiento: un enlace ya usado dejaba el formulario utilizable.
+
+## Causa raíz
+
+No existía una capa de presentación: la extracción técnica (`core/errors.js`) estaba centralizada desde U10, pero la decisión «código canónico → texto de dominio» vivía en cada vista sin catálogo contra el que comprobarla.
+
+## Cambio
+
+- `src/core/error-rules.js`: `presentError(error, rules, fallback)`. Toma los hechos de `core/errors.js` (`errorStatus`, `errorCode` canónico) y recorre la lista ORDENADA de reglas del dominio; la primera que casa decide. Una regla casa si CUALQUIERA de sus condiciones se cumple (reproduce los `||` de los mapeadores): `statuses`, `minStatus`, `offline` (estado 0), `codes` (exactos), `codeIncludes` (subcadenas), `when` (conjunción). `message` y `fallback` son texto o función de los hechos (la activación devuelve `{ field, message, completed }` nuevos en cada llamada). Sin textos, códigos ni estados en el módulo.
+- Las cinco superficies pasan a listas de reglas (`LOGIN_ERROR_RULES`, `RESET_ERROR_RULES` + `RESET_TOKEN_UNAVAILABLE_CODES`, `ACTIVATION_ERROR_RULES`, `SUPPORT_ERROR_RULES` + `ACTIVE_TICKET_ERROR_CODES`, `CREATE_USER_ERROR_RULES`), con los mismos textos y el mismo orden. El alta de Usuarios conserva su policy explícita de texto del backend en el fallback (`errorMessage(…, payloadFirst)`).
+- Catálogo: `tools/backend-error-codes.json` (742 códigos en 11 dominios), generado por `node tools/backend-error-codes.mjs --from ../oniontech` desde `sendError` (por la firma local de cada helper), `errorPayload`, `sendAuthError`/`fail`/`domainError`/`paidFlowError`/`HttpError`/`WhatsAppError`, `createAuthError("CODE", …)`, literales `code:`/`error:` y `.code =`. `--check` detecta deriva frente a un checkout del backend.
+- `tools/error-rules-contract.mjs` (en `check:dist`): mecanismo (orden, cualquier condición, `offline`/`minStatus`/`codes`/`codeIncludes`/`when`, funciones de mensaje y fallback, código canónico, registros nuevos por llamada); catálogo bien formado; cada lista de reglas existe, está congelada y sólo nombra códigos que emite su dominio del backend (o que fabrica `core/http.js`: `HTTP_ERROR`, `NETWORK_ERROR`, `REQUEST_TIMEOUT`); las subcadenas de `codeIncludes` forman parte de algún código real; el vocabulario podado no vuelve; un solo definidor; los fixtures de soporte público inyectan y sirven la autoridad; `main.js` y analytics no importan el módulo. Pruebas negativas: una subcadena inventada y un código fuera de catálogo hacen fallar el contrato.
+- Fixtures: `public-support-runtime-contract` inyecta `presentError`; `public-support-browser-contract` sirve `core/error-rules.js`; `public-auth-state-contract` rechaza con los códigos y estados reales (`RESET_TOKEN_INVALID_OR_EXPIRED` 400, `RESET_TOKEN_ALREADY_USED_OR_STALE` 409, `TOKEN_EXPIRED` 410, `ACTIVATION_STATE_CHANGED` 401); `auth-error-code-alignment-contract` comprueba las mismas invariantes del login sobre la lista de reglas (la regla 423/LOCKED existe y precede a la de 401; `lockUntil` del payload; texto del bloqueo).
+
+## Poda y alineación (vocabulario que el backend no emite, verificado contra el catálogo)
+
+| Superficie | Antes | Ahora | Efecto visible |
+| --- | --- | --- | --- |
+| Restablecimiento (`tokenIsUnavailable`) | `401`, `410` o regex `^(?:RESET_)?TOKEN_(EXPIRED\|INVALID\|INVALID_OR_EXPIRED\|ALREADY_USED)$` | `401`, `410` o uno de `TOKEN_EXPIRED`, `TOKEN_INVALID_OR_EXPIRED`, `RESET_TOKEN_INVALID_OR_EXPIRED`, `RESET_TOKEN_ALREADY_USED_OR_STALE` | Un enlace ya usado (409 `RESET_TOKEN_ALREADY_USED_OR_STALE`, el único código real de ese caso) bloquea ahora el formulario con «Necesitas un nuevo enlace», como los enlaces inválidos; antes quedaba utilizable. Los códigos que salen de la lista nunca se emitían |
+| Restablecimiento (mensaje) | `RESET_TOKEN_EXPIRED` o 410 → «caducado»; `RESET_TOKEN_ALREADY_USED` o (409 y TOKEN) → «ya utilizado» | 410 → «caducado»; `RESET_TOKEN_ALREADY_USED_OR_STALE` o (409 y TOKEN) → «ya utilizado» | Ninguno con el backend actual (el código real llega con 409 y ya casaba por estado) |
+| Activación | `TOKEN_INVALID_OR_EXPIRED`, `TOKEN_INVALID`, 401, `ACTIVATION_STATE_CHANGED` | sin `TOKEN_INVALID` | Ninguno |
+| Login (403) | subcadenas `DISABLED`, `DESACTIVADO`, `BLOCKED`, `BLOQUEADO`, `DELETED`, `ARCHIVED`, `SUSPENDED`, `REVOKED` | `DISABLED`, `REVOKED` (el backend emite `ACCOUNT_DISABLED`, `USER_DISABLED`, `SESSION_REVOKED`; los demás no existen) | Ninguno |
+| Soporte público | conflicto si 409/423 y código en {`PUBLIC_TICKET_ACTIVE_EXISTS`, `PUBLIC_TICKET_OPEN_EXISTS`, `PUBLIC_TICKET_ALREADY_OPEN`, `ACTIVE_TICKET_EXISTS`} | sólo `PUBLIC_TICKET_ACTIVE_EXISTS` (el único que el backend emite; los otros dos son alias de reconocimiento internos del backend que nunca salen) | Ninguno |
+| Alta de Usuarios | `CREATE_USER_MAIL_FAILED` → «El usuario se creó, pero no se pudo enviar el correo…» | regla retirada | Ninguno: el backend nunca emite ese código. El caso «creado pero sin correo» no es un error: responde 201 con `USER_CREATED_MAIL_PENDING` y `activationUrl`, que la API de Usuarios ya trata. No se asigna ese texto a `CREATE_USER_FAILED` (fallo genérico: el usuario no se creó) ni se añade `EMAIL_ALREADY_EXISTS` (lo emite sólo la edición, no el alta) |
+
+## Comportamiento
+
+Equivalencia de cada mapeador retirado (extraído de `HEAD`) frente a su lista de reglas: 17 estados × 732 códigos (los 742 del catálogo menos duplicados, más los podados, los del propio frontend y varios inventados) × 4 formas de error (código directo, payload con mensaje, `lockUntil` futuro, `lockUntilIso` pasado): 348.432 comprobaciones. Todas las diferencias corresponden a códigos que el backend no emite, salvo `RESET_TOKEN_ALREADY_USED_OR_STALE` en el restablecimiento (la alineación de la tabla). Batería de navegador (incluido `public-auth-state-contract` con los códigos reales) y espejo con el tooling de `main`: en la PR.
+
+## Riesgo
+
+Bajo. Un mecanismo sin texto propio; las listas reproducen orden y condiciones; el único cambio visible es el bloqueo del formulario de restablecimiento ante un enlace ya usado, que es el comportamiento que el texto ya anunciaba. Las vistas privadas (Clientes, Facturas, Incidencias, Usuarios, Home, Cuenta, Servidor, Correo, WhatsApp) siguen mostrando el texto del backend por `errorMessage`; su paso a reglas con policy `backendText` explícita es la siguiente unidad.

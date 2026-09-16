@@ -42,6 +42,7 @@ import createPasswordResetTemplate from "../password-reset/template.js";
 import { cleanText, codeKey } from "../../../core/presentation-text.js";
 import { isObject, isFunction } from "../../../core/objects.js";
 import { errorCode, errorStatus } from "../../../core/errors.js";
+import { presentError } from "../../../core/error-rules.js";
 
 export const ACTIVATE_ACCOUNT_VIEW_VERSION =
   "activate-account.view.public.v1-production";
@@ -986,100 +987,26 @@ function resultIsSuccess(result = {}) {
   );
 }
 
+const ACTIVATION_ERROR_RULES = Object.freeze([
+  { codes: ["TOKEN_EXPIRED"], statuses: [410], message: () => ({ field: "token", message: "El enlace de activación ha caducado.", completed: false }) },
+  { codes: ["TOKEN_INVALID_OR_EXPIRED", "ACTIVATION_STATE_CHANGED"], statuses: [401], message: () => ({ field: "token", message: "El enlace de activación no es válido o ya se ha utilizado. Solicita ayuda para continuar.", completed: false }) },
+  { codes: ["ACCOUNT_ALREADY_ACTIVE"], message: () => ({ field: "", message: "La cuenta ya está activada. Puedes iniciar sesión.", completed: true }) },
+  { codes: ["ACTIVATION_PASSWORD_MISSING"], message: () => ({ field: "password", message: "Introduce una contraseña nueva.", completed: false }) },
+  { codes: ["WEAK_PASSWORD"], message: () => ({ field: "password", message: AUTH_PASSWORD_POLICY_MESSAGE, completed: false }) },
+  { codes: ["PASSWORD_TOO_LONG"], message: () => ({ field: "password", message: "La contraseña es demasiado larga.", completed: false }) },
+  { codes: ["ACTIVATION_PASSWORD_MISMATCH"], message: () => ({ field: "confirmPassword", message: "Las contraseñas no coinciden.", completed: false }) },
+  { statuses: [429], codeIncludes: ["RATE_LIMIT"], message: () => ({ field: "", message: "Demasiados intentos. Espera unos minutos y vuelve a intentarlo.", completed: false }) },
+  { minStatus: 500, codes: ["ACTIVATION_UNAVAILABLE"], message: () => ({ field: "", message: "No se pudo activar la cuenta en este momento. Inténtalo de nuevo.", completed: false }) },
+]);
+
 function activationError(error = null) {
-  const code = errorCode(error);
-  const status = errorStatus(error, 0);
-
-  if (code === "TOKEN_EXPIRED" || status === 410) {
-    return {
-      field: "token",
-      message: "El enlace de activación ha caducado.",
-      completed: false,
-    };
-  }
-
-  if (
-    code === "TOKEN_INVALID_OR_EXPIRED" || code === "TOKEN_INVALID" || status === 401 ||
-    code === "ACTIVATION_STATE_CHANGED"
-  ) {
-    return {
-      field: "token",
-      message: "El enlace de activación no es válido o ya se ha utilizado. Solicita ayuda para continuar.",
-      completed: false,
-    };
-  }
-
-  if (code === "ACCOUNT_ALREADY_ACTIVE") {
-    return {
-      field: "",
-      message: "La cuenta ya está activada. Puedes iniciar sesión.",
-      completed: true,
-    };
-  }
-
-  if (code === "ACTIVATION_PASSWORD_MISSING") {
-    return {
-      field: "password",
-      message: "Introduce una contraseña nueva.",
-      completed: false,
-    };
-  }
-
-  if (code === "WEAK_PASSWORD") {
-    return {
-      field: "password",
-      message: AUTH_PASSWORD_POLICY_MESSAGE,
-      completed: false,
-    };
-  }
-
-  if (code === "PASSWORD_TOO_LONG") {
-    return {
-      field: "password",
-      message: "La contraseña es demasiado larga.",
-      completed: false,
-    };
-  }
-
-  if (code === "ACTIVATION_PASSWORD_MISMATCH") {
-    return {
-      field: "confirmPassword",
-      message: "Las contraseñas no coinciden.",
-      completed: false,
-    };
-  }
-
-  if (
-    status === 429 ||
-    code.includes("RATE_LIMIT")
-  ) {
-    return {
-      field: "",
-      message:
-        "Demasiados intentos. Espera unos minutos y vuelve a intentarlo.",
-      completed: false,
-    };
-  }
-
-  if (
-    status >= 500 ||
-    code === "ACTIVATION_UNAVAILABLE"
-  ) {
-    return {
-      field: "",
-      message:
-        "No se pudo activar la cuenta en este momento. Inténtalo de nuevo.",
-      completed: false,
-    };
-  }
-
-  return {
+  return presentError(error, ACTIVATION_ERROR_RULES, ({ status }) => ({
     field: "",
     message: !status
       ? "No hemos podido conectar. Comprueba tu conexión y vuelve a intentarlo."
       : "No se pudo activar la cuenta. Vuelve a intentarlo o solicita ayuda.",
     completed: false,
-  };
+  }));
 }
 
 /* =========================================================

@@ -21,6 +21,7 @@ import { cleanText } from "../../../core/presentation-text.js";
 import { isFunction } from "../../../core/objects.js";
 import { redactSecrets } from "../../../core/redact.js";
 import { errorCode, errorStatus } from "../../../core/errors.js";
+import { presentError } from "../../../core/error-rules.js";
 
 export const LOGIN_VIEW_VERSION = "login.view.public.controller.v7-document-handoff";
 
@@ -690,60 +691,31 @@ function applyErrors(refs, errors = {}) {
   return Object.keys(errors).length > 0;
 }
 
+const LOGIN_ERROR_RULES = Object.freeze([
+  { statuses: [423], codeIncludes: ["LOCKED"], message: lockedMessage },
+  { statuses: [401], codeIncludes: ["INVALID", "UNAUTHORIZED"], message: "El usuario o la contraseña no son correctos. Revísalos e inténtalo de nuevo." },
+  { statuses: [403], codeIncludes: ["DISABLED", "REVOKED"], message: "Tu cuenta no tiene acceso activo. Revisa el correo de activación o contacta con Onion Support." },
+  { statuses: [429], codeIncludes: ["RATE_LIMIT"], message: "Has realizado demasiados intentos. Espera unos minutos antes de volver a entrar." },
+  { offline: true, codeIncludes: ["NETWORK", "TIMEOUT"], message: "No hemos podido conectar. Comprueba tu conexión y vuelve a intentarlo." },
+  { minStatus: 500, message: "El servidor no respondió correctamente. Inténtalo de nuevo." },
+]);
+
+function lockedMessage({ error }) {
+  const lockUntil = Number(
+    error?.payload?.lockUntil ||
+      error?.data?.lockUntil ||
+      Date.parse(error?.payload?.lockUntilIso || "") ||
+      0
+  );
+  const minutes = Math.max(1, Math.ceil((lockUntil - Date.now()) / 60000));
+  const wait = Number.isFinite(lockUntil) && lockUntil > Date.now()
+    ? ` Podrás volver a intentarlo en ${minutes} ${minutes === 1 ? "minuto" : "minutos"}.`
+    : " Espera unos minutos antes de volver a intentarlo.";
+  return `La cuenta está bloqueada temporalmente por varios intentos fallidos.${wait}`;
+}
+
 function authErrorMessage(error = null) {
-  const status = errorStatus(error, 0);
-
-  const code = errorCode(error);
-
-  if (status === 423 || code.includes("LOCKED")) {
-    const lockUntil = Number(
-      error?.payload?.lockUntil ||
-        error?.data?.lockUntil ||
-        Date.parse(error?.payload?.lockUntilIso || "") ||
-        0
-    );
-    const minutes = Math.max(1, Math.ceil((lockUntil - Date.now()) / 60000));
-    const wait = Number.isFinite(lockUntil) && lockUntil > Date.now()
-      ? ` Podrás volver a intentarlo en ${minutes} ${minutes === 1 ? "minuto" : "minutos"}.`
-      : " Espera unos minutos antes de volver a intentarlo.";
-    return `La cuenta está bloqueada temporalmente por varios intentos fallidos.${wait}`;
-  }
-
-  if (
-    status === 401 ||
-    code.includes("INVALID") ||
-    code.includes("UNAUTHORIZED")
-  ) {
-    return "El usuario o la contraseña no son correctos. Revísalos e inténtalo de nuevo.";
-  }
-
-  if (
-    status === 403 ||
-    code.includes("DISABLED") ||
-    code.includes("DESACTIVADO") ||
-    code.includes("BLOCKED") ||
-    code.includes("BLOQUEADO") ||
-    code.includes("DELETED") ||
-    code.includes("ARCHIVED") ||
-    code.includes("SUSPENDED") ||
-    code.includes("REVOKED")
-  ) {
-    return "Tu cuenta no tiene acceso activo. Revisa el correo de activación o contacta con Onion Support.";
-  }
-
-  if (status === 429 || code.includes("RATE_LIMIT")) {
-    return "Has realizado demasiados intentos. Espera unos minutos antes de volver a entrar.";
-  }
-
-  if (!status || code.includes("NETWORK") || code.includes("TIMEOUT")) {
-    return "No hemos podido conectar. Comprueba tu conexión y vuelve a intentarlo.";
-  }
-
-  if (status >= 500) {
-    return "El servidor no respondió correctamente. Inténtalo de nuevo.";
-  }
-
-  return "No hemos podido iniciar sesión. Vuelve a intentarlo en unos minutos.";
+  return presentError(error, LOGIN_ERROR_RULES, "No hemos podido iniciar sesión. Vuelve a intentarlo en unos minutos.");
 }
 
 /* =========================================================

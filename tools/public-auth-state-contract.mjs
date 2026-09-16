@@ -110,13 +110,13 @@ try {
     assert.equal(await page.locator(".password-reset-links a").first().isVisible(), true);
   }
 
-  for (const [view, code] of [["password-reset", "RESET_TOKEN_EXPIRED"], ["password-reset", "RESET_TOKEN_ALREADY_USED"], ["activate-account", "TOKEN_EXPIRED"], ["activate-account", "ACTIVATION_STATE_CHANGED"]]) {
+  for (const [view, code, status] of [["password-reset", "RESET_TOKEN_INVALID_OR_EXPIRED", 400], ["password-reset", "RESET_TOKEN_ALREADY_USED_OR_STALE", 409], ["activate-account", "TOKEN_EXPIRED", 410], ["activate-account", "ACTIVATION_STATE_CHANGED", 401]]) {
     const path = `/${view === "password-reset" ? "password-reset" : "activate-account"}?token=fixture-token-only`;
     await mount(view, path);
     await fillPassword();
     await page.locator("[type=submit]").click();
     assert.equal(await page.locator("[type=submit]").getAttribute("aria-busy"), "true");
-    await reject(code);
+    await reject(code, status);
     assert.equal(await page.locator('[data-auth-state="invalid"]').count(), 1);
     assert.equal(await page.locator("[name=password]").inputValue(), "");
     assert.equal(await page.locator("[type=submit]").isDisabled(), true);

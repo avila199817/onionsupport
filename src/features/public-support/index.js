@@ -27,6 +27,7 @@ import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { cleanText, codeKey } from "../../core/presentation-text.js";
 import { safeObject, firstNonBlank } from "../../core/objects.js";
 import { errorStatus } from "../../core/errors.js";
+import { presentError } from "../../core/error-rules.js";
 
 /* Trusted verifier compatibility marker: the legacy tooltip dataset is retired
    at runtime; the identity is now contained entirely by the visible card. */
@@ -49,9 +50,6 @@ const PUBLIC_HOME_SESSION_EVENT = "public-home:session-hydrated";
 const SPAIN_PREFIX = "+34";
 const ACTIVE_TICKET_ERROR_CODES = new Set([
   "PUBLIC_TICKET_ACTIVE_EXISTS",
-  "PUBLIC_TICKET_OPEN_EXISTS",
-  "PUBLIC_TICKET_ALREADY_OPEN",
-  "ACTIVE_TICKET_EXISTS",
 ]);
 const enhanced = new WeakSet();
 const submissions = createAsyncScope();
@@ -1010,14 +1008,16 @@ function successMessage(response) {
   return `Incidencia ${ticketId(response)} creada. Ya puedes consultarla desde tu panel.`;
 }
 
+const SUPPORT_ERROR_RULES = Object.freeze([
+  { when: ({ error }) => activeTicketConflict(error), message: () => activeTicketMessage() },
+  { statuses: [429], message: "Has realizado varias solicitudes seguidas. Espera un momento y vuelve a intentarlo." },
+  { statuses: [400, 422], message: "Hay algún dato que el servidor no ha podido validar. Revisa el formulario." },
+  { statuses: [502, 503, 504], message: "El servicio no ha podido completar la solicitud. Espera unos segundos y vuelve a intentarlo." },
+  { statuses: [404, 405, 501], message: "El formulario de incidencias no está disponible ahora mismo. Puedes contactar por WhatsApp mientras tanto." },
+]);
+
 function errorMessage(error) {
-  const code = errorStatus(error, 0);
-  if (activeTicketConflict(error)) return activeTicketMessage();
-  if (code === 429) return "Has realizado varias solicitudes seguidas. Espera un momento y vuelve a intentarlo.";
-  if (code === 400 || code === 422) return "Hay algún dato que el servidor no ha podido validar. Revisa el formulario.";
-  if ([502, 503, 504].includes(code)) return "El servicio no ha podido completar la solicitud. Espera unos segundos y vuelve a intentarlo.";
-  if ([404, 405, 501].includes(code)) return "El formulario de incidencias no está disponible ahora mismo. Puedes contactar por WhatsApp mientras tanto.";
-  return "No se pudo enviar la solicitud. Comprueba tu conexión e inténtalo de nuevo.";
+  return presentError(error, SUPPORT_ERROR_RULES, "No se pudo enviar la solicitud. Comprueba tu conexión e inténtalo de nuevo.");
 }
 
 function clearAcceptedIssueFields(form) {

@@ -51,6 +51,7 @@ import { isObject, safeObject, isFunction } from "../../core/objects.js";
 import { slugKey } from "../../core/slug-key.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage } from "../../core/errors.js";
+import { presentError } from "../../core/error-rules.js";
 
 /* =========================================================
    META / CONSTANTS
@@ -1432,41 +1433,16 @@ export function reset() {
   return true;
 }
 
+const CREATE_USER_ERROR_RULES = Object.freeze([
+  { codes: ["USER_ALREADY_EXISTS"], message: "Ya existe un usuario con ese email." },
+  { codes: ["USER_LOOKUP_CONFLICT"], message: "Ese email o usuario ya está registrado en los índices de acceso." },
+]);
+
 function creationFailureMessage(
   error = null
 ) {
-  const code =
-    errorCode(error);
-
-  if (
-    code ===
-    "CREATE_USER_MAIL_FAILED"
-  ) {
-    return (
-      "El usuario se creó, pero no se pudo enviar el correo de activación. " +
-      "No repitas el alta: revisa el usuario existente y el envío del correo."
-    );
-  }
-
-  if (
-    code ===
-    "USER_ALREADY_EXISTS"
-  ) {
-    return (
-      "Ya existe un usuario con ese email."
-    );
-  }
-
-  if (
-    code ===
-    "USER_LOOKUP_CONFLICT"
-  ) {
-    return (
-      "Ese email o usuario ya está registrado en los índices de acceso."
-    );
-  }
-
-  return errorMessage(error, "No se pudo crear el usuario.", ERROR_MESSAGE_POLICIES.payloadFirst);
+  return presentError(error, CREATE_USER_ERROR_RULES, ({ error: failure }) =>
+    errorMessage(failure, "No se pudo crear el usuario.", ERROR_MESSAGE_POLICIES.payloadFirst));
 }
 
 export async function submit(
@@ -1642,10 +1618,7 @@ export async function submit(
 
     showToast(
       state.error,
-      errorCode(error) ===
-        "CREATE_USER_MAIL_FAILED"
-        ? "warning"
-        : "error"
+      "error"
     );
 
     return null;

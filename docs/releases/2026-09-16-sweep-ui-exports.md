@@ -19,6 +19,10 @@ La misma que en las unidades anteriores: `export` por costumbre y un alias de no
 
 `createSidebarFooter` parecía de clase A, pero `.github/scripts/avatar_runtime_dom_contract.mjs` importa el módulo dentro de una página real (`await import("/src/ui/sidebar/template.js")`) y llama al nombre como propiedad del espacio de nombres. La primera pasada del verificador no lo vio por un fallo propio (excluía por ruta todo el árbol de trabajo al estar bajo el directorio de trabajo temporal), y la batería lo detectó antes de fusionar. Se mantiene exportado, documentado como API pública deliberada del fixture (clase C), y el verificador ya recorre `tools`, `.github`, `docs` y los HTML de verdad.
 
+## Corrección del contrato: comprobaciones parciales
+
+El trabajo de comparación de la Home construye cada revisión en un directorio que sólo copia `src`, `tools` y la configuración de build. `export-surface-contract` recorría `.github` y `docs` sin comprobar que existieran y fallaba allí con `ENOENT`, rompiendo ese trabajo en cualquier PR desde que se añadió. Ahora, cuando falta alguna de esas raíces, el contrato dice que se salta (el corpus de referencia estaría incompleto y no podría demostrar que un nombre no se usa) y la comprobación completa sigue corriendo donde el repositorio está entero: `npm run validate`, el espejo con el tooling de `main` y la validación confiable de dist.
+
 ## Métricas
 
 | Métrica | Antes | Después |

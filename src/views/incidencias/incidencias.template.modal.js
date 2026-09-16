@@ -30,6 +30,7 @@ import {
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
+import { DATE_PRESETS, dateFormatter } from "../../core/format.js";
 
 export {
   DETAIL_ACTIONS,
@@ -419,13 +420,7 @@ function formatCommentDate(value = null) {
   if (!at) return "Fecha no disponible";
 
   try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(at));
+    return dateFormatter(DATE_PRESETS.shortMonthDateTime).format(new Date(at));
   } catch {
     return "Fecha no disponible";
   }

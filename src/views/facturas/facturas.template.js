@@ -20,7 +20,7 @@ import { safeArray } from "../../core/arrays.js";
 import { clamp } from "../../core/numbers.js";
 import { labelKey } from "../../core/slug-key.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
-import { CURRENCY_POLICIES, currencyCode, formatCurrency } from "../../core/format.js";
+import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, dateFormatter, formatCurrency } from "../../core/format.js";
 
 export const FACTURAS_TEMPLATE_VERSION =
   "facturas.template.private.v7.admin-visual-parity";
@@ -244,9 +244,6 @@ function isAdmin(input = {}) {
    DATE / MONEY
 ========================================================= */
 
-const DATE_SHORT = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
-const DATE_TIME = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-
 function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
   const amount = number(value, NaN);
   if (!Number.isFinite(amount)) return "—";
@@ -256,13 +253,13 @@ function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
 function formatDateShort(value = null) {
   const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.invoiceText);
   if (!timestamp) return "—";
-  try { return DATE_SHORT.format(new Date(timestamp)); } catch { return "—"; }
+  try { return dateFormatter(DATE_PRESETS.date).format(new Date(timestamp)); } catch { return "—"; }
 }
 
 function formatDateTime(value = null) {
   const timestamp = toTimestamp(value, TIMESTAMP_POLICIES.invoiceText);
   if (!timestamp) return "—";
-  try { return DATE_TIME.format(new Date(timestamp)); } catch { return "—"; }
+  try { return dateFormatter(DATE_PRESETS.dateTime).format(new Date(timestamp)); } catch { return "—"; }
 }
 
 function formatRelativeDate(value = null) {

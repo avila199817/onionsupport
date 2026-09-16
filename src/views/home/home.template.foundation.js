@@ -4,7 +4,7 @@ import { isObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { clamp, finiteNumber } from "../../core/numbers.js";
 import { TIMESTAMP_POLICIES, toDate } from "../../core/dates.js";
-import { CURRENCY_POLICIES, currencyCode, formatCurrency, formatDecimal } from "../../core/format.js";
+import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, dateFormatter, formatCurrency, formatDecimal } from "../../core/format.js";
 
 export { isObject, safeArray };
 export { cleanText, escapeHtml };
@@ -109,13 +109,6 @@ const ICON_ALIASES = Object.freeze({
 const PERCENT_FORMATTER = new Intl.NumberFormat("es-ES", {
   maximumFractionDigits: 0,
 });
-const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("es-ES", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
 /* =========================================================
    BASICS
 ========================================================= */
@@ -202,7 +195,7 @@ export function formatDate(value = "") {
   if (!date) return "Sin fecha";
 
   try {
-    return DATE_TIME_FORMATTER.format(date).replace(/\./g, "");
+    return dateFormatter(DATE_PRESETS.shortMonthDateTime).format(date).replace(/\./g, "");
   } catch {
     return date.toLocaleString("es-ES");
   }

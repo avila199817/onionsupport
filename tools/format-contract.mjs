@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CURRENCY_POLICIES, currencyCode, currencyFormatter, formatCurrency, formatDecimal } from "../src/core/format.js";
+import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, currencyFormatter, dateFormatter, formatCurrency, formatDecimal } from "../src/core/format.js";
 
 // core/format.js: formatting primitives over values the domain has already
 // parsed. Ten formatMoney copies plus two inline versions built an es-ES
@@ -12,12 +12,16 @@ import { CURRENCY_POLICIES, currencyCode, currencyFormatter, formatCurrency, for
 // its empty text and, where it differs from the standard one, its fallback
 // text (the Clientes modal and the Incidencias list and modal compose
 // currencyFormatter for that). Four named currency policies name the
-// digits and grouping a domain shows.
+// digits and grouping a domain shows. Date presets name the es-ES
+// DateTimeFormat option sets more than one domain shows (16 constructions
+// in 11 modules became four presets behind one cache); a preset used by
+// one module stays with that module, listed below as an upper bound.
 const AUTHORITY = "src/core/format.js";
 const ENTRY_AND_LEAF = Object.freeze(["src/main.js", "src/analytics/google-tag.js"]);
-// Measured before the migration: every consumer with the policies it names.
+// Measured before the migration: every consumer with the currency policies it names.
 const CONSUMERS = Object.freeze({
   "src/features/facturas-paid-confirm/index.js": ["standard"],
+  "src/features/incidencias-detail-state/index.js": [],
   "src/features/incidencias-technician-profile/index.js": [],
   "src/views/clientes/clientes.template.js": ["standard"],
   "src/views/clientes/clientes.template.modal.js": ["currencyDigits"],
@@ -28,8 +32,34 @@ const CONSUMERS = Object.freeze({
   "src/views/home/home.template.foundation.js": ["standard"],
   "src/views/incidencias/incidencias.template.js": ["grouped"],
   "src/views/incidencias/incidencias.template.modal.impl.js": ["currencyDigits"],
+  "src/views/incidencias/incidencias.template.modal.js": [],
   "src/views/server/server.template.js": ["precise", "standard"],
   "src/views/usuarios/usuarios.template.js": [],
+  "src/views/usuarios/usuarios.template.modal.js": [],
+});
+// Measured: every consumer with the date presets it names.
+const DATE_CONSUMERS = Object.freeze({
+  "src/features/incidencias-detail-state/index.js": ["shortMonthDateTime"],
+  "src/views/clientes/clientes.template.js": ["dateTime", "shortMonthDate"],
+  "src/views/clientes/clientes.template.modal.js": ["dateTime", "shortMonthDate"],
+  "src/views/facturas/facturas.template.js": ["date", "dateTime"],
+  "src/views/facturas/facturas.template.modal.base.js": ["date", "dateTime"],
+  "src/views/home/home.template.foundation.js": ["shortMonthDateTime"],
+  "src/views/incidencias/incidencias.template.js": ["shortMonthDate"],
+  "src/views/incidencias/incidencias.template.modal.impl.js": ["dateTime"],
+  "src/views/incidencias/incidencias.template.modal.js": ["shortMonthDateTime"],
+  "src/views/usuarios/usuarios.template.js": ["dateTime", "shortMonthDate"],
+  "src/views/usuarios/usuarios.template.modal.js": ["dateTime"],
+});
+// Upper bound of es-ES DateTimeFormat constructions outside the authority: presets one module shows.
+const LOCAL_DATE_FORMATTERS = Object.freeze({
+  "src/views/agenda/index.js": 3,
+  "src/views/clientes/clientes.template.js": 1,
+  "src/views/correo/correo.template.js": 3,
+  "src/views/incidencias/incidencias.template.js": 2,
+  "src/views/server/server.template.base.js": 1,
+  "src/views/server/server.template.js": 2,
+  "src/views/whatsapp/whatsapp.template.js": 1,
 });
 // Local policies that stay with their domain, with the reason.
 const LOCAL_CURRENCY_FORMATTERS = Object.freeze({
@@ -71,6 +101,18 @@ assert.equal(plain(formatDecimal(12345.678)), "12.345,678");
 assert.equal(plain(formatDecimal(0)), "0");
 assert.equal(plain(formatDecimal(-1.5)), "-1,5");
 assert.equal(plain(formatDecimal(NaN)), "NaN", "the domain parses first; the primitive formats what it gets");
+// Date presets: frozen, one formatter per preset, the shape each preset prints (time zone independent).
+assert.deepEqual(Object.keys(DATE_PRESETS), ["dateTime", "date", "shortMonthDate", "shortMonthDateTime"]);
+assert.ok(Object.isFrozen(DATE_PRESETS));
+for (const preset of Object.values(DATE_PRESETS)) assert.ok(Object.isFrozen(preset));
+const sample = new Date(Date.UTC(2026, 8, 16, 4, 5, 6));
+assert.equal(dateFormatter(DATE_PRESETS.dateTime), dateFormatter(DATE_PRESETS.dateTime), "one formatter per preset");
+assert.notEqual(dateFormatter(DATE_PRESETS.dateTime), dateFormatter(DATE_PRESETS.date));
+assert.match(dateFormatter(DATE_PRESETS.dateTime).format(sample), /^\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}$/u);
+assert.match(dateFormatter(DATE_PRESETS.date).format(sample), /^\d{2}\/\d{2}\/\d{4}$/u);
+assert.match(dateFormatter(DATE_PRESETS.shortMonthDate).format(sample), /^\d{2} [a-z]{3,4}\.? \d{4}$/u);
+assert.match(dateFormatter(DATE_PRESETS.shortMonthDateTime).format(sample), /^\d{2} [a-z]{3,4}\.? \d{4}, \d{2}:\d{2}$/u);
+assert.equal(dateFormatter(DATE_PRESETS.dateTime).resolvedOptions().locale.slice(0, 2), "es");
 
 // Source: one definer, no currency Intl formatter or formatter cache outside
 // the authority (the listed local policy aside), no plain es-ES number
@@ -89,6 +131,10 @@ const currencyOutside = {};
 const cachesOutside = [];
 const plainOutside = [];
 const consumers = {};
+const dateConsumers = {};
+const sharedPresetOutside = [];
+const localDateFormatters = {};
+const PRESET_KEYS = new Map(Object.entries(DATE_PRESETS).map(([name, preset]) => [JSON.stringify(Object.fromEntries(Object.entries(preset).sort())), name]));
 const callersWithoutBinding = [];
 const entryImports = [];
 for (const file of sourceFiles(SRC_ROOT)) {
@@ -103,7 +149,16 @@ for (const file of sourceFiles(SRC_ROOT)) {
   if (/new Intl\.NumberFormat\(\s*["']es-ES["']\s*\)/u.test(executable)) plainOutside.push(path);
   const imports = /import\s*\{([^}]*)\}\s*from\s*"(?:(?:\.\.\/)+core|\.)\/format\.js"/u.exec(code);
   const imported = imports ? imports[1].split(",").map((s) => s.trim()).filter(Boolean) : [];
-  const calls = [...executable.matchAll(/(?<![\w$.])(formatCurrency|currencyFormatter|formatDecimal|currencyCode)\s*\(/gu)];
+  for (const built of executable.matchAll(/new Intl\.DateTimeFormat\(\s*["']es-ES["']\s*(?:,\s*(\{[^{}]*\}))?\s*\)/gu)) {
+    const options = {};
+    for (const pair of (built[1] || "{}").matchAll(/(\w+)\s*:\s*["']([^"']*)["']/gu)) options[pair[1]] = pair[2];
+    const preset = PRESET_KEYS.get(JSON.stringify(Object.fromEntries(Object.entries(options).sort())));
+    if (preset) sharedPresetOutside.push(`${path} → ${preset}`);
+    else localDateFormatters[path] = (localDateFormatters[path] || 0) + 1;
+  }
+  const presets = [...new Set([...executable.matchAll(/DATE_PRESETS\.(\w+)/gu)].map((m) => m[1]))].sort();
+  if (presets.length) dateConsumers[path] = presets;
+  const calls = [...executable.matchAll(/(?<![\w$.])(formatCurrency|currencyFormatter|formatDecimal|currencyCode|dateFormatter)\s*\(/gu)];
   if (calls.length && !imports) callersWithoutBinding.push(path);
   for (const alias of imported) if (/\sas\s/u.test(alias)) callersWithoutBinding.push(`${path} → ${alias}`);
   if (calls.length) consumers[path] = [...new Set([...executable.matchAll(/CURRENCY_POLICIES\.(\w+)/gu)].map((m) => m[1]))].sort();
@@ -115,6 +170,9 @@ assert.deepEqual(cachesOutside, [], "no module keeps a money formatter cache of 
 assert.deepEqual(plainOutside, [], "no module builds the plain es-ES number formatter again");
 assert.deepEqual(callersWithoutBinding, [], "every caller imports core/format.js by name");
 assert.deepEqual(consumers, CONSUMERS, "the consumers and their policies are the measured map");
+assert.deepEqual(sharedPresetOutside, [], "no module builds a shared date preset again");
+assert.deepEqual(localDateFormatters, LOCAL_DATE_FORMATTERS, "local date presets stay within the measured upper bound per module");
+assert.deepEqual(dateConsumers, DATE_CONSUMERS, "the date preset consumers are the measured map");
 assert.deepEqual(entryImports, [], "main.js and analytics/google-tag.js never import core/format.js");
 
-console.log(`Format contract: PASS · formatCurrency/currencyFormatter/currencyCode/formatDecimal in core/format.js · 4 currency policies frozen · behaviour with real Intl (EUR, USD, JPY, unknown and malformed codes) · ${Object.keys(consumers).length} consumers on their measured policies · 1 local currency policy listed · no formatter cache or plain es-ES formatter outside · callers bind by name · entry and analytics leaf import none`);
+console.log(`Format contract: PASS · formatCurrency/currencyFormatter/currencyCode/formatDecimal/dateFormatter in core/format.js · 4 currency policies and 4 date presets frozen · behaviour with real Intl (EUR, USD, JPY, unknown and malformed codes; preset shapes) · ${Object.keys(consumers).length} consumers on their measured policies · ${Object.keys(dateConsumers).length} date consumers on their measured presets · 1 local currency policy and ${Object.values(localDateFormatters).reduce((a, b) => a + b, 0)} local date presets listed · no shared preset, formatter cache or plain es-ES formatter outside · callers bind by name · entry and analytics leaf import none`);

@@ -19,7 +19,22 @@ export const CURRENCY_POLICIES = Object.freeze({
   currencyDigits: Object.freeze({ maximumFractionDigits: 2 }),
 });
 
+// Date presets name the es-ES option sets more than one domain shows; a
+// preset used by one module stays with that module.
+// - dateTime: 16/09/2026, 04:05 (Clientes, Usuarios, Facturas, the
+//   Incidencias modal)
+// - date: 16/09/2026 (Facturas)
+// - shortMonthDate: 16 sept 2026 (Clientes, Usuarios, the Incidencias list)
+// - shortMonthDateTime: 16 sept 2026, 04:05 (Home, the Incidencias detail)
+export const DATE_PRESETS = Object.freeze({
+  dateTime: Object.freeze({ day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+  date: Object.freeze({ day: "2-digit", month: "2-digit", year: "numeric" }),
+  shortMonthDate: Object.freeze({ day: "2-digit", month: "short", year: "numeric" }),
+  shortMonthDateTime: Object.freeze({ day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+});
+
 const CURRENCY_FORMATTERS = new Map();
+const DATE_FORMATTERS = new Map();
 let decimalFormatter = null;
 
 export function currencyCode(value, fallback = "EUR") {
@@ -52,6 +67,13 @@ export function formatCurrency(amount, code, policy) {
     }
   }
   return `${amount.toFixed(2).replace(".", ",")} ${code}`;
+}
+
+// The es-ES date formatter for a preset, built once.
+export function dateFormatter(preset) {
+  const key = JSON.stringify(preset);
+  if (!DATE_FORMATTERS.has(key)) DATE_FORMATTERS.set(key, new Intl.DateTimeFormat("es-ES", preset));
+  return DATE_FORMATTERS.get(key);
 }
 
 // Plain number in es-ES (grouping from five digits, up to three decimals).

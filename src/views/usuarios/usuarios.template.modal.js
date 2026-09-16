@@ -35,6 +35,7 @@ import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/obje
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
+import { DATE_PRESETS, dateFormatter } from "../../core/format.js";
 
 /* =========================================================
    META / ACTIONS
@@ -507,16 +508,7 @@ function formatDate(value = null) {
   }
 
   try {
-    return new Intl.DateTimeFormat(
-      "es-ES",
-      {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }
-    ).format(
+    return dateFormatter(DATE_PRESETS.dateTime).format(
       new Date(timestamp)
     );
   } catch {

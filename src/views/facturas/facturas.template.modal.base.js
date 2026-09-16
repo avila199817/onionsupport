@@ -42,7 +42,7 @@ import { arrayFrom } from "../../core/arrays.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { labelKey } from "../../core/slug-key.js";
 import { TIMESTAMP_POLICIES, toDate } from "../../core/dates.js";
-import { CURRENCY_POLICIES, currencyCode, formatCurrency } from "../../core/format.js";
+import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, dateFormatter, formatCurrency } from "../../core/format.js";
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
   "facturas.template.modal.productivo.v4.admin-payment";
@@ -511,14 +511,7 @@ function formatDate(
   }
 
   try {
-    return new Intl.DateTimeFormat(
-      "es-ES",
-      {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }
-    ).format(date);
+    return dateFormatter(DATE_PRESETS.date).format(date);
   } catch {
     return "—";
   }
@@ -540,16 +533,7 @@ function formatDateTime(
   }
 
   try {
-    return new Intl.DateTimeFormat(
-      "es-ES",
-      {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      }
-    ).format(date);
+    return dateFormatter(DATE_PRESETS.dateTime).format(date);
   } catch {
     return "—";
   }

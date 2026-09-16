@@ -19,6 +19,7 @@ import { persistedCommentId } from "../incidencias-comment-identity/index.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { safeObject, firstNonEmpty } from "../../core/objects.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
+import { DATE_PRESETS, dateFormatter } from "../../core/format.js";
 
 export const INCIDENCIAS_DETAIL_STATE_VERSION =
   "incidencias-detail-state.v6.controller-authoritative";
@@ -555,13 +556,7 @@ function formatDate(value = null) {
   if (!at) return "Fecha no disponible";
 
   try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(at));
+    return dateFormatter(DATE_PRESETS.shortMonthDateTime).format(new Date(at));
   } catch {
     return "Fecha no disponible";
   }

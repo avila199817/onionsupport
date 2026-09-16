@@ -46,7 +46,7 @@ import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
-import { CURRENCY_POLICIES, currencyCode, currencyFormatter } from "../../core/format.js";
+import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, currencyFormatter, dateFormatter } from "../../core/format.js";
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
   "incidencias.template.modal.extreme.v36-owned-attachment-delete-confirm";
@@ -737,14 +737,6 @@ function formatBytes(bytes = 0) {
   ).toFixed(1)} GB`;
 }
 
-const MODAL_DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
 function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
   const formatter = currencyFormatter(currencyCode(currency, DEFAULT_CURRENCY), CURRENCY_POLICIES.currencyDigits);
   return formatter ? formatter.format(number(value, 0)) : `${number(value, 0).toFixed(2)} €`;
@@ -755,7 +747,7 @@ function formatDate(value = "") {
   if (!raw) return "—";
   const date = new Date(raw);
   if (!Number.isFinite(date.getTime())) return cleanText(raw, "—");
-  try { return MODAL_DATE_FORMATTER.format(date); }
+  try { return dateFormatter(DATE_PRESETS.dateTime).format(date); }
   catch { return date.toISOString(); }
 }
 

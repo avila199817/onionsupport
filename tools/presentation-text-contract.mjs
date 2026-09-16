@@ -194,7 +194,9 @@ for (const file of sourceFiles(SRC_ROOT)) {
   const code = readFileSync(file, "utf8");
   const path = `src/${relative(SRC_ROOT, file).split(sep).join("/")}`;
   if (path !== CLEAN_TEXT_AUTHORITY && !CLEAN_TEXT_FINGERPRINT_EXEMPT.includes(path) && code.includes(CLEAN_TEXT_FINGERPRINT)) cleanTextFingerprints.push(path);
-  if (path !== SLUG_KEY_AUTHORITY && !SLUG_FINGERPRINT_PENDING.includes(path) && SLUG_FINGERPRINT.test(code)) slugFingerprints.push(path);
+  // The text authority is about to carry codeKey (separators joined with "_" and upper-cased for
+  // backend codes); that join is not a slug pipeline, so the authority is exempt like the slug one.
+  if (path !== SLUG_KEY_AUTHORITY && path !== CLEAN_TEXT_AUTHORITY && !SLUG_FINGERPRINT_PENDING.includes(path) && SLUG_FINGERPRINT.test(code)) slugFingerprints.push(path);
   if (/import\s*\{[^}]*\b(?:cleanText|escapeHtml|normalizeKey|slugKey)\s+as\s+/u.test(code)) aliasImports.push(path);
   if (path !== ESCAPE_HTML_AUTHORITY && !ESCAPE_FINGERPRINT_EXEMPT.includes(path) && code.includes("&amp;")) escapeFingerprints.push(path);
   for (const name of Object.keys(definers)) {

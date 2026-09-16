@@ -26,7 +26,7 @@ import { slugKey } from "../../core/slug-key.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { CURRENCY_POLICIES, formatCurrency } from "../../core/format.js";
 import { AMOUNT_POLICIES, parseAmount, round2 } from "../../core/amounts.js";
-export const FACTURAS_CREATE_TEMPLATE_VERSION =
+const FACTURAS_CREATE_TEMPLATE_VERSION =
   "facturas.template.create.v7.multi-line-billing";
 
 export const FACTURA_CREATE_ACTIONS = Object.freeze({
@@ -1202,7 +1202,7 @@ export function renderFacturasCreateModal(input = {}) {
   });
 }
 
-export function renderFacturasCreateModalClosed() {
+function renderFacturasCreateModalClosed() {
   return "";
 }
 
@@ -1222,11 +1222,11 @@ export function renderFacturaCreateSelectedClientsSlot(input = {}) {
   return renderSelectedClientes(buildVm(input));
 }
 
-export function renderFacturaCreateSelectedTicketsSlot(input = {}) {
+function renderFacturaCreateSelectedTicketsSlot(input = {}) {
   return renderSelectedTickets(buildVm(input));
 }
 
-export function renderFacturaCreateTotalsSlot(input = {}) {
+function renderFacturaCreateTotalsSlot(input = {}) {
   return renderTotalStrip(buildVm(input));
 }
 
@@ -1283,7 +1283,7 @@ export function validateFacturaCreateForm({
   };
 }
 
-export function getFacturaCreateTemplateSnapshot() {
+function getFacturaCreateTemplateSnapshot() {
   return {
     version: FACTURAS_CREATE_TEMPLATE_VERSION,
     actions: FACTURA_CREATE_ACTIONS,

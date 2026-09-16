@@ -74,10 +74,10 @@ import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
 import { CURRENCY_POLICIES, formatCurrency } from "../../core/format.js";
 import { round2 } from "../../core/amounts.js";
 
-export const FACTURAS_INDEX_VERSION =
+const FACTURAS_INDEX_VERSION =
   "facturas.index.productivo.v22.stable-create-client-relations";
 
-export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
+const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_BATCH_SIZE = 50;
@@ -6204,8 +6204,6 @@ export async function FacturasView(host = null, context = {}) {
 
   return controller.mount();
 }
-
-export const FacturasIndex = FacturasView;
 
 // The same controller and templates own route and in-place invoice details.
 // Detail-only mounting creates no route host or background list subscription.

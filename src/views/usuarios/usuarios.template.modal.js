@@ -31,7 +31,7 @@ import { AppCore } from "../../core/index.js";
 import { normalizeUsuarioModel } from "./usuarios.api.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, isFunction } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 
@@ -106,10 +106,6 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 

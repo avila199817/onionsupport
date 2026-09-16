@@ -33,7 +33,7 @@ import {
   isPrivateApiPath as configIsPrivateApiPath,
 } from "./config.js";
 import { cleanText, normalizeKey } from "./presentation-text.js";
-import { isObject } from "./objects.js";
+import { isObject, isFunction } from "./objects.js";
 
 export const HTTP_VERSION =
   "core.http.refresh.blob.v9-runtime-state-port";
@@ -107,12 +107,6 @@ function isPlainObject(value) {
   } catch {
     return false;
   }
-}
-
-function isFunction(value) {
-  return (
-    typeof value === "function"
-  );
 }
 
 function isBlob(value) {

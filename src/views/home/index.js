@@ -38,7 +38,7 @@ import {
   renderHomeTemplate,
   renderHomeErrorState,
 } from "./home.template.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, isFunction } from "../../core/objects.js";
 
 export const HOME_INDEX_VERSION = "home.index.v13-persisted-onboarding";
 export const HOME_VIEW_VERSION = HOME_INDEX_VERSION;
@@ -81,10 +81,6 @@ let lastInstance = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function isDomNode(value = null) {

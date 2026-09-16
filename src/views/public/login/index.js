@@ -18,6 +18,7 @@ import { AppCore } from "../../../core/index.js";
 import { Auth as DefaultAuth } from "../../../features/auth/index.js";
 import createLoginTemplate from "./template.js";
 import { cleanText } from "../../../core/presentation-text.js";
+import { isFunction } from "../../../core/objects.js";
 
 export const LOGIN_VIEW_VERSION = "login.view.public.controller.v7-document-handoff";
 
@@ -32,10 +33,6 @@ let lastInstance = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function redact(value = "") {

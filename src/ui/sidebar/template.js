@@ -25,7 +25,7 @@ import {
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { avatarInitials, synchronizeAvatarHost } from "../../features/avatar-system/index.js";
 import { cleanText } from "../../core/presentation-text.js";
-import { isObject } from "../../core/objects.js";
+import { isObject, isFunction } from "../../core/objects.js";
 
 
 export const SIDEBAR_TEMPLATE_VERSION =
@@ -164,10 +164,6 @@ function isBrowser() {
 
 function isElement(value = null) {
   return Boolean(isBrowser() && value && value.nodeType === 1);
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 

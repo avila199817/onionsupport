@@ -74,7 +74,7 @@ import {
   fetchUsuariosCursorPage,
   mergeUsuariosCursorItems,
 } from "./usuarios.cursor.js";
-import { isObject, safeObject } from "../../core/objects.js";
+import { isObject, safeObject, isFunction } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 
@@ -162,9 +162,6 @@ let lastController = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-function isFunction(value) {
-  return typeof value === "function";
 }
 function first(...values) {
   for (const value of values) {

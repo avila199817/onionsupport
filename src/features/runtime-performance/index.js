@@ -6,6 +6,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { isFunction } from "../../core/objects.js";
 
 export const RUNTIME_PERFORMANCE_VERSION =
   "runtime-performance.v3-route-phase-attribution";
@@ -78,10 +79,6 @@ let navigationTimeout = 0;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function now() {

@@ -16,6 +16,7 @@
 import { AppCore } from "../../../core/index.js";
 import createPublicHomeTemplate from "./template.js";
 import { cleanText } from "../../../core/presentation-text.js";
+import { isFunction } from "../../../core/objects.js";
 
 export const PUBLIC_HOME_VIEW_VERSION =
   "public.home.view.controller.2026.25.cold-boot-main-content";
@@ -70,10 +71,6 @@ const SELECTORS = Object.freeze({
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function redact(value = "") {

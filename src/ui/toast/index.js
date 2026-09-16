@@ -53,10 +53,6 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isFunction(value) {
-  return typeof value === "function";
-}
-
 function normalizeType(type = "info") {
   const value = cleanText(type, "info").toLowerCase();
   return VALID_TYPES.has(value) ? value : "info";

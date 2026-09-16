@@ -22,12 +22,12 @@ import { renderPublicLegalFooter } from "../../core/public-legal.js";
 
 import {
   ROUTES,
-  SENSITIVE_QUERY_PARAMS,
   isBlockedRoutePath,
   normalizeRoutePath,
   routePathFromUrlLike,
 } from "../../core/config.js";
 import { cleanText, normalizeKey } from "../../core/presentation-text.js";
+import { SENSITIVE_QUERY_KEYS } from "../../core/redact.js";
 
 export const PUBLIC_SHARED_VERSION = "public.shared.v1";
 
@@ -43,39 +43,6 @@ export const PUBLIC_AUTH_LOGO_WEBP = new URL(
 const APP_NAME = "Onion Support";
 const DEFAULT_PUBLIC_VIEW = "public";
 const DEFAULT_SAFE_HREF = ROUTES.login || "/login";
-
-const SENSITIVE_QUERY_KEYS = new Set(
-  (Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
-    ? SENSITIVE_QUERY_PARAMS
-    : [
-        "token",
-        "access_token",
-        "accessToken",
-        "refresh_token",
-        "refreshToken",
-        "id_token",
-        "idToken",
-        "jwt",
-        "authorization",
-        "session",
-        "sessionId",
-        "session_id",
-        "secret",
-        "code",
-        "password",
-        "pwd",
-        "key",
-        "sig",
-        "signature",
-        "reset_token",
-        "resetToken",
-        "activation_token",
-        "activationToken",
-      ]
-  )
-    .map((key) => normalizeKey(key))
-    .filter(Boolean)
-);
 
 /* =========================================================
    BASICS

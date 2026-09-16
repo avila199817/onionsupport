@@ -17,6 +17,7 @@ import { AppCore } from "../../../core/index.js";
 import createPublicHomeTemplate from "./template.js";
 import { cleanText } from "../../../core/presentation-text.js";
 import { isFunction } from "../../../core/objects.js";
+import { redactSecrets } from "../../../core/redact.js";
 
 export const PUBLIC_HOME_VIEW_VERSION =
   "public.home.view.controller.2026.25.cold-boot-main-content";
@@ -71,16 +72,6 @@ const SELECTORS = Object.freeze({
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function toArray(value) {
@@ -656,7 +647,7 @@ function initCtaTracking(refs, cleanups) {
 
       dispatchHomeEvent(refs.root, "public-home:cta-click", {
         label: cleanText(target.textContent, ""),
-        href: redact(target.getAttribute?.("href") || ""),
+        href: redactSecrets(cleanText(target.getAttribute?.("href") || "", "")),
         kind: target.matches?.(SELECTORS.login)
           ? "login"
           : target.matches?.(SELECTORS.cta)
@@ -1142,7 +1133,7 @@ function initCopyActions(refs, cleanups) {
 
     dispatchHomeEvent(refs.root, ok ? "public-home:copy-success" : "public-home:copy-fail", {
       ok,
-      value: redact(value),
+      value: redactSecrets(cleanText(value, "")),
     });
 
     clearTimeout(timer);
@@ -1433,7 +1424,7 @@ export function renderPublicHomeView(container, context = {}) {
         scrollPipeline: "single-listener-frame-budgeted",
         routerAvailable: Boolean(router?.navigate || router?.replace || router?.push || router?.go),
         authenticated: auth?.isAuthenticated?.() === true,
-        currentPath: redact(`${window.location.pathname}${window.location.search}${window.location.hash}`),
+        currentPath: redactSecrets(cleanText(`${window.location.pathname}${window.location.search}${window.location.hash}`, "")),
       });
     },
 

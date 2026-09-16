@@ -30,6 +30,7 @@ import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { nowIso, nowMs } from "../../core/clock.js";
+import { redactSecrets } from "../../core/redact.js";
 
 export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v24.cursor-scale-safe";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
@@ -180,18 +181,8 @@ function firstEmail(...values) {
   return "";
 }
 
-function redact(value = "") {
-  return String(value ?? "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-}
-
 function safePublicText(value = "", fallback = "") {
-  const text = redact(cleanText(value, ""));
+  const text = redactSecrets(cleanText(value, ""));
   if (!text) return fallback;
 
   if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature)=/i.test(text)) {
@@ -2728,7 +2719,7 @@ export async function loadIncidenciasStats() {
 
 function normalizeError(error = null) {
   return {
-    message: redact(error?.message || "No se pudo cargar incidencias."),
+    message: redactSecrets(error?.message || "No se pudo cargar incidencias."),
     status: error?.status || error?.statusCode || error?.response?.status || null,
     code: error?.code || error?.response?.code || "INCIDENCIAS_ERROR",
   };

@@ -50,6 +50,7 @@ import {
 } from "./template.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, isFunction } from "../../core/objects.js";
+import { redactSecrets } from "../../core/redact.js";
 
 
 export const SIDEBAR_VERSION =
@@ -70,9 +71,6 @@ const WHATSAPP_SIDEBAR_PATH =
 
 const WHATSAPP_SIDEBAR_ORDER =
   54;
-
-const LEGACY_RESET_TOKEN_PATH =
-  /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
 
 let initialized = false;
 let unsubscribeDomainChanges = null;
@@ -105,31 +103,6 @@ function isBrowser() {
 }
 
 
-
-function redact(
-  value = ""
-) {
-  return cleanText(
-    value,
-    ""
-  )
-    .replace(
-      LEGACY_RESET_TOKEN_PATH,
-      "$1***"
-    )
-    .replace(
-      /([?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(
-      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-      "$1***"
-    )
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
-}
 
 function stablePart(
   value = ""
@@ -2955,14 +2928,10 @@ function getSnapshot() {
     logoutInFlight,
 
     publicPath:
-      redact(
-        context.publicPath
-      ),
+      redactSecrets(cleanText(context.publicPath, "")),
 
     canonicalPath:
-      redact(
-        context.canonicalPath
-      ),
+      redactSecrets(cleanText(context.canonicalPath, "")),
 
     authenticated:
       context.authenticated,
@@ -3024,9 +2993,7 @@ function getSnapshot() {
       items.map(
         (item) => ({
           href:
-            redact(
-              item.href
-            ),
+            redactSecrets(cleanText(item.href, "")),
 
           label:
             item.label,

@@ -28,6 +28,7 @@ import { fetchUsuariosStatsRequest } from "../usuarios/usuarios.api.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { nowIso, nowMs } from "../../core/clock.js";
+import { redactSecrets } from "../../core/redact.js";
 
 export const HOME_API_VERSION =
   "home.api.domain-aggregator.v13-domain-counts";
@@ -100,16 +101,6 @@ function safeId(value = "") {
     .slice(0, 180);
 }
 
-function redact(value = "") {
-  return String(value ?? "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
-}
-
 function errorStatus(error = null) {
   return number(
     firstNonEmpty(
@@ -131,7 +122,7 @@ function isUnauthorizedError(error = null) {
 function normalizeError(domain = "home", error = null) {
   return {
     domain: cleanText(domain, "home"),
-    message: redact(error?.message || "No se pudo cargar el recurso."),
+    message: redactSecrets(error?.message || "No se pudo cargar el recurso."),
     status: errorStatus(error) || null,
     code: cleanText(error?.code, "") || null,
     at: nowIso(),

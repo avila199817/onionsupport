@@ -91,6 +91,7 @@ import {
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
+import { redactSecrets } from "../../core/redact.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
   "incidencias.index.extreme.v45-single-detail-authority";
@@ -225,22 +226,6 @@ function escapeCssAttribute(
    NO usar flat(Infinity) aquí.
    Arrays de adjuntos/historial/comentarios son valores completos.
 */
-function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(
-      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-      "$1***"
-    )
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
-}
-
 function normalizeSortOrder(
   value = ""
 ) {
@@ -8333,7 +8318,7 @@ async function loadMore(options = {}) {
           isAdmin(),
 
         error:
-          redact(error),
+          redactSecrets(cleanText(error, "")),
 
         detailLimits: {
           ...DETAIL_LIMITS,

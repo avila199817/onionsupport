@@ -15,6 +15,7 @@
 import { AppCore } from "../../core/index.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject } from "../../core/objects.js";
+import { redactSecrets } from "../../core/redact.js";
 
 export const TOAST_VERSION = "toast.minimal.v1";
 
@@ -68,16 +69,6 @@ function normalizeId(value = "") {
 function createId() {
   sequence += 1;
   return `toast_${Date.now()}_${sequence}`;
-}
-
-function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 /* =========================================================
@@ -171,12 +162,12 @@ function patchNode(node, item) {
   const message = node.querySelector("[data-toast-message]");
 
   if (title) {
-    title.textContent = redact(item.title || "");
+    title.textContent = redactSecrets(cleanText(item.title || "", ""));
     title.hidden = !cleanText(item.title, "");
   }
 
   if (message) {
-    message.textContent = redact(item.message || "");
+    message.textContent = redactSecrets(cleanText(item.message || "", ""));
   }
 
   return true;
@@ -414,14 +405,9 @@ function showToast(input = {}, options = {}) {
   const payload = normalizeInput(input, options);
   const type = normalizeType(payload.type || "info");
 
-  const title = redact(cleanText(payload.title || "", ""));
+  const title = redactSecrets(cleanText(cleanText(payload.title || "", ""), ""));
 
-  const message = redact(
-    cleanText(
-      payload.message || payload.text || payload.description || "",
-      type === "loading" ? "Cargando..." : ""
-    )
-  );
+  const message = redactSecrets(cleanText(cleanText( payload.message || payload.text || payload.description || "", type === "loading" ? "Cargando..." : "" ), ""));
 
   if (!title && !message) return null;
 
@@ -475,8 +461,8 @@ function updateToast(idOrPatch = "", patch = {}) {
     ...nextPatch,
     id,
     type,
-    title: redact(cleanText(nextPatch.title ?? current.title, "")),
-    message: redact(cleanText(nextPatch.message ?? nextPatch.text ?? current.message, "")),
+    title: redactSecrets(cleanText(cleanText(nextPatch.title ?? current.title, ""), "")),
+    message: redactSecrets(cleanText(cleanText(nextPatch.message ?? nextPatch.text ?? current.message, ""), "")),
     persist: nextPatch.persist !== undefined
       ? nextPatch.persist === true
       : type === "loading",
@@ -573,7 +559,7 @@ function getSnapshot() {
     items: [...items.values()].map((item) => ({
       id: item.id,
       type: item.type,
-      message: redact(item.message),
+      message: redactSecrets(cleanText(item.message, "")),
       persist: Boolean(item.persist),
       duration: getDuration(item),
     })),

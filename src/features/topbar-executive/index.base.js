@@ -18,6 +18,7 @@
 import { AppCore } from "../../core/index.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject } from "../../core/objects.js";
+import { redactSecrets } from "../../core/redact.js";
 
 export const TOPBAR_EXECUTIVE_VERSION =
   "topbar.executive.v1-search-bell-notifications";
@@ -79,17 +80,7 @@ function clipText(value = "", fallback = "", max = 500) {
 }
 
 function redactText(value = "", max = MAX_MESSAGE) {
-  return clipText(value, "", max * 2)
-    .replace(
-      /([?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    )
-    .slice(0, max);
+  return redactSecrets(clipText(value, "", max * 2)).slice(0, max);
 }
 
 function safeRoute(value = "") {

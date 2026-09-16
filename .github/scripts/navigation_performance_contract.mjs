@@ -168,7 +168,14 @@ assert.equal(enhancementsSnapshot.policy.visibleCommittedHostOnly, true);
 assert.equal(enhancementsSnapshot.policy.preparationHostIgnored, true);
 assert.equal(enhancementsSnapshot.policy.rapidNavigationCoalescing, true);
 assert.equal(enhancementsSnapshot.policy.speculativeRoutePreload, false);
-assert.equal(enhancementsSnapshot.policy.routeHostOnlyObservation, true);
+// La observación ya NO es sólo del route host: un dominio se activa también por su portal
+// realmente montado, porque el mismo detalle se abre desde Home, Facturas o un enlace
+// profundo y antes llegaba sin sus features en 11 de las 13 rutas. Sigue sin observarse el
+// subtree de la vista y sigue sin adelantarse nada en el arranque.
+assert.equal(enhancementsSnapshot.policy.routeHostOnlyObservation, false);
+assert.equal(enhancementsSnapshot.policy.mountedDomainScopes, true);
+assert.equal(enhancementsSnapshot.policy.routeCommitLazyLoading, true);
+assert.equal(enhancementsSnapshot.policy.speculativeRoutePreload, false);
 assert.equal(enhancementsSnapshot.policy.mutationObserverFallback, true);
 
 const perfSnapshot = getRuntimePerformanceSnapshot();
@@ -256,6 +263,16 @@ assert.equal(
   true,
   "enhancements must not observe internal view mutations"
 );
+assert.equal(
+  /subtree:\s*true/u.test(enhancementsSource),
+  false,
+  "no enhancements observation may walk a subtree"
+);
+assert.equal(
+  enhancementsSource.includes("MOUNTED_SCOPE_SELECTORS"),
+  true,
+  "the domain portals that activate a scope are a declared, closed list"
+);
 
 // Public entry and login must not activate private table enhancements; direct
 // and user-scoped listing routes must retain them after a committed navigation.
@@ -276,6 +293,37 @@ try {
   else globalThis.window = previousWindow;
   if (previousDocument === undefined) delete globalThis.document;
   else globalThis.document = previousDocument;
+}
+
+// EL MISMO DETALLE DISPONE DE SUS FUNCIONES VENGA DE DONDE VENGA.
+// En /home la ruta no nombra ningún dominio; con el portal de Incidencias montado, el ámbito
+// activo lo incluye, y sin él no. Nada se carga por adelantado: es el ámbito lo que cambia.
+{
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  try {
+    globalThis.window = { location: { pathname: "/home" } };
+
+    globalThis.document = { querySelector: () => null };
+    const bare = getAppEnhancementsSnapshot();
+    assert.deepEqual(bare.mountedScopes, [], "nothing mounted, nothing added");
+    assert.equal(bare.activeScopes.includes("incidencias"), false, "/home alone is not the incidencias scope");
+
+    globalThis.document = {
+      querySelector: (selector) => (selector.includes("incidencias-modal") ? { nodeType: 1 } : null),
+    };
+    const mounted = getAppEnhancementsSnapshot();
+    assert.deepEqual(mounted.mountedScopes, ["incidencias"]);
+    assert.equal(mounted.routeScopes.includes("incidencias"), false, "the route still does not name it");
+    assert.equal(mounted.activeScopes.includes("incidencias"), true, "the mounted detail does");
+    assert.equal(mounted.activeScopes.includes("facturas"), false, "only the domain really mounted");
+    assert.equal(mounted.features["incidencias-technician-profile"].state, "idle", "still lazy: declaring the scope loads nothing by itself");
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
 }
 
 const preloadSource = await readFile(

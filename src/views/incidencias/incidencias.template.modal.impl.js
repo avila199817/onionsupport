@@ -39,6 +39,9 @@ import {
   INCIDENCIA_STATUS_OPTIONS,
   INCIDENCIA_PRIORITY_OPTIONS,
   INCIDENCIA_CATEGORY_OPTIONS,
+  incidenciaStatusLabel,
+  incidenciaPriorityLabel,
+  incidenciaCategoryLabel,
   normalizeIncidenciaStatus,
   normalizeIncidenciaPriority,
   normalizeIncidenciaCategory,
@@ -179,24 +182,6 @@ function joinClasses(...values) {
         cleanText(value, "")
     )
     .filter(Boolean)
-    .join(" ");
-}
-
-function displayLabel(value = "", fallback = "") {
-  const text = cleanText(value, fallback)
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (!text) return fallback;
-
-  return text
-    .split(" ")
-    .map((word) =>
-      word
-        ? `${word.charAt(0).toLocaleUpperCase("es-ES")}${word.slice(1)}`
-        : ""
-    )
     .join(" ");
 }
 
@@ -868,24 +853,6 @@ function getStatus(detail = {}) {
   );
 }
 
-function statusLabel(
-  status = ""
-) {
-  return (
-    {
-      open: "Abierta",
-      pending: "Pendiente",
-      progress: "En proceso",
-      resolved: "Resuelta",
-      closed: "Cerrada",
-    }[status] ||
-    cleanText(
-      status,
-      "Abierta"
-    )
-  );
-}
-
 function statusClass(
   status = ""
 ) {
@@ -926,22 +893,6 @@ function getPriority(
       "medium"
     ),
     "medium"
-  );
-}
-
-function priorityLabel(
-  priority = ""
-) {
-  return (
-    {
-      low: "Baja",
-      medium: "Media",
-      high: "Alta",
-    }[priority] ||
-    cleanText(
-      priority,
-      "Media"
-    )
   );
 }
 
@@ -4348,17 +4299,17 @@ export function renderIncidenciasDetailModal(
           )}
 
           ${renderChip(
-            statusLabel(status),
+            incidenciaStatusLabel(status),
             `status-${statusClass(status)}`
           )}
 
           ${renderChip(
-            priorityLabel(priority),
+            incidenciaPriorityLabel(priority),
             `priority-${priorityClass(priority)}`
           )}
 
           ${renderChip(
-            displayLabel(category, "General"),
+            incidenciaCategoryLabel(category),
             "category"
           )}
         </div>

@@ -124,6 +124,66 @@ const CATEGORY_ALIASES = Object.freeze({
   ventas: "sales",
 });
 
+/* ETIQUETAS: LA MISMA AUTORIDAD QUE DECLARA LOS VALORES DECLARA CÓMO SE LEEN.
+ *
+ * Los selects del detalle ya salían de estas listas; los chips no, y por eso la MISMA
+ * incidencia se leía «Technical» en la cabecera y «Técnica» en el desplegable, con acentos
+ * perdidos en media taxonomía (Billing, Access, Network, Documentation, Sales) y con el
+ * token crudo del backend a la vista en cuanto llegaba un alias (`in_progress`, `urgent`,
+ * `abierta`). Con una sola función, chip y select no pueden discrepar.
+ *
+ * Estados heredados: la taxonomía vigente tiene tres estados, pero el detalle sabía leer dos
+ * más. Se conservan sus textos EXACTOS en vez de reescribirlos como «Abierta»/«Cerrada»: la
+ * etiqueta no es el sitio donde recortar una taxonomía.
+ *
+ * Desconocido y ausente no son lo mismo: un valor ausente cae en el valor por defecto
+ * declarado del campo; uno desconocido se muestra legible tal cual llega, sin inventarle un
+ * estado que no tiene. */
+const STATUS_LEGACY_LABELS = Object.freeze({
+  progress: "En proceso",
+  resolved: "Resuelta",
+});
+
+function readableValue(value = "") {
+  const text = String(value ?? "")
+    .replace(/[_-]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+
+  if (!text) return "";
+
+  return text
+    .split(" ")
+    .map((word) => (word ? `${word.charAt(0).toLocaleUpperCase("es-ES")}${word.slice(1)}` : ""))
+    .join(" ");
+}
+
+function labelWith(options, aliases, legacy, value, fallback) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return fallback;
+
+  const key = slugKey(raw);
+  if (legacy?.[key]) return legacy[key];
+
+  const canonical = aliases[key] || "";
+  const declared = options.find((entry) => entry.value === canonical);
+  if (declared) return declared.label;
+
+  return readableValue(raw) || fallback;
+}
+
+export function incidenciaStatusLabel(value = "", fallback = "Abierta") {
+  return labelWith(INCIDENCIA_STATUS_OPTIONS, STATUS_ALIASES, STATUS_LEGACY_LABELS, value, fallback);
+}
+
+export function incidenciaPriorityLabel(value = "", fallback = "Media") {
+  return labelWith(INCIDENCIA_PRIORITY_OPTIONS, PRIORITY_ALIASES, null, value, fallback);
+}
+
+export function incidenciaCategoryLabel(value = "", fallback = "General") {
+  return labelWith(INCIDENCIA_CATEGORY_OPTIONS, CATEGORY_ALIASES, null, value, fallback);
+}
+
 function normalizeWith(map, value, fallback = "") {
   return map[slugKey(value)] || fallback;
 }

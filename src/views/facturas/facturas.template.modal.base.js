@@ -2150,6 +2150,24 @@ function normalizeTaxLine(
   };
 }
 
+/* TRES COSAS DISTINTAS QUE NO PUEDEN CONTARSE COMO LA MISMA.
+ *
+ * Un campo de importe puede estar AUSENTE (el contrato lo define como que no hay retención),
+ * PRESENTE PERO ILEGIBLE (no es un importe: no vale inventarle un cero), o ser un CERO REAL.
+ * `parseAmount` con un fallback de 0 las funde a todas en 0, así que aquí se separan antes.
+ */
+function readTaxAmount(sources = [], paths = []) {
+  const raw = firstFromSources(sources, paths);
+  const present = raw !== null && raw !== undefined && String(raw).trim() !== "";
+  const parsed = parseAmount(raw, null, AMOUNT_POLICIES.booleanDigit);
+
+  return {
+    present,
+    disponible: !present || parsed !== null,
+    importe: parsed === null ? 0 : parsed,
+  };
+}
+
 function getObjectTax(
   factura = {},
   type = "iva"
@@ -2184,17 +2202,12 @@ function getObjectTax(
     return null;
   }
 
-  const importe =
-    parseAmount(
-      firstNonEmpty(
-        obj.importe,
-        obj.amount,
-        obj.total,
-        obj.value
-      ),
-      0,
-      AMOUNT_POLICIES.booleanDigit
-    );
+  const amount = readTaxAmount(
+    [obj],
+    ["importe", "amount", "total", "value"]
+  );
+
+  const importe = amount.importe;
 
   const porcentaje =
     parseAmount(
@@ -2250,6 +2263,9 @@ function getObjectTax(
     porcentaje,
     base,
     importe,
+    /* Declarado aplicable pero sin importe legible: se dice que no está disponible en vez
+       de enseñar un cero que nadie ha escrito. */
+    importeDisponible: amount.disponible && (amount.present || !enabled),
 
     sign:
       type === "irpf"
@@ -2279,25 +2295,25 @@ function getExplicitTax(
   }
 
   if (type === "iva") {
-    const importe =
-      parseAmount(
-        firstFromSources(
-          sources,
-          [
-            "ivaImporte",
-            "importeIva",
-            "totalIva",
-            "ivaTotal",
-            "ivaAmount",
-            "totales.iva",
-            "totals.iva",
-            "summary.iva",
-            "meta.displayIva",
-          ]
-        ),
-        0,
-        AMOUNT_POLICIES.booleanDigit
-      );
+    const amount = readTaxAmount(
+      sources,
+      [
+        "ivaImporte",
+        "importeIva",
+        "totalIva",
+        "ivaTotal",
+        "ivaAmount",
+        "totales.iva",
+        "totals.iva",
+        "summary.iva",
+        "meta.displayIva",
+        // Mismo campo canónico que ya lee normalizeFinancialAliases en la API. El detalle
+        // lo ignoraba, así que un IVA real llegaba a pantalla como 0,00 €.
+        "iva",
+      ]
+    );
+
+    const importe = amount.importe;
 
     const porcentaje =
       parseAmount(
@@ -2340,6 +2356,7 @@ function getExplicitTax(
         porcentaje,
         base,
         importe,
+        importeDisponible: amount.disponible,
         sign: "positive",
         source: "explicit",
       };
@@ -2348,29 +2365,28 @@ function getExplicitTax(
     return null;
   }
 
-  const importe =
-    parseAmount(
-      firstFromSources(
-        sources,
-        [
-          "irpfImporte",
-          "importeIrpf",
-          "totalIrpf",
-          "irpfTotal",
-          "irpfAmount",
-          "retencion",
-          "retencionIrpf",
-          "withholding",
-          "withholdingAmount",
-          "totales.irpf",
-          "totals.irpf",
-          "summary.irpf",
-          "meta.displayIrpf",
-        ]
-      ),
-      0,
-      AMOUNT_POLICIES.booleanDigit
-    );
+  const amount = readTaxAmount(
+    sources,
+    [
+      "irpfImporte",
+      "importeIrpf",
+      "totalIrpf",
+      "irpfTotal",
+      "irpfAmount",
+      "retencion",
+      "retencionIrpf",
+      "withholding",
+      "withholdingAmount",
+      "totales.irpf",
+      "totals.irpf",
+      "summary.irpf",
+      "meta.displayIrpf",
+      // Igual que el IVA: la API ya trata `irpf` como campo canónico de importe.
+      "irpf",
+    ]
+  );
+
+  const importe = amount.importe;
 
   const porcentaje =
     parseAmount(
@@ -2388,6 +2404,11 @@ function getExplicitTax(
       AMOUNT_POLICIES.booleanDigit
     );
 
+  /* LA BASE IMPONIBLE DE LA FACTURA NO ES UNA RETENCIÓN.
+     Estaba en esta lista, y como la tarjeta se pinta cuando hay importe, porcentaje o base,
+     bastaba con que la factura tuviera base -- es decir, siempre -- para fabricar un IRPF
+     inexistente y enseñarlo como «-0,00 €». Una retención sólo se acredita con datos suyos:
+     su importe, su tipo, su propia base o una marca explícita de que aplica. */
   const base =
     parseAmount(
       firstFromSources(
@@ -2396,18 +2417,19 @@ function getExplicitTax(
           "irpfBase",
           "baseIrpf",
           "retencionBase",
-          "baseImponible",
-          "totales.baseImponible",
         ]
       ),
       0,
       AMOUNT_POLICIES.booleanDigit
     );
 
+  /* Un campo de retención presente pero ilegible NO es «no aplica»: se acredita la
+     retención y se dice que su importe no está disponible. */
   if (
     importe ||
     porcentaje ||
-    base
+    base ||
+    !amount.disponible
   ) {
     return {
       tipo: "IRPF",
@@ -2415,6 +2437,7 @@ function getExplicitTax(
       porcentaje,
       base,
       importe,
+      importeDisponible: amount.disponible,
       sign: "negative",
       source: "explicit",
     };
@@ -2841,12 +2864,33 @@ function renderTaxCard(
       AMOUNT_POLICIES.booleanDigit
     );
 
-  const displayAmount =
+  const disponible = item.importeDisponible !== false;
+
+  /* Un cero negativo es un artefacto de representación, no un importe. Se corrige SÓLO
+     cuando el importe real es exactamente cero; un importe real que se redondea a cero se
+     sigue mostrando con su signo y se dice que está redondeado. La autoridad de formato no
+     se toca: se le entrega el número correcto. */
+  const signedAmount =
     tone === "irpf"
       ? -Math.abs(importeRaw)
       : importeRaw;
 
+  const displayAmount =
+    Object.is(signedAmount, -0)
+      ? 0
+      : signedAmount;
+
+  const roundsToZero =
+    importeRaw !== 0 &&
+    Math.round(Math.abs(importeRaw) * 100) === 0;
+
   const captionParts = [];
+
+  if (roundsToZero) {
+    captionParts.push(
+      "Importe redondeado en pantalla"
+    );
+  }
 
   if (porcentaje) {
     captionParts.push(
@@ -2886,10 +2930,12 @@ function renderTaxCard(
 
       <strong class="facturas-detail-tax-value">
         ${escapeHtml(
-          formatMoney(
-            displayAmount,
-            moneda
-          )
+          disponible
+            ? formatMoney(
+                displayAmount,
+                moneda
+              )
+            : "No disponible"
         )}
       </strong>
 
@@ -2969,42 +3015,46 @@ function renderAvatar(
     );
 
   return `
-    <div
-      class="facturas-detail-avatar"
-      data-avatar-system="true"
-      data-avatar-host="true"
-      data-avatar-name="${attr(presentation.name)}"
-      data-avatar-email="${attr(presentation.email)}"
-      data-avatar-user-id="${attr(presentation.userId)}"
-      data-avatar-username="${attr(presentation.username)}"
-      data-avatar-tone="${attr(String(presentation.tone))}"
-      data-avatar-identity="${attr(presentation.fingerprint)}"
-      data-avatar-initials="${attr(presentation.initials)}"
-      data-has-avatar="${avatarUrl ? "true" : "false"}"
-      aria-hidden="true"
-    >
-      ${
-        avatarUrl
-          ? `
-            <img
-              src="${attr(avatarUrl)}"
-              alt=""
-              loading="lazy"
-              decoding="async"
-              referrerpolicy="no-referrer"
-              draggable="false"
-              class="facturas-detail-avatar-image"
-              data-avatar-image="true"
-            >
-          `
-          : ""
-      }
+    <div class="ui-detail-modal-avatar" aria-hidden="true">
+      <div
+        class="ui-detail-modal-avatar-frame"
+        data-avatar-system="true"
+        data-avatar-host="true"
+        data-modal-avatar-frame="true"
+        data-avatar-source="facturas-detail"
+        data-avatar-name="${attr(presentation.name)}"
+        data-avatar-email="${attr(presentation.email)}"
+        data-avatar-user-id="${attr(presentation.userId)}"
+        data-avatar-username="${attr(presentation.username)}"
+        data-avatar-tone="${attr(String(presentation.tone))}"
+        data-avatar-identity="${attr(presentation.fingerprint)}"
+        data-avatar-initials="${attr(presentation.initials)}"
+        data-has-avatar="${avatarUrl ? "true" : "false"}"
+        data-fallback="${avatarUrl ? "false" : "true"}"
+      >
+        ${
+          avatarUrl
+            ? `
+              <img
+                src="${attr(avatarUrl)}"
+                alt=""
+                loading="lazy"
+                decoding="async"
+                referrerpolicy="no-referrer"
+                draggable="false"
+                data-avatar-image="true"
+                data-modal-avatar-img="true"
+              >
+            `
+            : ""
+        }
 
-      <span class="facturas-detail-avatar-fallback" data-avatar-fallback="true">
-        ${escapeHtml(
-          presentation.initials
-        )}
-      </span>
+        <span class="ui-detail-modal-avatar-fallback" data-avatar-fallback="true">
+          ${escapeHtml(
+            presentation.initials
+          )}
+        </span>
+      </div>
     </div>
   `;
 }
@@ -3987,12 +4037,12 @@ function renderFacturasDetailParts({
     header: `
       <div class="facturas-detail-header" data-facturas-detail-header="true">
         <div class="facturas-detail-hero">
-          <div class="facturas-detail-identity">
+          <div class="facturas-detail-identity ui-detail-modal-hero">
             ${renderAvatar(
               factura
             )}
 
-            <div class="facturas-detail-title-stack">
+            <div class="facturas-detail-title-stack ui-detail-modal-hero-content">
               <div class="facturas-detail-chip-row">
                 <span class="facturas-detail-number">
                   ${escapeHtml(numero)}

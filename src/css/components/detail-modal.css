@@ -208,6 +208,11 @@ min-inline-size: 0;
   gap: var(--space-md);
 }
 
+/* EL AVATAR DE UNA CABECERA DE DETALLE ES UNA SOLA VARIANTE.
+   El hueco lo declara la rejilla del hero con el mismo token que da tamaño a la caja, así
+   que el espacio está reservado antes de que llegue ninguna imagen y no hay salto al
+   cargarla. El marco recorta: una foto que no sea cuadrada se cubre, nunca se deforma.
+   Los tamaños por anchura se cambian redefiniendo el token, no repitiendo píxeles. */
 .ui-detail-modal-avatar,
 .ui-detail-modal-avatar-frame {
   display: grid;
@@ -215,6 +220,40 @@ min-inline-size: 0;
   font-size: var(--font-lg);
   font-weight: var(--weight-black);
   letter-spacing: var(--letter-tight);
+}
+
+.ui-detail-modal-avatar {
+  inline-size: var(--ui-detail-modal-avatar-size);
+  block-size: var(--ui-detail-modal-avatar-size);
+}
+
+.ui-detail-modal-avatar-frame {
+  position: relative;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: hidden;
+  border-radius: var(--ui-detail-modal-avatar-radius);
+}
+
+.ui-detail-modal-avatar-frame > img {
+  grid-area: 1 / 1;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+/* La inicial ocupa la misma celda que la imagen: mientras la foto no está, o si falla, el
+   hueco ya está ocupado por el fallback y la cabecera no se mueve. */
+.ui-detail-modal-avatar-fallback {
+  grid-area: 1 / 1;
+  display: grid;
+  place-items: center;
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.ui-detail-modal-avatar-frame[data-has-avatar="true"] > .ui-detail-modal-avatar-fallback {
+  opacity: 0;
 }
 
 .ui-detail-modal-hero-content {
@@ -650,10 +689,10 @@ padding: 14px 15px;
 grid-template-columns: 54px minmax(0, 1fr);
 }
 
-.ui-detail-modal-avatar,
-.ui-detail-modal-avatar-frame {
-inline-size: 54px;
-    block-size: 54px;
+/* Un tamaño por anchura se declara UNA vez, en el token que ya usa la rejilla del hero. */
+.ui-detail-modal-root {
+--ui-detail-modal-avatar-size: 54px;
+    --ui-detail-modal-avatar-radius: 17px;
 }
 
 .ui-detail-modal-body {
@@ -688,10 +727,9 @@ grid-template-columns: 46px minmax(0, 1fr);
     gap: 10px;
 }
 
-.ui-detail-modal-avatar,
-.ui-detail-modal-avatar-frame {
-inline-size: 46px;
-    block-size: 46px;
+.ui-detail-modal-root {
+--ui-detail-modal-avatar-size: 46px;
+    --ui-detail-modal-avatar-radius: 14px;
 }
 
 .ui-detail-modal-title {

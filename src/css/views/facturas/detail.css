@@ -40,61 +40,11 @@
   gap: var(--space-md, 16px);
 }
 
-.facturas-detail-identity {
-  min-inline-size: 0;
-  display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  align-items: center;
-  gap: 14px;
-}
 
 /* =========================================================
    AVATAR
 ========================================================= */
 
-.facturas-detail-avatar {
-  --fac-detail-avatar-a: var(--accent);
-  --fac-detail-avatar-b: var(--info);
-  position: relative;
-  inline-size: 58px;
-  block-size: 58px;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--fac-detail-avatar-a) 44%, var(--border-default));
-  border-radius: var(--radius-md, 14px);
-  background: linear-gradient(135deg, var(--fac-detail-avatar-a), var(--fac-detail-avatar-b));
-  color: var(--text-on-accent, #fff);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
-  font-size: var(--font-lg, 18px);
-  font-weight: var(--weight-black, 800);
-  letter-spacing: var(--letter-tight, -.02em);
-}
-.facturas-detail-avatar[data-has-avatar="true"] { background: var(--solid-bg-2); }
-
-.facturas-detail-avatar-image {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  inline-size: 100%;
-  block-size: 100%;
-  display: block;
-  object-fit: cover;
-  object-position: center;
-  user-select: none;
-  -webkit-user-drag: none;
-}
-
-.facturas-detail-avatar-fallback {
-  position: relative;
-  z-index: 1;
-  inline-size: 100%;
-  block-size: 100%;
-  display: grid;
-  place-items: center;
-}
-
-.facturas-detail-avatar[data-has-avatar="true"] .facturas-detail-avatar-fallback { opacity: 0; }
 
 /* =========================================================
    TITLE / CHIPS
@@ -354,8 +304,13 @@
    BODY / SECTIONS
 ========================================================= */
 
+/* `margin-inline: auto` sobre un ítem de rejilla anula el estirado y lo deja a ancho de
+   contenido: medido, 801 px dentro de una pista de 1179 px. El tope de legibilidad de
+   1180 px NO era la causa y se conserva; lo que se declara es que ocupe su pista hasta
+   ese tope y siga centrado cuando la pista es más ancha. */
 .facturas-detail-body {
   min-inline-size: 0;
+  inline-size: 100%;
   max-inline-size: 1180px;
   display: grid;
   align-content: start;
@@ -571,8 +526,6 @@
 }
 
 @media (max-width: 820px) {
-  .facturas-detail-identity { grid-template-columns: 52px minmax(0, 1fr); gap: 12px; }
-  .facturas-detail-avatar { inline-size: 52px; block-size: 52px; font-size: 17px; }
   .facturas-detail-title { font-size: clamp(21px, 5vw, 29px); }
 
   .facturas-detail-actions {
@@ -592,8 +545,7 @@
   .facturas-detail-modal-root { --fdm-section-radius: var(--radius-md); }
 
   .facturas-detail-header { gap: 10px; }
-  .facturas-detail-identity { grid-template-columns: 46px minmax(0, 1fr); gap: 10px; }
-  .facturas-detail-avatar { inline-size: 46px; block-size: 46px; font-size: 15px; }
+
   .facturas-detail-title { font-size: clamp(19px, 6.4vw, 25px); }
   .facturas-detail-subtitle { font-size: 10.5px; }
 
@@ -623,7 +575,6 @@
 }
 
 @media (max-height: 700px) and (min-width: 561px) {
-  .facturas-detail-avatar { inline-size: 50px; block-size: 50px; }
   .facturas-detail-mini { min-block-size: 50px; }
 }
 
@@ -653,7 +604,6 @@
   .facturas-detail-linea,
   .facturas-detail-feedback,
   .facturas-detail-btn,
-  .facturas-detail-avatar { forced-color-adjust: auto; }
 }
 
 @media print {

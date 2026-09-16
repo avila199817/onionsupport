@@ -12,3 +12,9 @@ export function cleanText(value = "", fallback = "") {
 export function normalizeKey(value = "") {
   return cleanText(value, "").replace(/[-_\s]/g, "").toLowerCase();
 }
+
+// Code key: separators joined with "_" and upper-cased, the shape of the
+// backend's error and status codes ("not-found" → "NOT_FOUND").
+export function codeKey(value = "") {
+  return cleanText(value, "").replace(/[\s-]+/g, "_").toUpperCase();
+}

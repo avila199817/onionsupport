@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cleanText, normalizeKey } from "../src/core/presentation-text.js";
-import { slugKey } from "../src/core/slug-key.js";
+import { cleanText, normalizeKey, codeKey } from "../src/core/presentation-text.js";
+import { slugKey, recordKey, labelKey } from "../src/core/slug-key.js";
 import { escapeHtml } from "../src/core/escape-html.js";
 import { cleanText as homeText, escapeHtml as homeEscape, attr } from "../src/views/home/home.template.foundation.js";
 import { cleanText as overlayText, renderDetailPending, safeError } from "../src/features/entity-overlay/pending-view.js";
@@ -171,9 +171,9 @@ const SRC_ROOT = fileURLToPath(new URL("../src/", import.meta.url));
 const CLEAN_TEXT_AUTHORITY = "src/core/presentation-text.js";
 const ESCAPE_HTML_AUTHORITY = "src/core/escape-html.js";
 const SLUG_KEY_AUTHORITY = "src/core/slug-key.js";
-const NORMALIZE_KEY_VARIANTS_PENDING = Object.freeze(["src/features/incidencias-technician-profile/index.js", "src/views/facturas/facturas.template.js", "src/views/facturas/facturas.template.modal.base.js", "src/views/home/home.template.foundation.js"]);
+const NORMALIZE_KEY_VARIANTS_PENDING = Object.freeze([]); // the view variants carry their own names now (handleKey, homeLabelKey)
 const SLUG_FINGERPRINT = /\.replace\(\s*\/\[\\s\.?-\]\+\/g,\s*"_"\s*\)/u;
-const SLUG_FINGERPRINT_PENDING = Object.freeze(["src/core/http.js", "src/features/incidencias-technician-profile/index.js", "src/features/public-support/index.js", "src/views/facturas/facturas.api.alias-core.js", "src/views/facturas/facturas.api.boundary.js", "src/views/facturas/facturas.api.canonical.js", "src/views/facturas/facturas.template.js", "src/views/facturas/facturas.template.modal.base.js", "src/views/facturas/facturas.template.modal.js", "src/views/home/home.template.foundation.js", "src/views/incidencias/incidencias.api.js", "src/views/incidencias/incidencias.options.js", "src/views/incidencias/incidencias.priority-policy.js", "src/views/incidencias/incidencias.template.modal.js", "src/views/public/activate-account/index.js", "src/views/usuarios/usuarios.cursor.js"]);
+const SLUG_FINGERPRINT_PENDING = Object.freeze(["src/features/incidencias-technician-profile/index.js", "src/views/facturas/facturas.api.canonical.js", "src/views/home/home.template.foundation.js", "src/views/incidencias/incidencias.api.js", "src/views/incidencias/incidencias.priority-policy.js", "src/views/incidencias/incidencias.template.modal.js"]); // own key policies: handleKey keeps "@", technicalVersion feeds an includes(), homeLabelKey keeps symbols as "_" and 80 chars, the Incidencias state/priority/modal keys keep punctuation
 const CLEAN_TEXT_FINGERPRINT = 'replace(/[\\r\\n\\t]/g, " ")';
 const CLEAN_TEXT_FINGERPRINT_EXEMPT = Object.freeze(["src/analytics/google-tag.js", "src/core/public-site.js", "src/main.js", "src/views/clientes/clientes.template.js"]);
 const ESCAPE_FINGERPRINT_EXEMPT = Object.freeze(["src/core/public-legal.js"]);
@@ -184,7 +184,7 @@ function sourceFiles(directory) {
     return entry.isFile() && entry.name.endsWith(".js") ? [path] : [];
   });
 }
-const definers = { cleanText: [], escapeHtml: [], normalizeKey: [], slugKey: [] };
+const definers = { cleanText: [], escapeHtml: [], normalizeKey: [], slugKey: [], codeKey: [], recordKey: [], labelKey: [] };
 const slugFingerprints = [];
 const aliasImports = [];
 const callersWithoutBinding = [];
@@ -197,7 +197,7 @@ for (const file of sourceFiles(SRC_ROOT)) {
   // The text authority is about to carry codeKey (separators joined with "_" and upper-cased for
   // backend codes); that join is not a slug pipeline, so the authority is exempt like the slug one.
   if (path !== SLUG_KEY_AUTHORITY && path !== CLEAN_TEXT_AUTHORITY && !SLUG_FINGERPRINT_PENDING.includes(path) && SLUG_FINGERPRINT.test(code)) slugFingerprints.push(path);
-  if (/import\s*\{[^}]*\b(?:cleanText|escapeHtml|normalizeKey|slugKey)\s+as\s+/u.test(code)) aliasImports.push(path);
+  if (/import\s*\{[^}]*\b(?:cleanText|escapeHtml|normalizeKey|slugKey|codeKey|recordKey|labelKey)\s+as\s+/u.test(code)) aliasImports.push(path);
   if (path !== ESCAPE_HTML_AUTHORITY && !ESCAPE_FINGERPRINT_EXEMPT.includes(path) && code.includes("&amp;")) escapeFingerprints.push(path);
   for (const name of Object.keys(definers)) {
     const defines = new RegExp(`^(?:export )?(?:async )?(?:function ${name}\\s*\\(|(?:const|let|var) ${name}\\b)`, "mu").test(code);
@@ -210,6 +210,19 @@ assert.deepEqual(definers.cleanText, [CLEAN_TEXT_AUTHORITY], "cleanText is defin
 assert.deepEqual(definers.normalizeKey.filter((path) => path !== CLEAN_TEXT_AUTHORITY && !NORMALIZE_KEY_VARIANTS_PENDING.includes(path)), [], "the compact normalizeKey is defined in the text authority; only the listed slug variants still carry the name");
 assert.ok(definers.normalizeKey.includes(CLEAN_TEXT_AUTHORITY), "the text authority defines normalizeKey");
 assert.deepEqual(definers.slugKey, [SLUG_KEY_AUTHORITY], "slugKey is defined once, in core/slug-key.js");
+assert.deepEqual(definers.recordKey, [SLUG_KEY_AUTHORITY], "recordKey (Facturas API and modal) is defined once, in core/slug-key.js");
+assert.deepEqual(definers.labelKey, [SLUG_KEY_AUTHORITY], "labelKey (Facturas templates) is defined once, in core/slug-key.js");
+assert.deepEqual(definers.codeKey, [CLEAN_TEXT_AUTHORITY], "codeKey (backend error and status codes) is defined once, in the text authority");
+assert.equal(codeKey(" not-found "), "NOT_FOUND");
+assert.equal(codeKey("account activated"), "ACCOUNT_ACTIVATED");
+assert.equal(codeKey(null), "");
+assert.equal(recordKey("meta:foo.bar"), "meta:foo_bar");
+assert.equal(recordKey("x@y.com"), "x_y_com");
+assert.equal(recordKey("Sí, Pagada"), "si__pagada", "the comma becomes a separator of its own, as in the retired copies");
+assert.equal(labelKey("a.b:c"), "a_b_c");
+assert.equal(labelKey("Sí, Pagada"), "si__pagada");
+assert.equal(labelKey("meta:foo.bar"), "meta_foo_bar", "labelKey turns \":\" and \".\" into \"_\"; recordKey keeps \":\"");
+assert.equal(labelKey("--__--"), "");
 assert.deepEqual(slugFingerprints, [], "no module builds a slug key on its own outside the authority and the pending list; the list only shrinks");
 assert.deepEqual(aliasImports, [], "authorities are imported under their own name");
 assert.equal(normalizeKey(" Content-Type "), "contenttype");
@@ -225,4 +238,4 @@ assert.deepEqual(definers.escapeHtml, [ESCAPE_HTML_AUTHORITY], "escapeHtml is de
 assert.deepEqual(escapeFingerprints, [], "no module escapes HTML on its own: only the authority and the import-free legal renderer emit &amp;");
 assert.deepEqual(callersWithoutBinding, [], "every cleanText and escapeHtml caller binds its canonical helper");
 
-console.log(`Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · one cleanText authority (no local copies under any name; 4 listed policies) · compact normalizeKey in the text authority (${NORMALIZE_KEY_VARIANTS_PENDING.length} slug variants pending) · one slugKey authority (${SLUG_FINGERPRINT_PENDING.length} inline slug pipelines pending) · no alias imports · one escapeHtml authority (no local copies; public-legal keeps its import-free escaper) · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction`);
+console.log(`Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · one cleanText authority (no local copies under any name; 4 listed policies) · compact normalizeKey only in the text authority · one slugKey authority with recordKey and labelKey, codeKey in the text authority (${SLUG_FINGERPRINT_PENDING.length} own key policies listed) · no alias imports · one escapeHtml authority (no local copies; public-legal keeps its import-free escaper) · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction`);

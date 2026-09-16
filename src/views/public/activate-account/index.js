@@ -39,7 +39,7 @@ import {
 } from "../../../core/config.js";
 
 import createPasswordResetTemplate from "../password-reset/template.js";
-import { cleanText } from "../../../core/presentation-text.js";
+import { cleanText, codeKey } from "../../../core/presentation-text.js";
 import { isObject, isFunction } from "../../../core/objects.js";
 
 export const ACTIVATE_ACCOUNT_VIEW_VERSION =
@@ -85,12 +85,6 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
-}
-
-function normalizeCode(value = "") {
-  return cleanText(value, "")
-    .replace(/[\s-]+/g, "_")
-    .toUpperCase();
 }
 
 function clearNode(node = null) {
@@ -987,7 +981,7 @@ function resultIsSuccess(result = {}) {
     result?.ok === true ||
     result?.success === true ||
     result?.activated === true ||
-    normalizeCode(result?.code) === "ACCOUNT_ACTIVATED"
+    codeKey(result?.code) === "ACCOUNT_ACTIVATED"
   );
 }
 
@@ -1007,7 +1001,7 @@ function statusOf(error = null) {
 }
 
 function codeOf(error = null) {
-  return normalizeCode(
+  return codeKey(
     error?.code ||
     error?.error ||
     error?.data?.code ||

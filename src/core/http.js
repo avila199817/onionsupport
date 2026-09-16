@@ -32,7 +32,7 @@ import {
   isPublicApiPath as configIsPublicApiPath,
   isPrivateApiPath as configIsPrivateApiPath,
 } from "./config.js";
-import { cleanText, normalizeKey } from "./presentation-text.js";
+import { cleanText, normalizeKey, codeKey } from "./presentation-text.js";
 import { isObject, isFunction, firstNonBlank } from "./objects.js";
 import { nowIso } from "./clock.js";
 
@@ -115,20 +115,6 @@ function isBlob(value) {
     typeof Blob !== "undefined" &&
     value instanceof Blob
   );
-}
-
-function normalizeCode(
-  value = ""
-) {
-  return cleanText(
-    value,
-    ""
-  )
-    .replace(
-      /[\s-]+/g,
-      "_"
-    )
-    .toUpperCase();
 }
 
 /* =========================================================
@@ -1156,7 +1142,7 @@ export function shouldClearSessionForAuthError(
     );
 
   const code =
-    normalizeCode(
+    codeKey(
       error?.code ||
       error?.payload?.code ||
       error?.payload?.error ||
@@ -1194,7 +1180,7 @@ export function isRefreshableAuthError(
     );
 
   const code =
-    normalizeCode(
+    codeKey(
       error?.code ||
       error?.payload?.code ||
       error?.payload?.error ||
@@ -1700,7 +1686,7 @@ function extractErrorCode(
     isObject(payload)
   ) {
     const explicit =
-      normalizeCode(
+      codeKey(
         firstNonBlank(
           payload.code,
           payload.errorCode,
@@ -1844,7 +1830,7 @@ function createHttpError({
     "HttpError";
 
   error.code =
-    normalizeCode(
+    codeKey(
       code
     );
 

@@ -5,7 +5,7 @@ import { getIncidenciaEntityId, getFacturaEntityId } from "../../core/entity-ide
    Shared by /src/views/home/home.template.js
 ========================================================= */
 
-import { attr, cleanText, escapeHtml, formatDate, icon, invoiceDisplayId, isGenericInvoiceTitle, isObject, normalizeKey, safeArray, safeDisplayId, ticketDisplayId, visibleText } from "./home.template.foundation.js";
+import { attr, cleanText, escapeHtml, formatDate, icon, invoiceDisplayId, isGenericInvoiceTitle, isObject, homeLabelKey, safeArray, safeDisplayId, ticketDisplayId, visibleText } from "./home.template.foundation.js";
 import {
   emptyState,
   entityIdBadge,
@@ -21,7 +21,7 @@ import {
 import { firstNonEmpty } from "../../core/objects.js";
 
 function activityIcon(type = "") {
-  const key = normalizeKey(type);
+  const key = homeLabelKey(type);
   if (key.includes("invoice") || key.includes("factura")) return "facturas";
   if (key.includes("ticket") || key.includes("incidencia")) return "incidencias";
   if (key.includes("client") || key.includes("cliente")) return "clientes";
@@ -30,7 +30,7 @@ function activityIcon(type = "") {
 }
 
 function overlayEntityType(type = "") {
-  const key = normalizeKey(type);
+  const key = homeLabelKey(type);
 
   if (key.includes("invoice") || key.includes("factura")) return "factura";
   if (key.includes("ticket") || key.includes("incidencia")) return "incidencia";
@@ -200,7 +200,7 @@ function relationSourceForActivity(
 
 function activityItem(item = {}, vm = {}) {
   const source = isObject(item) ? item : {};
-  const type = normalizeKey(firstNonEmpty(source.type, source.tipo, "activity"));
+  const type = homeLabelKey(firstNonEmpty(source.type, source.tipo, "activity"));
   const entityType = overlayEntityType(type);
   const isInvoice = entityType === "factura";
   const entityId = activityEntityId(entityType, source);

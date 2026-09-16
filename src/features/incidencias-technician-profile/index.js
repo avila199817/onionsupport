@@ -106,7 +106,7 @@ function firstDefined(...values) {
 
 const attr = (value = "") => escapeHtml(cleanText(value, ""));
 
-function normalizeKey(value = "") {
+function handleKey(value = "") {
   return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
@@ -326,7 +326,7 @@ function mergeTicketTechnician(seed = {}, ticket = {}) {
 
 export function publicTechnicianProfileFor(tech = {}) {
   const email = normalizeEmail(tech.email);
-  const username = normalizeKey(tech.username).replace(/^@+/, "");
+  const username = handleKey(tech.username).replace(/^@+/, "");
   const name = normalizeName(tech.name);
   const isCristian =
     email === CRISTIAN_PUBLIC_TECHNICIAN_PROFILE.email ||
@@ -438,11 +438,11 @@ function mergeTechnician(snapshot = {}, user = {}) {
 function statusLabel(value = "") {
   return [
     "inactive", "inactivo", "disabled", "blocked", "suspended",
-  ].includes(normalizeKey(value)) ? "Inactivo" : "Activo";
+  ].includes(handleKey(value)) ? "Inactivo" : "Activo";
 }
 
 function metricScopeKey(value = "") {
-  return normalizeKey(value).replace(/[.:/]+/g, "_");
+  return handleKey(value).replace(/[.:/]+/g, "_");
 }
 
 function aggregateScopeIsPublic(response = {}) {

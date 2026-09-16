@@ -15,6 +15,7 @@
 import * as Boundary from "./facturas.api.boundary.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
+import { recordKey } from "../../core/slug-key.js";
 
 export * from "./facturas.api.boundary.js";
 
@@ -24,16 +25,6 @@ export const FACTURA_CANONICAL_ALIAS_VERSION =
 const TECHNICAL_PREFIX = "FACTURA_CREATE_IDEMP_";
 const aliasRegistry = new Map();
 const MAX_ALIAS_REGISTRY = 256;
-
-function key(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s.-]+/g, "_")
-    .replace(/[^\w:]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
 
 function numberOrNull(value) {
   if (value === undefined || value === null || value === "") return null;
@@ -254,12 +245,12 @@ function taxesFromLines(value = {}) {
     if (amount === null) continue;
 
     found = true;
-    const type = key(firstNonEmpty(item.tipo, item.type, item.name, item.label, ""));
+    const type = recordKey(firstNonEmpty(item.tipo, item.type, item.name, item.label, ""));
     const negative =
       type.includes("irpf") ||
       type.includes("retencion") ||
       type.includes("withholding") ||
-      key(item.sign) === "negative";
+      recordKey(item.sign) === "negative";
 
     total += negative ? -Math.abs(amount) : amount;
   }
@@ -496,11 +487,11 @@ export function canonicalizeFacturaListItem(value = null) {
     entityType: "invoice",
     type: "invoice",
     status: ["issued", "emitida", "sent", "enviada", "paid", "pagada", "draft", "borrador"]
-      .includes(key(firstNonEmpty(source.status, source.estado, "")))
+      .includes(recordKey(firstNonEmpty(source.status, source.estado, "")))
         ? cleanText(firstNonEmpty(source.status, source.estado), "issued")
         : "issued",
     estado: ["issued", "emitida", "sent", "enviada", "paid", "pagada", "draft", "borrador"]
-      .includes(key(firstNonEmpty(source.estado, source.status, "")))
+      .includes(recordKey(firstNonEmpty(source.estado, source.status, "")))
         ? cleanText(firstNonEmpty(source.estado, source.status), "issued")
         : "issued",
     meta: {
@@ -888,7 +879,7 @@ export async function fetchFacturaPdfRequest(
   mode = Boundary.FACTURA_PDF_MODES.DOWNLOAD,
   options = {}
 ) {
-  const normalizedMode = key(mode);
+  const normalizedMode = recordKey(mode);
   return ["view", "inline", "ver", "open", "preview"].includes(normalizedMode)
     ? viewFacturaPdfRequest(id, options)
     : downloadFacturaPdfRequest(id, options);

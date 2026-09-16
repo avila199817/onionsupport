@@ -13,7 +13,7 @@ import { userNameFromIdentity } from "../../core/user-identity.js";
 import {
   resolveAvatarPresentation,
 } from "../../features/avatar-system/identity.js";
-import { attr, cleanText, escapeHtml, isObject, normalizeKey, safeArray, safeImageSrc } from "./home.template.foundation.js";
+import { attr, cleanText, escapeHtml, isObject, homeLabelKey, safeArray, safeImageSrc } from "./home.template.foundation.js";
 import { safeObject, firstNonEmpty } from "../../core/objects.js";
 
 export const HOME_ENTITY_RELATION_VERSION =
@@ -165,8 +165,8 @@ function firstImage(values = [], seen = new WeakSet()) {
 }
 
 function sameIdentityText(left = "", right = "") {
-  const a = normalizeKey(left);
-  const b = normalizeKey(right);
+  const a = homeLabelKey(left);
+  const b = homeLabelKey(right);
   return Boolean(a && b && a === b);
 }
 
@@ -211,7 +211,7 @@ function finalizeRelation({
   });
 
   return Object.freeze({
-    kind: normalizeKey(kind) || "relacion",
+    kind: homeLabelKey(kind) || "relacion",
     name: primary,
     secondaryName: safeSecondary,
     email: visibleEmail,
@@ -416,7 +416,7 @@ function genericRelation(source = {}, kind = "relacion") {
 }
 
 export function resolveHomeEntityRelation(type = "", source = {}) {
-  const entityType = normalizeKey(type);
+  const entityType = homeLabelKey(type);
 
   if (entityType === "incidencia" || entityType === "ticket") {
     return incidenciaRelation(source);

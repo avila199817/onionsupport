@@ -40,6 +40,7 @@ import { renderModalCloseButton, renderModalShell, renderModalState } from "../.
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
+import { labelKey } from "../../core/slug-key.js";
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
   "facturas.template.modal.productivo.v4.admin-payment";
@@ -222,27 +223,6 @@ function disabledAttrs(
         ? "true"
         : false,
   });
-}
-
-function normalizeText(
-  value = ""
-) {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(
-      /[\u0300-\u036f]/g,
-      ""
-    );
-}
-
-function normalizeKey(
-  value = ""
-) {
-  return normalizeText(value)
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w]+/g, "_")
-    .replace(/^_+|_+$/g, "");
 }
 
 function readPath(
@@ -767,7 +747,7 @@ function formatPaymentMethodLabel(
   }
 
   const key =
-    normalizeKey(text);
+    labelKey(text);
 
   switch (key) {
     case "transferencia_bancaria":
@@ -1411,7 +1391,7 @@ function getFacturaPagado(
   }
 
   const status =
-    normalizeKey(
+    labelKey(
       getFacturaEstadoPagoRaw(
         factura
       )
@@ -1465,7 +1445,7 @@ function getFacturaPendiente(
     getFacturaPagado(factura);
 
   const status =
-    normalizeKey(
+    labelKey(
       getFacturaEstadoPagoRaw(
         factura
       )
@@ -1530,7 +1510,7 @@ function getEstadoPagoLabel(
   value = ""
 ) {
   const key =
-    normalizeKey(value);
+    labelKey(value);
 
   switch (key) {
     case "paid":
@@ -1577,7 +1557,7 @@ function getEstadoLabel(
   value = ""
 ) {
   const key =
-    normalizeKey(value);
+    labelKey(value);
 
   switch (key) {
     case "emitida":
@@ -1649,7 +1629,7 @@ function isFacturaPaid(
     "abonada",
     "abonado",
   ].includes(
-    normalizeKey(
+    labelKey(
       getFacturaEstadoPagoRaw(
         factura
       )
@@ -1661,7 +1641,7 @@ function getEstadoPagoTone(
   value = ""
 ) {
   const key =
-    normalizeKey(value);
+    labelKey(value);
 
   if (
     [
@@ -1715,7 +1695,7 @@ function getEstadoTone(
   value = ""
 ) {
   const key =
-    normalizeKey(value);
+    labelKey(value);
 
   if (
     [
@@ -2270,7 +2250,7 @@ function normalizeTaxLine(
   return {
     tipo,
     key:
-      normalizeKey(tipo),
+      labelKey(tipo),
 
     porcentaje:
       number(
@@ -2767,7 +2747,7 @@ function getFacturaImpuestos(
       );
 
     const negative =
-      normalizeKey(item.sign) ===
+      labelKey(item.sign) ===
         "negative" ||
       amount < 0;
 
@@ -2875,7 +2855,7 @@ function isFacturaAlreadySent(
   }
 
   const state =
-    normalizeKey(
+    labelKey(
       getFacturaEstadoRaw(
         factura
       )
@@ -2946,7 +2926,7 @@ export function renderDetailStat(
   options = {}
 ) {
   const tone =
-    normalizeKey(
+    labelKey(
       options.tone ||
       "neutral"
     );
@@ -3241,9 +3221,9 @@ function renderFeedback({
       "error",
       "info",
     ].includes(
-      normalizeKey(type)
+      labelKey(type)
     )
-      ? normalizeKey(type)
+      ? labelKey(type)
       : "info";
 
   const title =

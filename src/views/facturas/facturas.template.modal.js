@@ -10,6 +10,7 @@
 import { cleanText } from "../../core/presentation-text.js";
 import BaseDefault, * as Base from "./facturas.template.modal.base.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
+import { recordKey } from "../../core/slug-key.js";
 
 export * from "./facturas.template.modal.base.js";
 
@@ -85,16 +86,6 @@ const FALLBACK_KEYS = Object.freeze([
   "sasUrl",
 ]);
 
-function key(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s.-]+/g, "_")
-    .replace(/[^\w:]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
 function empty(value) {
   if (value === undefined || value === null) return true;
   if (typeof value === "string") return !value.trim();
@@ -154,14 +145,14 @@ export function isFacturaModalTechnicalRecord(value = null) {
     source.documentType,
     source.recordType,
   ]) {
-    if (TECHNICAL_TYPES.has(key(candidate))) return true;
+    if (TECHNICAL_TYPES.has(recordKey(candidate))) return true;
   }
 
   return Boolean(
-    key(source.operation) === "factura_create" &&
+    recordKey(source.operation) === "factura_create" &&
       (
         cleanText(source.operationHash, "") ||
-        key(firstNonEmpty(
+        recordKey(firstNonEmpty(
           source.version,
           source.idempotencyVersion,
           source.meta?.idempotencyVersion,
@@ -323,12 +314,12 @@ function taxAmountFromLines(value = {}) {
     if (amount === null) continue;
 
     found = true;
-    const taxKey = key(firstNonEmpty(item.tipo, item.taxType, item.name, item.label, ""));
+    const taxKey = recordKey(firstNonEmpty(item.tipo, item.taxType, item.name, item.label, ""));
     const negative =
       taxKey.includes("irpf") ||
       taxKey.includes("retencion") ||
       taxKey.includes("withholding") ||
-      key(item.sign) === "negative";
+      recordKey(item.sign) === "negative";
     total += negative ? -Math.abs(amount) : amount;
   }
 

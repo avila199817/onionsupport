@@ -1185,19 +1185,24 @@ export function renderFacturasCreateModal(input = {}) {
 
         ${renderTotalStrip(vm)}
 
-        <div class="fac-create-actions">
-          <span class="fac-create-actions-note">La factura se creará con el cliente, las incidencias y todas las partidas seleccionadas.</span>
-          <button
-            type="submit"
-            class="fac-create-submit inc-create-submit"
-            data-factura-create-action="${FACTURA_CREATE_ACTIONS.SUBMIT}"
-            ${disabled ? "disabled" : ""}
-            aria-busy="${vm.submitting ? "true" : "false"}"
-          >
-            ${vm.submitting ? renderSpinner("Creando...") : `<span>Crear factura</span>`}
-          </button>
-        </div>
       </form>
+    `,
+    /* La acción principal vive en el pie estructural del shell, no dentro del cuerpo
+       desplazable: mismo sitio, mismo aire y mismo borde que en el detalle. El botón sigue
+       enviando su formulario por el atributo `form`. */
+    footer: `
+      <div class="fac-create-actions">
+        <span class="fac-create-actions-note">La factura se creará con el cliente, las incidencias y todas las partidas seleccionadas.</span>
+        <button
+          type="submit" form="${FORM_ID}"
+          class="fac-create-submit inc-create-submit"
+          data-factura-create-action="${FACTURA_CREATE_ACTIONS.SUBMIT}"
+          ${disabled ? "disabled" : ""}
+          aria-busy="${vm.submitting ? "true" : "false"}"
+        >
+          ${vm.submitting ? renderSpinner("Creando...") : `<span>Crear factura</span>`}
+        </button>
+      </div>
     `,
   });
 }

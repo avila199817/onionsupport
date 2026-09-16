@@ -2852,21 +2852,26 @@ export function renderClientesCreateModal(
         ${renderContactBlock(vm)}
         ${renderAddressBlock(vm)}
 
-        <div class="cli-create-actions inc-create-actions">
-          <span class="cli-create-actions-note inc-create-actions-note">El cliente quedará vinculado al usuario seleccionado y disponible en las vistas privadas.</span>
-          <button
-            id="clientes-create-submit-btn"
-            type="submit"
-            data-create-action="${CREATE_ACTIONS.SUBMIT}"
-            ${disabledAttrs(vm.submitting || !vm.admin, vm.submitting)}
-            class="cli-create-submit inc-create-submit"
-          >
-            <span class="cli-create-submit-inner inc-create-submit-inner">
-              ${vm.submitting ? `<span class="cli-create-spinner inc-create-spinner" aria-hidden="true"></span>Creando...` : "Crear cliente"}
-            </span>
-          </button>
-        </div>
       </form>
+    `,
+    /* La acción principal vive en el pie estructural del shell, no dentro del cuerpo
+       desplazable: mismo sitio, mismo aire y mismo borde que en el detalle. El botón sigue
+       enviando su formulario por el atributo `form`. */
+    footer: `
+      <div class="cli-create-actions inc-create-actions">
+        <span class="cli-create-actions-note inc-create-actions-note">El cliente quedará vinculado al usuario seleccionado y disponible en las vistas privadas.</span>
+        <button
+          id="clientes-create-submit-btn"
+          type="submit" form="${FORM_ID}"
+          data-create-action="${CREATE_ACTIONS.SUBMIT}"
+          ${disabledAttrs(vm.submitting || !vm.admin, vm.submitting)}
+          class="cli-create-submit inc-create-submit"
+        >
+          <span class="cli-create-submit-inner inc-create-submit-inner">
+            ${vm.submitting ? `<span class="cli-create-spinner inc-create-spinner" aria-hidden="true"></span>Creando...` : "Crear cliente"}
+          </span>
+        </button>
+      </div>
     `,
   });
 }

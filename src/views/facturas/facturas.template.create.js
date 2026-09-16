@@ -23,6 +23,7 @@ import { resolveAvatarPresentation } from "../../features/avatar-system/identity
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 export const FACTURAS_CREATE_TEMPLATE_VERSION =
   "facturas.template.create.v7.multi-line-billing";
 
@@ -159,21 +160,9 @@ function round2(value = 0) {
   return Math.round((parsed + Number.EPSILON) * 100) / 100;
 }
 
-function parseBoolean(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (value === 1 || value === "1") return true;
-  if (value === 0 || value === "0") return false;
-
-  const key = slugKey(value);
-  if (["true", "yes", "si", "on", "enabled", "active"].includes(key)) return true;
-  if (["false", "no", "off", "disabled", "inactive"].includes(key)) return false;
-
-  return fallback;
-}
-
 function parseOptionalBoolean(value) {
   if (value === undefined || value === null || value === "") return null;
-  return parseBoolean(value, null);
+  return parseBoolean(value, BOOLEAN_POLICIES.activity, null);
 }
 
 function attr(value = "") {
@@ -595,7 +584,7 @@ function normalizeForm(form = {}) {
     fechaServicio: cleanText(input.fechaServicio, todayInputValue()),
     formaPago: cleanText(input.formaPago, DEFAULT_FORM.formaPago),
     estadoPago: cleanText(input.estadoPago, DEFAULT_FORM.estadoPago),
-    sendEmail: parseBoolean(input.sendEmail, true),
+    sendEmail: parseBoolean(input.sendEmail, BOOLEAN_POLICIES.activity, true),
 
     clienteId: cleanText(input.clienteId, ""),
     clienteUserId: cleanText(input.clienteUserId, ""),

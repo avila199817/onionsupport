@@ -6,6 +6,7 @@ import { createModalHost, renderModalCloseButton, renderModalContent, renderModa
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 /* =========================================================
    Onion Support - Clientes Detail Template
    Archivo: /src/views/clientes/clientes.template.modal.js
@@ -208,69 +209,6 @@ function optionalNumber(
 
   return null;
 }
-
-function parseBoolean(
-  value,
-  fallback = null
-) {
-  if (
-    value === true ||
-    value === false
-  ) {
-    return value;
-  }
-
-  if (
-    value === 1 ||
-    value === "1"
-  ) {
-    return true;
-  }
-
-  if (
-    value === 0 ||
-    value === "0"
-  ) {
-    return false;
-  }
-
-  if (
-    typeof value === "string"
-  ) {
-    const key =
-      slugKey(value);
-
-    if (
-      [
-        "true",
-        "yes",
-        "si",
-        "on",
-        "enabled",
-        "active",
-        "activo",
-      ].includes(key)
-    ) {
-      return true;
-    }
-
-    if (
-      [
-        "false",
-        "no",
-        "off",
-        "disabled",
-        "inactive",
-        "inactivo",
-      ].includes(key)
-    ) {
-      return false;
-    }
-  }
-
-  return fallback;
-}
-
 
 function attr(
   value = ""
@@ -1739,7 +1677,7 @@ function getStatus(
         raw.blocked,
         null
       ),
-      null
+      BOOLEAN_POLICIES.activityEsStrings, null
     );
 
   const disabled =
@@ -1749,7 +1687,7 @@ function getStatus(
         raw.disabled,
         null
       ),
-      null
+      BOOLEAN_POLICIES.activityEsStrings, null
     );
 
   const active =
@@ -1764,7 +1702,7 @@ function getStatus(
         raw.enabled,
         null
       ),
-      null
+      BOOLEAN_POLICIES.activityEsStrings, null
     );
 
   if (
@@ -2950,7 +2888,7 @@ function renderBillingBlock(
     )
       ? parseBoolean(
           billing.enabled,
-          null
+          BOOLEAN_POLICIES.activityEsStrings, null
         )
       : hasOwn(
           facturacion,
@@ -2958,7 +2896,7 @@ function renderBillingBlock(
         )
         ? parseBoolean(
             facturacion.enabled,
-            null
+            BOOLEAN_POLICIES.activityEsStrings, null
           )
         : null;
 
@@ -3007,7 +2945,7 @@ function renderBillingBlock(
     )
       ? parseBoolean(
           billing.aplicaIVA,
-          null
+          BOOLEAN_POLICIES.activityEsStrings, null
         )
       : hasOwn(
           safeObject(
@@ -3017,7 +2955,7 @@ function renderBillingBlock(
         )
         ? parseBoolean(
             billing.iva.enabled,
-            null
+            BOOLEAN_POLICIES.activityEsStrings, null
           )
         : hasOwn(
             safeObject(
@@ -3027,7 +2965,7 @@ function renderBillingBlock(
           )
           ? parseBoolean(
               facturacion.iva.enabled,
-              null
+              BOOLEAN_POLICIES.activityEsStrings, null
             )
           : null;
 
@@ -3069,7 +3007,7 @@ function renderBillingBlock(
     )
       ? parseBoolean(
           billing.aplicaIRPF,
-          null
+          BOOLEAN_POLICIES.activityEsStrings, null
         )
       : hasOwn(
           safeObject(
@@ -3079,7 +3017,7 @@ function renderBillingBlock(
         )
         ? parseBoolean(
             billing.irpf.enabled,
-            null
+            BOOLEAN_POLICIES.activityEsStrings, null
           )
         : hasOwn(
             safeObject(
@@ -3089,7 +3027,7 @@ function renderBillingBlock(
           )
           ? parseBoolean(
               facturacion.irpf.enabled,
-              null
+              BOOLEAN_POLICIES.activityEsStrings, null
             )
           : null;
 
@@ -3418,7 +3356,7 @@ function renderPrivacyBlock(
     const value =
       parseBoolean(
         source[key],
-        null
+        BOOLEAN_POLICIES.activityEsStrings, null
       );
 
     if (

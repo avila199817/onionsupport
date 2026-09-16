@@ -68,6 +68,7 @@ import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/obje
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { clamp } from "../../core/numbers.js";
+import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 
 export const FACTURAS_INDEX_VERSION =
   "facturas.index.productivo.v22.stable-create-client-relations";
@@ -149,24 +150,6 @@ function number(value = 0, fallback = 0) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function parseBoolean(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  if (typeof value === "string") {
-    const key = slugKey(value);
-
-    if (["true", "1", "yes", "si", "on"].includes(key)) return true;
-    if (["false", "0", "no", "off"].includes(key)) return false;
-  }
-
-  return fallback;
 }
 
 function redact(value = "") {
@@ -452,7 +435,7 @@ function isFacturaSent(item = {}) {
   );
 
   if (explicit !== null && explicit !== undefined) {
-    return parseBoolean(explicit, false);
+    return parseBoolean(explicit, BOOLEAN_POLICIES.switch, false);
   }
 
   const status = slugKey(
@@ -2561,7 +2544,7 @@ function createFacturasController(host = null, context = {}) {
         ? items.length < total
         : parseBoolean(
             responseHasMore,
-            items.length < total
+            BOOLEAN_POLICIES.switch, items.length < total
           );
 
     nextPage = hasMore
@@ -3461,7 +3444,7 @@ function createFacturasController(host = null, context = {}) {
           response?.paging?.hasMore,
           false
         ),
-        false
+        BOOLEAN_POLICIES.switch, false
       );
       if (!append && responseAdvertisesMore && normalizedRows.length === 0) {
         const progressError = new Error(

@@ -43,6 +43,7 @@ import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/obje
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { clamp } from "../../core/numbers.js";
+import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 
 /* =========================================================
    META / CONFIG
@@ -318,56 +319,6 @@ function uniqueStrings(
 /* =========================================================
    BOOLEAN / EMAIL / DATE
 ========================================================= */
-
-function parseBoolean(
-  value,
-  fallback = false
-) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  const normalized =
-    slugKey(value);
-
-  if (
-    [
-      "true",
-      "1",
-      "yes",
-      "si",
-      "on",
-      "active",
-      "activo",
-      "enabled",
-      "habilitado",
-    ].includes(normalized)
-  ) {
-    return true;
-  }
-
-  if (
-    [
-      "false",
-      "0",
-      "no",
-      "off",
-      "inactive",
-      "inactivo",
-      "disabled",
-      "deshabilitado",
-    ].includes(normalized)
-  ) {
-    return false;
-  }
-
-  return fallback;
-}
 
 function parseStrictBoolean(
   value,
@@ -1300,7 +1251,7 @@ function normalizeSecurity(
           raw.twofa_enabled,
           false
         ),
-        false
+        BOOLEAN_POLICIES.activityEsExtended, false
       ),
 
     twofaMethod:
@@ -1329,7 +1280,7 @@ function normalizeSecurity(
     emailChangePending:
       parseBoolean(
         raw.emailChangePending,
-        false
+        BOOLEAN_POLICIES.activityEsExtended, false
       ),
 
     activation:
@@ -1807,19 +1758,19 @@ export function normalizeUsuarioModel(
           raw.meta?.emailVerified,
           false
         ),
-        false
+        BOOLEAN_POLICIES.activityEsExtended, false
       ),
 
     privacyMode:
       parseBoolean(
         raw.privacyMode,
-        false
+        BOOLEAN_POLICIES.activityEsExtended, false
       ),
 
     darkMode:
       parseBoolean(
         raw.darkMode,
-        true
+        BOOLEAN_POLICIES.activityEsExtended, true
       ),
 
     permissions,
@@ -2469,7 +2420,7 @@ export function buildUsuariosListQuery({
     query.active =
       parseBoolean(
         finalActive,
-        true
+        BOOLEAN_POLICIES.activityEsExtended, true
       );
   }
 
@@ -2480,7 +2431,7 @@ export function buildUsuariosListQuery({
     query.emailVerified =
       parseBoolean(
         emailVerified,
-        false
+        BOOLEAN_POLICIES.activityEsExtended, false
       );
   }
 
@@ -2491,7 +2442,7 @@ export function buildUsuariosListQuery({
     query.hasAvatar =
       parseBoolean(
         hasAvatar,
-        false
+        BOOLEAN_POLICIES.activityEsExtended, false
       );
   }
 
@@ -2502,7 +2453,7 @@ export function buildUsuariosListQuery({
     query.has2fa =
       parseBoolean(
         finalTwofa,
-        false
+        BOOLEAN_POLICIES.activityEsExtended, false
       );
   }
 
@@ -2553,7 +2504,7 @@ export function buildUsuariosListQuery({
             : key
       ] = parseBoolean(
         cleanValue,
-        false
+        BOOLEAN_POLICIES.activityEsExtended, false
       );
 
       continue;
@@ -2963,7 +2914,7 @@ function pickHasMore(
     ) {
       return parseBoolean(
         value,
-        false
+        BOOLEAN_POLICIES.activityEsExtended, false
       );
     }
   }
@@ -4069,13 +4020,13 @@ function buildCreateUsuarioBody(
     privacyMode:
       parseBoolean(
         source.privacyMode,
-        false
+        BOOLEAN_POLICIES.activityEsExtended, false
       ),
 
     darkMode:
       parseBoolean(
         source.darkMode,
-        true
+        BOOLEAN_POLICIES.activityEsExtended, true
       ),
   };
 }

@@ -8,7 +8,7 @@ Tres defectos del detalle de entidad, los tres de **presentación**. Ningún cá
 
 Facturas **sí** pintaba avatar — mi parte anterior dijo que no, a partir de un `grep` de la clase compartida, y era incorrecto. Lo que ocurría es que cada dominio tenía la suya.
 
-Medido en navegador sobre `main a93db093`, con el mismo render y el mismo zoom:
+Medido con el mismo guion sobre las dos revisiones (fixture real `--serve`, modal abierto desde el botón del fixture):
 
 | Anchura | Incidencias | Facturas |
 | --- | --- | --- |
@@ -49,21 +49,19 @@ Con foto válida, ausente o fallida el hueco es el mismo 66×66 en los tres caso
 
 ## B · El contenido de Facturas se encogía a su texto
 
-El cuerpo medía **801 px dentro de una pista de 1179 px**.
-
-La causa no era el tope de legibilidad: `.facturas-detail-body` lleva `margin-inline: auto`, y en un ítem de rejilla los márgenes automáticos **anulan el estirado** y lo dejan a ancho de contenido. Comprobado en vivo, sin tocar ficheros:
-
-| | Ancho del cuerpo |
-| --- | --- |
-| Antes | 801 px |
-| Declarando `inline-size: 100%` | **1171 px** |
-| Además sin el tope de 1180 px | 1171 px — *sin efecto* |
+La causa no es el tope de legibilidad: `.facturas-detail-body` lleva `margin-inline: auto`, y en un ítem de rejilla los márgenes automáticos **anulan el estirado** y lo dejan a ancho de contenido. Comprobado en vivo, sin tocar ficheros: quitar el tope de 1180 px no cambiaba nada; declarar `inline-size: 100%` sí.
 
 El tope **no era la causa y se conserva**. Lo que se declara es que el cuerpo ocupe su pista hasta ese tope y siga centrado cuando la pista es más ancha. Sin anchos por factura, sin `!important` y sin variantes nuevas.
 
-Medido después: 1171 px sobre pista de 1179 px (escritorio), 794/799 (intermedio), 330/332 (móvil), con las tarjetas alineadas al ancho útil y sin desbordamiento horizontal en ninguna.
+Medido con el mismo guion sobre las dos revisiones (fixture real `tools/private-owner-modal-browser-contract.mjs --serve`, modal abierto desde el botón del fixture, ventana de 900 px de alto):
 
----
+| Anchura | Pista | Cuerpo antes (`a93db093`) | Cuerpo después |
+| --- | --- | --- | --- |
+| 1280 px | 1230 px | 807 px | **1179 px** (el tope de 1180 px es ahora quien manda) |
+| 900 px | 850 px | 611 px | **799 px** |
+| 390 px | 390 px | 356 px | 356 px — *sin cambio: a esa anchura ya mandaba el relleno* |
+
+Sin desbordamiento horizontal en ninguna de las tres.
 
 ## C · IRPF: dos defectos de lectura, no de cálculo
 

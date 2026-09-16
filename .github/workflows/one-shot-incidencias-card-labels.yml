@@ -84,10 +84,7 @@ jobs:
       - name: Verify incidence KPI browser contract
         run: node tools/private-kpi-render-browser-contract.mjs
 
-      - name: Verify production build envelope
-        run: npm run build && npm run check:dist
-
-      - name: Commit verified change
+      - name: Commit candidate locally
         shell: bash
         run: |
           set -euo pipefail
@@ -97,4 +94,9 @@ jobs:
           git diff --cached --check
           git diff --cached --quiet && { echo "No changes produced" >&2; exit 1; }
           git commit -m "fix(incidencias): simplify KPI card labels"
-          git push origin HEAD:chore/incidencias-card-labels
+
+      - name: Verify production build envelope
+        run: npm run build && npm run check:dist
+
+      - name: Push verified change
+        run: git push origin HEAD:chore/incidencias-card-labels

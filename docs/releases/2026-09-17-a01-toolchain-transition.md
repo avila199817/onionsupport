@@ -153,8 +153,9 @@ igualdad de bytes se sigue exigiendo contra esa reconstrucción.
 Una PR retira `tools/toolchain-transition.json`. Vuelve el modo estricto.
 
 La retirada es higiene, no seguridad: en cuanto T3 se fusiona, la base declara
-`to` y la declaración ya no autoriza nada (caducidad por contenido, §3). Se hace
-igualmente y por separado, para que el estado del repositorio diga la verdad.
+`to` y la declaración ya no autoriza nada. El resolutor vuelve a modo estricto,
+lo que permite que la propia PR T4 se valide con normalidad; después se retira
+la declaración para que el estado del repositorio diga la verdad.
 
 ---
 
@@ -176,7 +177,7 @@ caza su regresión.
 | coincide `package.json` pero no el lock, o al revés | rechazo |
 | la declaración nombra un paquete y los archivos mueven otro | rechazo |
 | el par autorizado no declara o no resuelve la versión `to` | rechazo |
-| declaración olvidada tras la activación | rechazo por caducidad |
+| declaración aún presente tras la activación | modo estricto: ya no autoriza nada |
 | el candidato cambia `vite.config.js` o `tools/` | se ignoran: vienen de la base |
 | PR normal que sólo da de alta un contrato en `scripts` | modo estricto, sigue funcionando |
 | cualquier rechazo | no deja el destino a medio construir |

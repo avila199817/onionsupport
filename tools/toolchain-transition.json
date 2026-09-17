@@ -1,0 +1,8 @@
+{
+  "schema": "onionsupport.toolchain-transition.v1",
+  "package": "vite",
+  "from": "8.2.2",
+  "to": "8.3.0",
+  "packageJsonSha256": "7aabb031fc4d973bf37e2a8a28b650e6b4897537dcb9674c9bae216432a4fc48",
+  "packageLockSha256": "fd8592b8401bb101a554b5745474096516efc5819a530f4fa0f65f71f89224cd"
+}

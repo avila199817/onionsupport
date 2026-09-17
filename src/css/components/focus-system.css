@@ -1,0 +1,94 @@
+/* =========================================================
+   ONION SUPPORT — FOCUS SYSTEM
+   Archivo: /src/css/components/focus-system.css
+
+   UNA SOLA GRAMÁTICA DE FOCO PARA TODO EL SPA
+
+   Hermano de StatusSystem y AvatarSystem: vive en la última capa
+   (layer(guardrails), app.css) porque su trabajo es ganar.
+
+   EL PROBLEMA QUE RESUELVE
+
+   El indicador de foco estaba declarado en core/core.css, es decir en
+   @layer core, la TERCERA de diez. Y se pinta con `box-shadow`:
+
+       outline: 2px solid transparent;
+       box-shadow: var(--focus-ring);
+
+   Dos consecuencias medidas:
+
+   1 · Cualquier regla posterior que declare `box-shadow` sobre el mismo
+       elemento BORRA el indicador, porque no se suman: se sustituyen. Y una
+       sombra decorativa en un botón o una tarjeta es de lo más común en las
+       capas components, views y compositions. De ahí que 83 sitios del
+       proyecto lleven `outline: none; box-shadow: var(--focus-ring)`: cada
+       componente con sombra propia tenía que volver a declarar el anillo para
+       recuperarlo. Ese es el síntoma, no la solución.
+
+   2 · El anillo era invisible. Contraste calculado contra la superficie real
+       (WCAG 2.4.11 pide 3:1 para un indicador de foco):
+
+         tema claro, base                 1.19:1
+         tema claro, más contraste        1.64:1
+         tema oscuro, base                1.79:1
+         tema oscuro, más contraste       3.06:1   (el único que pasaba)
+
+   Esta hoja no reinventa el mecanismo --sigue siendo el mismo `box-shadow`,
+   para no chocar con los 83 sitios que ya lo declaran-- sino que lo pone donde
+   gana. Los valores del anillo se corrigen en la capa de tokens.
+
+   NO define geometría de layout ni lógica de dominio.
+   NO contiene @layer: app.css asigna layer(guardrails).
+========================================================= */
+
+/* =========================================================
+   FOCO VISIBLE · TECLADO
+
+   `:where()` mantiene la especificidad en cero: un componente que quiera su
+   propio indicador sigue pudiendo declararlo, y al estar en la última capa
+   esta regla sólo se impone donde nadie dijo nada.
+========================================================= */
+
+:where(
+  button,
+  a[href],
+  input,
+  select,
+  textarea,
+  summary,
+  [role="button"],
+  [role="menuitem"],
+  [role="option"],
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+
+  box-shadow: var(--focus-ring);
+}
+
+/* =========================================================
+   ALTO CONTRASTE DEL SISTEMA
+
+   En forced-colors el navegador ignora `box-shadow`, así que el indicador
+   tiene que ser un `outline` real. El `solid transparent` de arriba existe
+   precisamente para que el sistema pueda pintarlo aquí.
+========================================================= */
+
+@media (forced-colors: active) {
+  :where(
+    button,
+    a[href],
+    input,
+    select,
+    textarea,
+    summary,
+    [role="button"],
+    [role="menuitem"],
+    [role="option"],
+    [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+  }
+}

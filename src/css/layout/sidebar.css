@@ -28,11 +28,9 @@
   --sb-collapsed-w:
     var(--sidebar-collapsed, 72px);
 
+  /* Declarado en core/layout.css, que es quien también reserva el hueco. */
   --sb-mobile-collapsed-w:
-    var(
-      --sidebar-mobile-collapsed-width,
-      60px
-    );
+    var(--sidebar-mobile-collapsed-width);
 
   --sb-mobile-open-w:
     min(

@@ -625,8 +625,9 @@
   /* =========================================================
      FOCUS / SELECTION
   ========================================================= */
-  --focus-ring: 0 0 0 3px rgba(255,255,255,.18);
-  --focus-ring-strong: 0 0 0 3px rgba(255,255,255,.28);
+  /* 4,42:1 y 6,82:1 sobre #242424. Antes .18/.28 daban 1,79:1 y 2,52:1. */
+  --focus-ring: 0 0 0 3px rgba(255,255,255,.46);
+  --focus-ring-strong: 0 0 0 3px rgba(255,255,255,.62);
 
   --selection-bg: rgba(255,255,255,.28);
   --selection-text: #ffffff;
@@ -931,8 +932,13 @@
   --topbar-search-bg-focus: var(--graphite-300);
   --topbar-search-border: rgba(255,255,255,.14);
 
-  --topbar-search-results-gap-token: 5px;
-  --topbar-search-results-offset: var(--topbar-search-results-gap-token);
+  /*
+    Un solo nombre. Se declaraba `--topbar-search-results-gap` y
+    layout/topbar.css consumía `--topbar-search-results-gap`, que no existía:
+    ganaba su fallback de 8px y los 5px declarados no llegaban a pintarse.
+    `--topbar-search-results-offset` era un alias sin ningún consumidor.
+  */
+  --topbar-search-results-gap: 5px;
   --topbar-search-results-max-height: calc(400px * var(--ui-scale));
   --topbar-search-result-bg: var(--popover-bg);
   --topbar-search-result-border: var(--border-default);
@@ -969,7 +975,7 @@
         100dvh -
         var(--topbar-search-command-offset-top) -
         var(--topbar-search-height) -
-        var(--topbar-search-results-gap-token) -
+        var(--topbar-search-results-gap) -
         18px
       )
     );
@@ -1533,7 +1539,7 @@ body[data-route-mode="app"] {
           100dvh -
           var(--topbar-search-command-offset-top) -
           var(--topbar-search-height) -
-          var(--topbar-search-results-gap-token) -
+          var(--topbar-search-results-gap) -
           18px
         )
       );
@@ -1620,8 +1626,9 @@ body[data-route-mode="app"] {
     --text-muted: rgba(255,255,255,.82);
     --text-dim: rgba(255,255,255,.70);
 
-    --focus-ring: 0 0 0 4px rgba(255,255,255,.34);
-    --focus-ring-strong: 0 0 0 4px rgba(255,255,255,.48);
+    /* Tramo de más contraste: se sube por encima del base. */
+    --focus-ring: 0 0 0 4px rgba(255,255,255,.62);
+    --focus-ring-strong: 0 0 0 4px rgba(255,255,255,.78);
 
     --topbar-search-border: rgba(255,255,255,.34);
     --topbar-search-glass-bg: var(--graphite-500);

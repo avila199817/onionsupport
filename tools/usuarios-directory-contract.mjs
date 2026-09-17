@@ -148,7 +148,7 @@ try {
             userId: id,
             email: "carlos@directorio.test",
             expiresAt: "2026-09-19T00:00:00.000Z",
-            activationUrl: "https://www.onionsupport.com/activate-account/SECRET-QUE-NUNCA-DEBE-LLEGAR-AL-DOM",
+            activationUrl: "https://activation.invalid/SECRET-QUE-NUNCA-DEBE-LLEGAR-AL-DOM",
             mail: { sent: true, status: "sent" },
           });
         },

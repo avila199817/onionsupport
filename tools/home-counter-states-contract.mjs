@@ -17,7 +17,13 @@
      cargando      · esqueletos de la sección
      value         · un número, el CERO incluido
      updating      · se conserva el número anterior y se señala el refresco
+     unknown       · el dominio contestó pero su recuento no está confirmado
      error         · el dominio no contestó, se dice y se ofrece reintentar
+
+   `unknown` es el estado que faltaba. El backend lo declara con
+   `totalKnown: false` y `total: null`, y NO genera aviso de dominio: el panel
+   no es parcial, así que se guardaba como completo y la tarjeta se quedaba
+   indefinidamente en «No disponible», sin nada que pulsar.
 
    No se coloca ningún número conocido: el valor sale del mundo sintético.
    No hay sondeo: se cuenta cuántas veces se pregunta de verdad.
@@ -210,6 +216,118 @@ try {
     assert.deepEqual(sesion.pageErrors, [], `Errores de página: ${JSON.stringify(sesion.pageErrors)}`);
     paso(`${escenarios.length + 1} · carga lenta y cambio de ruta: se resuelve en ${final.valor}, sin raya congelada`);
     await sesion.context.close();
+  }
+
+  /* =====================================================================
+     TOTAL DESCONOCIDO · la lista llega, el recuento no.
+
+     El backend lo declara: `totalKnown: false`, `total: null`, y los items
+     enteros. No hay aviso de dominio, así que el panel NO es parcial: ése era
+     justo el camino que se colaba. Antes esto se pintaba como «No disponible»
+     --indistinguible de un ámbito que no aplica--, se guardaba como panel
+     completo y no había nada que pulsar ni forma de recuperarlo.
+  ===================================================================== */
+  {
+    let sinConfirmar = true;
+    const mundo = syntheticWorld();
+    const sesion = await openSpaSession(browser, origin, {
+      world: mundo,
+      api: async ({ path, respond, world: w }) => {
+        if (!/^\/api\/(tickets|incidencias)$/u.test(path)) return false;
+        if (!sinConfirmar) return false;
+        /* La forma EXACTA que publica el backend cuando el recuento no está
+           confirmado: la lista entera, el total nulo y la marca puesta. */
+        await respond({
+          ok: true,
+          items: w.tickets,
+          data: w.tickets,
+          total: null,
+          totalCount: null,
+          totalKnown: false,
+          totalIsLowerBound: true,
+        });
+        return true;
+      },
+    });
+    const page = sesion.page;
+    const llamadas = () => sesion.calls.filter(({ path }) => /^\/api\/(tickets|incidencias)$/u.test(path)).length;
+
+    await page.goto(`${origin}${RUTA}`, { waitUntil: "load" });
+    await enHome(page);
+    await espera(1400);
+
+    /* 7 · Se dice que no está confirmado, y se puede reintentar. */
+    const desconocido = await tarjeta(page);
+    assert.equal(desconocido.estado, "unknown",
+      `Un total sin confirmar declara «${desconocido.estado}», y debe ser «unknown»`);
+    assert.equal(desconocido.valor, "—", `Sin recuento confirmado no se escribe un número: «${desconocido.valor}»`);
+    assert.notEqual(desconocido.valor, "0", "Un recuento sin confirmar NO es un cero");
+    assert.notEqual(desconocido.valor, String(mundo.tickets.length),
+      "Ni se rellena con lo que quepa en la página");
+    assert.notEqual(desconocido.estado, "error", "La lista llegó: esto no es un fallo del dominio");
+    assert.notEqual(desconocido.estado, "unavailable", "Ni un ámbito que no aplica");
+    assert.equal(desconocido.reintentar, 1, `Se ofrece reintentar (${desconocido.reintentar} controles)`);
+    assert.deepEqual(sesion.pageErrors, [], `Errores de página: ${JSON.stringify(sesion.pageErrors)}`);
+    paso(`${escenarios.length + 1} · total sin confirmar: estado «unknown», «${desconocido.texto}» y 1 control de reintento`);
+
+    /* 8 · Salir y volver vuelve a preguntar: NO se guardó como panel completo.
+       Ésta es la negativa del dato incompleto cacheado como fresco. */
+    const antes = llamadas();
+    await irA(page, "/facturas", "[data-factura-id]");
+    await volverAHome(page);
+    const despues = llamadas();
+    assert.ok(despues > antes,
+      `Volver a Home con un recuento sin confirmar tiene que volver a preguntar (${antes} → ${despues})`);
+    assert.equal((await tarjeta(page)).estado, "unknown", "Y mientras siga sin confirmarse, lo sigue diciendo");
+    paso(`${escenarios.length + 1} · salir y volver vuelve a preguntar (${antes} → ${despues}): no se guardó como panel completo`);
+
+    /* 9 · El reintento recupera el total, sin recargar. */
+    sinConfirmar = false;
+    await clickInPage(page, REINTENTAR);
+    await untilTrue(page, (sel) => document.querySelector(sel)?.getAttribute("data-home-stat-state") === "value",
+      { arg: TARJETA, timeout: 20000, message: "El reintento no recuperó el recuento" });
+    const recuperado = await tarjeta(page);
+    assert.equal(recuperado.valor, String(mundo.tickets.length), `El reintento recupera ${recuperado.valor}`);
+    assert.equal(recuperado.reintentar, 0, "Con el dato confirmado ya no hay nada que reintentar");
+    assert.equal(sesion.documents.length, 1, `Se pidieron ${sesion.documents.length} documentos; debe bastar 1`);
+    paso(`${escenarios.length + 1} · «Reintentar» recupera el total (${recuperado.valor}) sin recargar`);
+
+    /* 10 · Sin sondeo: quieta en Home, la pregunta no se repite sola. */
+    const estable = llamadas();
+    await espera(2500);
+    assert.equal(llamadas(), estable,
+      `Quieta en Home no se vuelve a preguntar (${estable} → ${llamadas()}): ni sondeo ni tormenta de reintentos`);
+    paso(`${escenarios.length + 1} · sin sondeo: ${estable} llamadas antes y después de 2,5 s quieta`);
+    await sesion.context.close();
+  }
+
+  /* =====================================================================
+     11 · Aislamiento por identidad: el recuento de una sesión no se hereda.
+  ===================================================================== */
+  {
+    const suyo = syntheticWorld();
+    const otro = syntheticWorld();
+    otro.conectado = { ...otro.conectado, id: "u-admin-2", userId: "u-admin-2", email: "admin2@example.test" };
+    otro.tickets = otro.tickets.slice(0, 2);
+
+    const primera = await openSpaSession(browser, origin, { world: suyo });
+    await primera.page.goto(`${origin}${RUTA}`, { waitUntil: "load" });
+    await enHome(primera.page);
+    await espera(1200);
+    const uno = await tarjeta(primera.page);
+    assert.equal(uno.valor, String(suyo.tickets.length), `La primera identidad ve lo suyo: ${uno.valor}`);
+    await primera.context.close();
+
+    const segunda = await openSpaSession(browser, origin, { world: otro });
+    await segunda.page.goto(`${origin}/@u-admin-2`, { waitUntil: "load" });
+    await enHome(segunda.page);
+    await espera(1200);
+    const dos = await tarjeta(segunda.page);
+    assert.equal(dos.estado, "value", `La segunda identidad resuelve su propio estado: «${dos.estado}»`);
+    assert.equal(dos.valor, String(otro.tickets.length), `Y su propio número: ${dos.valor}`);
+    assert.notEqual(dos.valor, uno.valor, "El recuento de una identidad no se hereda en otra");
+    paso(`${escenarios.length + 1} · aislamiento: ${uno.valor} para u-admin-1 y ${dos.valor} para u-admin-2, sin herencia`);
+    await segunda.context.close();
   }
 
   console.log(`Home counter states contract: PASS · ${escenarios.length} escenarios · estados por marca, recuperación medida y sin sondeo`);

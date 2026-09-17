@@ -46,17 +46,28 @@ export function header(vm) {
  *
  * El estado viaja también en `data-home-stat-state`, para que se pueda
  * comprobar sin leer texto traducido. */
-function statCard({ label, value, text, iconName, route, modifier, failed = false, refreshing = false }) {
+/* CUATRO ESTADOS, Y CADA UNO DICE LO SUYO.
+ *
+ *   value        el recuento está confirmado, el 0 incluido
+ *   updating     hay dato y se está refrescando
+ *   unknown      el dominio contestó pero su recuento no está confirmado
+ *   error        el dominio falló
+ *   unavailable  ese ámbito no aplica a esta sesión
+ *
+ * `unknown` es el que faltaba: un total sin confirmar se pintaba como «No
+ * disponible», indistinguible de un ámbito que no aplica, y sin nada que
+ * pulsar. No se rellena con un cero ni con lo que quepa en una página. */
+function statCard({ label, value, text, iconName, route, modifier, failed = false, unknown = false, refreshing = false }) {
   const href = safeRoute(route, "/");
   const key = homeLabelKey(modifier || label || "stat");
   const available = typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
   const state = available
     ? (refreshing ? "updating" : "value")
-    : (failed ? "error" : "unavailable");
+    : (failed ? "error" : unknown ? "unknown" : "unavailable");
   const formattedValue = available ? formatNumber(value) : "—";
   const description = available
     ? (refreshing ? `${text} · Actualizando` : text)
-    : (failed ? "No se pudo cargar" : "No disponible");
+    : (failed ? "No se pudo cargar" : unknown ? "Sin confirmar" : "No disponible");
   const ariaLabel = available
     ? `${label}: ${formattedValue}. ${description}`
     : `${label}: ${description}`;
@@ -100,6 +111,7 @@ export function stats(vm) {
     : "Facturación no disponible";
 
   const failed = isObject(vm.counts.failed) ? vm.counts.failed : {};
+  const unknown = isObject(vm.counts.unknown) ? vm.counts.unknown : {};
   const refreshing = vm.refreshing === true;
 
   const cards = [
@@ -111,6 +123,7 @@ export function stats(vm) {
       route: vm.routes.incidencias,
       modifier: "incidencias",
       failed: failed.incidencias === true,
+      unknown: unknown.incidencias === true,
       refreshing,
     },
     {
@@ -121,6 +134,7 @@ export function stats(vm) {
       route: vm.routes.facturas,
       modifier: "facturas",
       failed: failed.facturas === true,
+      unknown: unknown.facturas === true,
       refreshing,
     },
   ];
@@ -135,6 +149,7 @@ export function stats(vm) {
         route: vm.routes.clientes,
         modifier: "clientes",
         failed: failed.clientes === true,
+        unknown: unknown.clientes === true,
         refreshing,
       },
       {
@@ -145,6 +160,7 @@ export function stats(vm) {
         route: vm.routes.usuarios,
         modifier: "usuarios",
         failed: failed.usuarios === true,
+        unknown: unknown.usuarios === true,
         refreshing,
       }
     );

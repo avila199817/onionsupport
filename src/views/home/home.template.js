@@ -168,8 +168,16 @@ function welcomePilot(vm = {}) {
  * repararse sin recargar. */
 function partialCountsMessage(vm = {}) {
   const failed = isObject(vm?.counts?.failed) ? vm.counts.failed : {};
-  return Object.values(failed).some(Boolean)
-    ? "No se pudieron cargar todos los datos del resumen."
+  if (Object.values(failed).some(Boolean)) {
+    return "No se pudieron cargar todos los datos del resumen.";
+  }
+
+  /* Un recuento sin confirmar se repara por el MISMO sitio: este aviso ya trae
+     su «Reintentar» y el controlador lo trata como un refresco. No se añade
+     otro control, ni sondeo, ni reintento automático. */
+  const sinConfirmar = isObject(vm?.counts?.unknown) ? vm.counts.unknown : {};
+  return Object.values(sinConfirmar).some(Boolean)
+    ? "Algunos recuentos del resumen no se han podido confirmar."
     : "";
 }
 

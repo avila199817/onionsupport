@@ -6,7 +6,7 @@
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { DEFAULT_ROUTES, cleanText, initialsFrom, isObject, homeLabelKey, safeArray, safeImageSrc } from "./home.template.foundation.js";
 import { clamp, finiteNumber } from "../../core/numbers.js";
-import { firstNonEmpty } from "../../core/objects.js";
+import { firstNonEmpty, safeObject } from "../../core/objects.js";
 
 export function buildVm(input = {}) {
   const data = isObject(input) ? input : {};
@@ -62,6 +62,8 @@ export function buildVm(input = {}) {
   const domainFailed = (name) => failedDomains.some(
     (domain) => domain === name || domain.startsWith(`${name}_`)
   );
+
+  const sinConfirmar = safeObject(dashboard.unknownCounts);
 
   const totalInvoiced = finiteNumber(
     firstNonEmpty(
@@ -193,6 +195,14 @@ export function buildVm(input = {}) {
         facturas: domainFailed("facturas"),
         clientes: admin && domainFailed("clientes"),
         usuarios: admin && domainFailed("usuarios"),
+      },
+      /* Sin confirmar NO es lo mismo que caído: el dominio contestó y su lista
+         sirve; lo que no está confirmado es el recuento. Lo declara el panel. */
+      unknown: {
+        incidencias: sinConfirmar.incidencias === true,
+        facturas: sinConfirmar.facturas === true,
+        clientes: admin && sinConfirmar.clientes === true,
+        usuarios: admin && sinConfirmar.usuarios === true,
       },
     },
     billing: {

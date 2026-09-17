@@ -29,7 +29,18 @@ const JS_ROOT = resolve(DIST, "assets/js");
 // what the SPA loads, so it belongs in this closure; the ceiling moves to
 // 218600, leaving 57 bytes. Nothing is preloaded: the growth is the rule, not
 // the payload. app and auth keep their ceilings.
-const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218600 });
+// R06 (2026-09-17): the technician profile now reads the per-technician review
+// summary from the same module that already talks to the reviews API, so that
+// module is shared by two lazy features and the bundler gives it its own chunk.
+// The ONLY growth is the enhancements preload manifest naming it: +48 raw bytes
+// (enhancements 10081 -> 10129, union 218563 -> 218611 on a1b458e5), no new
+// startup code and nothing new preloaded for the public Home -- that entry is
+// reachable from the `facturas` and `incidencias` scopes, never from `public`.
+// The ceiling moves to 218700, leaving 89 bytes. app and auth keep theirs.
+// COORDINACIÓN: la entrega de Agenda (PR #691) sube este mismo techo por su
+// cuenta; quien fusione en segundo lugar debe conciliar un único valor medido,
+// no sumar los dos.
+const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218700 });
 
 function staticImports(code, identifier) {
   // PARSE ONLY. Never link, evaluate or supply a dynamic-import callback.

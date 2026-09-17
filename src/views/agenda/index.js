@@ -146,6 +146,7 @@ function renderDayEvents(state, key) {
             type="button"
             class="agenda-day-event is-${escapeHtml(cita.estado)}"
             data-agenda-action="open-cita"
+            data-agenda-opener="dia:${escapeHtml(cita.id)}"
             data-agenda-cita="${escapeHtml(cita.id)}"
             data-agenda-cita-user="${escapeHtml(cita.userId || "")}"
             title="${escapeHtml(citaChipLabel(cita, state.admin))}"
@@ -204,6 +205,7 @@ function renderMonthGrid(state) {
                    class="agenda-day-create-btn"
                    data-agenda-action="create-cita"
                    data-agenda-date="${escapeHtml(key)}"
+                   data-agenda-opener="crear:${escapeHtml(key)}"
                    aria-label="${escapeHtml(`Crear cita para el ${label.charAt(0).toLocaleLowerCase("es-ES")}${label.slice(1)}`)}"
                    tabindex="${selected ? "0" : "-1"}"
                  >${icon("plus")}</button>
@@ -255,6 +257,7 @@ function renderInspector(state) {
               type="button"
               class="agenda-inspector-item is-${escapeHtml(cita.estado)}"
               data-agenda-action="open-cita"
+              data-agenda-opener="inspector:${escapeHtml(cita.id)}"
               data-agenda-cita="${escapeHtml(cita.id)}"
               data-agenda-cita-user="${escapeHtml(cita.userId || "")}"
             >
@@ -766,7 +769,12 @@ function createController(host, context = {}) {
     if (opener.isConnected) return opener;
     return liveModalOpener(opener, {
       within: host,
-      identity: ["data-agenda-date", "data-agenda-cita", "data-agenda-action", "id"],
+      /* `data-agenda-opener` es lo único inequívoco: `data-agenda-date` lo
+         comparten la casilla y su «+», `data-agenda-cita` el chip del día y
+         el del inspector, y `data-agenda-action` las 42 casillas. Con esas
+         tres, `liveModalOpener` no encontraba nunca una coincidencia única y
+         devolvía null, así que el foco seguía cayendo al <body>. */
+      identity: ["data-agenda-opener", "data-agenda-cita", "id"],
     }) || null;
   }
 

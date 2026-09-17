@@ -99,13 +99,15 @@ const origin = `http://127.0.0.1:${server.address().port}`;
    Doble de la API
 --------------------------------------------------------- */
 
-function createApi({ admin = true, citas = [] } = {}) {
+function createApi({ admin = true, citas = [], fallosDetalle = 0, pasado = false } = {}) {
   const state = {
+    fallosDetallePendientes: fallosDetalle,
     citas: [...citas],
     calls: { list: 0, create: 0, detail: 0, patch: 0, cancel: 0, users: 0 },
     createdPayloads: [],
     idempotencyKeys: [],
     ifMatch: [],
+    patchPayloads: [],
     seq: 0,
   };
 
@@ -182,6 +184,10 @@ function createApi({ admin = true, citas = [] } = {}) {
     if (url.pathname === "/api/citas" && method === "POST") {
       state.calls.create += 1;
       const payload = JSON.parse(request.postData() || "{}");
+      if (pasado && payload.confirmarPasado !== true) {
+        return json({ ok: false, code: "CITA_EN_PASADO",
+                      message: "La fecha y hora indicadas ya han pasado." }, 409);
+      }
       const key = request.headers()["idempotency-key"] || "";
       state.createdPayloads.push(payload);
       state.idempotencyKeys.push(key);
@@ -210,6 +216,11 @@ function createApi({ admin = true, citas = [] } = {}) {
     const detailMatch = url.pathname.match(/^\/api\/citas\/([^/]+)$/u);
     if (detailMatch && method === "GET") {
       state.calls.detail += 1;
+      if (state.fallosDetallePendientes > 0) {
+        state.fallosDetallePendientes -= 1;
+        return json({ ok: false, code: "CITAS_ALMACENAMIENTO_NO_DISPONIBLE",
+                      message: "El almacenamiento de citas todavía no está disponible." }, 503);
+      }
       const cita = state.citas.find((item) => item.id === decodeURIComponent(detailMatch[1]));
       if (!cita) return json({ ok: false, code: "CITA_NO_ENCONTRADA", message: "No se ha encontrado la cita." }, 404);
       return json({ ok: true, cita: project(cita) });
@@ -221,6 +232,11 @@ function createApi({ admin = true, citas = [] } = {}) {
       const cita = state.citas.find((item) => item.id === decodeURIComponent(detailMatch[1]));
       if (!cita) return json({ ok: false, code: "CITA_NO_ENCONTRADA" }, 404);
       const payload = JSON.parse(request.postData() || "{}");
+      state.patchPayloads.push(payload);
+      if (pasado && payload.confirmarPasado !== true) {
+        return json({ ok: false, code: "CITA_EN_PASADO",
+                      message: "La fecha y hora indicadas ya han pasado." }, 409);
+      }
       Object.assign(cita, payload, { version: cita.version + 1, notifKind: "actualizada" });
       return json({ ok: true, cita: project(cita), cambios: Object.keys(payload) });
     }
@@ -248,8 +264,8 @@ function createApi({ admin = true, citas = [] } = {}) {
   return { state, handle };
 }
 
-async function openAgenda(browser, { admin = true, citas = [], width = 1280, query = "" } = {}) {
-  const api = createApi({ admin, citas });
+async function openAgenda(browser, { admin = true, citas = [], width = 1280, query = "", fallosDetalle = 0, pasado = false } = {}) {
+  const api = createApi({ admin, citas, fallosDetalle, pasado });
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   await page.route(`${API_ORIGIN}/**`, api.handle);
   await page.goto(`${origin}/agenda${query}`, { waitUntil: "load" });
@@ -739,6 +755,216 @@ try {
     assert.equal(await page.locator('[data-create-action="create-cancel"]').isVisible(), true);
 
     ok("11 · móvil 390 px: panel a medida, sin desbordamiento y con el pie accesible");
+    await page.close();
+  }
+
+  const SEMILLA = (id) => ({
+    id, userId: "usr-ana", destinatarioNombre: "Ana Pérez",
+    fechaLocal: ANCHOR, horaLocal: "10:00", lugar: "Oficina de Sant Vicenç",
+    nota: "", estado: "programada", version: 1,
+  });
+
+  /* 12 · H1 · EL REINTENTO DEL DETALLE EXISTE Y RECARGA DE VERDAD */
+  {
+    const { page, api } = await openAgenda(browser, { citas: [SEMILLA("CITA-RETRY-0001")], fallosDetalle: 1 });
+    const cell = page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"]`);
+    await cell.locator(".agenda-day-event").first().click();
+    await page.locator("#agenda-detail-modal").waitFor({ state: "visible" });
+
+    /* 1 · el estado de error aparece */
+    await page.locator("#agenda-detail-modal .modal-state, #agenda-detail-modal [data-detail-action='detail-retry']")
+      .first().waitFor({ state: "visible" });
+    assert.equal(api.state.calls.detail, 1, "el primer intento falló y se pidió una sola vez");
+
+    /* 2 · el botón EXISTE en el DOM (antes se descartaba en silencio) */
+    const retry = page.locator('#agenda-detail-modal [data-detail-action="detail-retry"]');
+    assert.equal(await retry.count(), 1, "el botón Reintentar existe");
+    assert.equal(await retry.isVisible(), true, "y es visible");
+
+    /* 3 y 4 · se activa y provoca una nueva petición */
+    await retry.click();
+    await page.waitForFunction(() => true);
+    await page.locator("#agenda-detail-modal .agenda-detail-grid").waitFor({ state: "visible" });
+    assert.equal(api.state.calls.detail, 2, "el reintento produce exactamente una petición más");
+
+    /* 5 · la respuesta correcta sustituye el error por el detalle */
+    assert.equal(await retry.count(), 0, "el estado de error ha desaparecido");
+    const texto = await page.locator("#agenda-detail-modal").textContent();
+    assert.match(texto, /Oficina de Sant Vicen/u, "y se ve el detalle cargado");
+
+    ok("12 · H1 · el reintento del detalle existe, se activa y recarga");
+    await page.close();
+  }
+
+  /* 13 · H2 · EL FOCO VUELVE A UN OBJETIVO VIVO, NO AL BODY */
+  {
+    const { page } = await openAgenda(browser, { citas: [SEMILLA("CITA-FOCO-0001")] });
+    const cell = page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"]`);
+
+    /* 1 y 2 · seleccionar el día repinta la rejilla */
+    await cell.click({ position: { x: 8, y: 8 } });
+    await page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"] .agenda-day-create-btn`)
+      .waitFor({ state: "visible" });
+
+    /* 3 · el nodo original del «+» queda reemplazado por el repintado */
+    const original = await page.evaluateHandle((key) =>
+      document.querySelector(`[data-agenda-date="${key}"] .agenda-day-create-btn`), ANCHOR);
+    await cell.click({ position: { x: 8, y: 8 } });
+    await page.waitForTimeout(50);
+    const seguiaConectado = await page.evaluate((el) => el.isConnected, original);
+
+    /* 4 y 5 · abrir y cerrar el alta */
+    await page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"] .agenda-day-create-btn`).click();
+    await page.locator("#agenda-create-modal").waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    await page.locator("#agenda-create-modal").waitFor({ state: "detached" });
+
+    const foco = await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { tag: el.tagName.toLowerCase(), conectado: el.isConnected,
+               visible: r.width > 0 && r.height > 0,
+               esCrear: el.classList.contains("agenda-day-create-btn") };
+    });
+    assert.ok(foco, "hay un elemento con el foco");
+    assert.notEqual(foco.tag, "body", "el foco NO cae al body");
+    assert.equal(foco.conectado, true, "el objetivo del foco está conectado");
+    assert.equal(foco.visible, true, "y es visible");
+    assert.equal(foco.esCrear, true, "y es el «+» del día, un destino razonable");
+
+    /* El mismo criterio para el detalle, tras refrescarse el rango. */
+    await page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"] .agenda-day-event`).first().click();
+    await page.locator("#agenda-detail-modal .agenda-detail-grid").waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    await page.locator("#agenda-detail-modal").waitFor({ state: "detached" });
+    const focoDetalle = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el ? { tag: el.tagName.toLowerCase(), conectado: el.isConnected } : null;
+    });
+    assert.ok(focoDetalle, "el detalle también devuelve el foco");
+    assert.notEqual(focoDetalle.tag, "body", "tampoco cae al body al cerrar el detalle");
+    assert.equal(focoDetalle.conectado, true, "y su objetivo está conectado");
+
+    ok(`13 · H2 · el foco vuelve a un objetivo vivo (el nodo original ${seguiaConectado ? "seguía" : "ya no estaba"} conectado)`);
+    await page.close();
+  }
+
+  /* 14 · H9 · REPROGRAMAR AL PASADO: AVISO, RECHAZO SIN PETICIÓN, ACEPTACIÓN CON confirmarPasado */
+  {
+    const { page, api } = await openAgenda(browser, { citas: [SEMILLA("CITA-PASADO-0001")], pasado: true });
+    const cell = page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"]`);
+    const abrirEdicion = async () => {
+      await cell.locator(".agenda-day-event").first().click();
+      await page.locator("#agenda-detail-modal .agenda-detail-grid").waitFor({ state: "visible" });
+      await page.locator('[data-detail-action="detail-edit"]').click();
+      await page.locator('[data-agenda-detail-form="true"]').waitFor({ state: "visible" });
+    };
+
+    /* 1‑3 · editar hacia el pasado y guardar: una petición SIN confirmarPasado, 409 */
+    await abrirEdicion();
+    await page.locator('#agenda-detail-modal [data-field="horaLocal"]').fill("09:00");
+    await page.locator('[data-detail-action="detail-save"]').click();
+    await page.waitForFunction(() => Boolean(document.querySelector(".agenda-alert--warning")));
+    assert.equal(api.state.calls.patch, 1, "una sola petición");
+    assert.equal(api.state.patchPayloads[0].confirmarPasado, undefined, "la primera no confirma el pasado");
+
+    /* 4 · el aviso aparece */
+    assert.equal(await page.locator(".agenda-alert--warning").isVisible(), true, "aparece el aviso de fecha pasada");
+
+    /* 5 · rechazar NO produce una segunda petición */
+    await page.locator('[data-detail-action="detail-edit-cancel"]').click();
+    await page.waitForTimeout(120);
+    assert.equal(api.state.calls.patch, 1, "descartar no envía nada");
+
+    /* 6‑8 · repetir y aceptar: exactamente una petición más, con confirmarPasado */
+    await page.locator('[data-detail-action="detail-edit"]').click();
+    await page.locator('[data-agenda-detail-form="true"]').waitFor({ state: "visible" });
+    await page.locator('#agenda-detail-modal [data-field="horaLocal"]').fill("09:15");
+    await page.locator('[data-detail-action="detail-save"]').click();
+    await page.waitForFunction(() => Boolean(document.querySelector(".agenda-alert--warning")));
+    assert.equal(api.state.calls.patch, 2, "el reintento manda una segunda petición");
+    await page.locator('[data-detail-action="detail-save"]').click();
+    await page.waitForFunction(() => !document.querySelector('[data-agenda-detail-form="true"]'));
+    assert.equal(api.state.calls.patch, 3, "aceptar produce UNA petición más");
+    assert.equal(api.state.patchPayloads[2].confirmarPasado, true, "y esa petición confirma el pasado");
+
+    /* 9 y 10 · respuesta satisfactoria y la interfaz refleja el cambio */
+    assert.equal(api.state.citas[0].horaLocal, "09:15", "el cambio se ha aplicado");
+    await page.waitForFunction(() =>
+      document.querySelector(".agenda-day-event-time")?.textContent?.trim() === "09:15");
+
+    ok("14 · H9 · aviso, rechazo sin petición y aceptación con confirmarPasado");
+    await page.close();
+  }
+
+  /* 15 · PRESENTACIÓN CON ESTILOS COMPUTADOS, SIN PASAR POR INCIDENCIAS */
+  {
+    const { page } = await openAgenda(browser, { citas: [] });
+    const cell = page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"]`);
+    await cell.click({ position: { x: 8, y: 8 } });
+    await page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"] .agenda-day-create-btn`).click();
+    await page.locator("#agenda-create-modal").waitFor({ state: "visible" });
+
+    /* Buscador y resultados */
+    const input = page.locator('#agenda-create-modal [data-create-field="userQuery"], #agenda-create-modal input[type="search"], #agenda-create-modal [data-field="userQuery"]').first();
+    await input.fill("ana");
+    await page.locator(".agenda-create-user-result").first().waitFor({ state: "visible" });
+
+    const estiloResultado = await page.locator(".agenda-create-user-result").first().evaluate((el) => {
+      const cs = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      return { alto: r.height, display: cs.display, cursor: cs.cursor };
+    });
+    assert.ok(estiloResultado.alto > 20, "el resultado tiene altura real, no está sin estilo");
+
+    /* Avatar: contrato compartido y caja real */
+    const avatar = await page.locator(".agenda-create-user-avatar").first().evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { ancho: r.width, alto: r.height,
+               iniciales: el.getAttribute("data-avatar-initials") || "",
+               tono: el.getAttribute("data-avatar-tone") || "",
+               sistema: el.getAttribute("data-avatar-system") || "",
+               fallback: Boolean(el.querySelector("[data-avatar-fallback]")),
+               textoFallback: (el.querySelector("[data-avatar-fallback]")?.textContent || "").trim() };
+    });
+    assert.ok(avatar.ancho > 10 && avatar.alto > 10, "el avatar tiene caja, no está sin estilo");
+    assert.equal(avatar.sistema, "true", "emite el contrato del sistema de avatar");
+    assert.ok(avatar.iniciales.length > 0, "la autoridad compartida da iniciales");
+    assert.ok(avatar.tono.length > 0, "y un tono");
+    assert.equal(avatar.fallback, true, "con su hueco de reserva");
+    assert.equal(avatar.textoFallback, avatar.iniciales, "que muestra esas mismas iniciales");
+
+    /* Selección: el chip también está vestido */
+    await page.locator(".agenda-create-user-result").first().click();
+    await page.locator(".agenda-create-selected-user, [data-create-action='create-user-clear']").first().waitFor({ state: "visible" });
+
+    /* Alertas: dos columnas reales y el copy fuera de la columna del icono */
+    const alerta = await page.evaluate(() => {
+      const host = document.querySelector("#agenda-create-modal .inc-create-body") || document.body;
+      const div = document.createElement("div");
+      div.className = "inc-create-alert agenda-alert--warning";
+      div.innerHTML = '<span class="agenda-alert-icon"></span><div class="agenda-alert-copy"><strong>T</strong><p>C</p></div>';
+      host.appendChild(div);
+      const base = document.createElement("div");
+      base.className = "inc-create-alert";
+      host.appendChild(base);
+      const cs = getComputedStyle(div);
+      const icono = div.querySelector(".agenda-alert-icon").getBoundingClientRect();
+      const copy = div.querySelector(".agenda-alert-copy").getBoundingClientRect();
+      const res = { columnas: cs.gridTemplateColumns, display: cs.display,
+                    copyALaDerecha: copy.left > icono.right - 1,
+                    fondoAviso: cs.backgroundColor,
+                    fondoBase: getComputedStyle(base).backgroundColor };
+      div.remove(); base.remove();
+      return res;
+    });
+    assert.equal(alerta.display, "grid", "la alerta es la rejilla compartida");
+    assert.equal(alerta.columnas.split(" ").length, 2, "con dos columnas: icono y texto");
+    assert.equal(alerta.copyALaDerecha, true, "el texto ocupa la columna del texto, no la del icono");
+    assert.notEqual(alerta.fondoAviso, alerta.fondoBase, "el aviso tiene su propio tono, no el informativo");
+
+    ok("15 · presentación: buscador, avatar con su autoridad y alertas en dos columnas");
     await page.close();
   }
 

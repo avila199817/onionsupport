@@ -420,4 +420,70 @@ pass("1 · versiones y zona canónica declaradas");
   pass(`11 · las ${emitidas.size} clases de Agenda se declaran en hojas que la ruta carga`);
 }
 
+/* =========================================================
+   12 · LA PRESENTACION DEL AVATAR Y EL TONO DE LAS ALERTAS
+
+   Dos cosas que el bloque 11 no puede ver:
+
+   a) las iniciales. Agenda derivaba las suyas con `slice(0,1)`: una autoridad
+      paralela, de una sola letra y sin tono. Las decide
+      `resolveAvatarPresentation`, como las otras superficies.
+
+   b) los modificadores `is-*`. El bloque 11 sólo mira clases con prefijo
+      `inc-`, `agenda-` o `ui-`, asi que un `is-warning` inexistente pasaba
+      de largo y el aviso salia en azul informativo.
+========================================================= */
+{
+  const raiz = resolve(fileURLToPath(new URL("../", import.meta.url)));
+  const leer = (ruta) => readFileSync(join(raiz, ruta), "utf8");
+  const alta = leer("src/views/agenda/agenda.template.create.js");
+  const detalle = leer("src/views/agenda/agenda.template.detail.js");
+
+  assert.match(alta, /resolveAvatarPresentation/u,
+    "el alta de Agenda resuelve el avatar con la autoridad compartida");
+  assert.doesNotMatch(alta, /\.slice\(\s*0\s*,\s*1\s*\)[\s\S]{0,40}toLocaleUpperCase/u,
+    "ninguna vista de Agenda deriva iniciales por su cuenta");
+  for (const atributo of ["data-avatar-system", "data-avatar-tone", "data-avatar-identity",
+                          "data-avatar-initials", "data-has-avatar", "data-avatar-fallback"]) {
+    assert.ok(alta.includes(atributo), `el avatar de Agenda emite ${atributo}`);
+  }
+
+  /* Toda alerta declara sus dos huecos: icono y copy. Con hijos sueltos el
+     titulo caia en la columna de 34px reservada al icono. */
+  for (const [nombre, texto] of [["alta", alta], ["detalle", detalle]]) {
+    for (const bloqueAlerta of texto.matchAll(/<div class="inc-create-alert[^"]*"[^>]*>([\s\S]*?)<\/div>/gu)) {
+      assert.match(bloqueAlerta[1], /agenda-alert-icon|inc-create-alert-icon/u,
+        `la alerta del ${nombre} declara su hueco de icono`);
+      assert.match(bloqueAlerta[1], /agenda-alert-copy|inc-create-alert-copy/u,
+        `la alerta del ${nombre} declara su hueco de texto`);
+    }
+  }
+
+  /* Y su tono tiene que existir en una hoja que la ruta cargue. */
+  const hojasCargadas = [
+    "src/css/views/agenda/index.css",
+    "src/css/compositions/private-create-modal.css",
+  ].map(leer).join("\n");
+  /* El alta compone su modificador, asi que se reproduce su regla sobre los
+     tipos que realmente invoca; el detalle lo escribe literal. */
+  assert.match(alta, /kind === "warning" \? "agenda-alert--warning"/u,
+    "el alta mapea el aviso al modificador que existe");
+  const modificadores = new Set();
+  for (const m of alta.matchAll(/renderAlert\(\s*"(\w+)"/gu)) {
+    modificadores.add(m[1] === "warning" ? "agenda-alert--warning" : `is-${m[1]}`);
+  }
+  for (const m of detalle.matchAll(/class="inc-create-alert ([^"$]*)"/gu)) {
+    for (const clase of m[1].split(/\s+/)) if (clase) modificadores.add(clase);
+  }
+  assert.ok(modificadores.size >= 2, "se han encontrado los tonos que Agenda pinta");
+  assert.ok(!modificadores.has("is-warning"),
+    "el aviso no usa `is-warning`: esa combinacion no existe en ninguna hoja");
+  const sinHoja = [...modificadores].filter(
+    (clase) => !new RegExp(`\\.${clase.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?![\\w-])`, "u").test(hojasCargadas));
+  assert.deepEqual(sinHoja, [],
+    `Agenda pinta una alerta con un modificador que ninguna hoja cargada declara: ${sinHoja.join(", ")}`);
+
+  pass(`12 · el avatar usa la autoridad compartida y los ${modificadores.size} tonos de alerta existen`);
+}
+
 console.log(`\nAgenda citas contract: PASS · ${checks.length} bloques · fechas civiles, proyección por rol, errores y habilitación`);

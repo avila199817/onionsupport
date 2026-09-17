@@ -20,6 +20,7 @@ import {
 } from "../../features/entity-overlay/modal-host.js";
 
 import { escapeHtml } from "../../core/escape-html.js";
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { cleanText } from "../../core/presentation-text.js";
 
 import {
@@ -74,13 +75,28 @@ function renderFieldError(message = "") {
   return `<span class="inc-create-field-error" role="alert">${escapeHtml(text)}</span>`;
 }
 
+/*
+  La composición compartida declara `grid-template-columns: 34px minmax(0,1fr)`:
+  el primer hijo cae en la columna del icono y el segundo en la del texto. Con
+  `<strong>` + `<span>` sueltos, el título se metía en los 34px del icono. Se
+  emiten los dos huecos, como hace el alta de Incidencias.
+
+  Y el tono: para `.inc-create-alert` sólo existen `is-success` e `is-error`.
+  `is-warning` no está en ninguna hoja, así que un aviso pintaba en azul
+  informativo. El aviso usa el modificador que SÍ existe y que ya emite el
+  detalle, `agenda-alert--warning`, declarado en la hoja de Agenda.
+*/
 function renderAlert(kind, title, message) {
   const text = cleanText(message, "");
   if (!text) return "";
+  const modifier = kind === "warning" ? "agenda-alert--warning" : `is-${attr(kind)}`;
   return `
-    <div class="inc-create-alert is-${attr(kind)}" role="${kind === "error" ? "alert" : "status"}">
-      <strong>${escapeHtml(title)}</strong>
-      <span>${escapeHtml(text)}</span>
+    <div class="inc-create-alert ${modifier}" role="${kind === "error" ? "alert" : "status"}">
+      <span class="agenda-alert-icon" aria-hidden="true"></span>
+      <div class="agenda-alert-copy">
+        <strong>${escapeHtml(title)}</strong>
+        <p>${escapeHtml(text)}</p>
+      </div>
     </div>`;
 }
 
@@ -88,16 +104,24 @@ function renderAlert(kind, title, message) {
    SELECCIÓN DE USUARIO
 ========================================================= */
 
+/*
+  Las iniciales, el tono y la huella de identidad los decide la autoridad
+  compartida, no esta vista: `slice(0,1)` era una autoridad paralela que daba
+  una sola letra y ningún tono. Se resuelve aquí, no en la frontera HTTP,
+  porque el usuario seleccionado se reconstruye desde los `data-*` del
+  resultado y así ambos caminos obtienen la misma presentación.
+*/
 function renderUserAvatar(user = {}) {
-  const initials = cleanText(user.nombre, "?").slice(0, 1).toLocaleUpperCase("es-ES");
+  const presentation = resolveAvatarPresentation({
+    name: user.nombre,
+    displayName: user.nombre,
+    email: user.email,
+    userId: user.userId,
+  });
+  const avatar = cleanText(user.avatarUrl, "");
+  const clases = `agenda-create-user-avatar inc-create-user-avatar avatar-host ${avatar ? "has-image" : "is-fallback"}`;
 
-  if (user.avatarUrl) {
-    return `<span class="agenda-create-user-avatar inc-create-user-avatar avatar-host" data-avatar-host="true" data-avatar-user-id="${attr(user.userId)}">
-      <img src="${attr(user.avatarUrl)}" alt="" loading="lazy" decoding="async">
-    </span>`;
-  }
-
-  return `<span class="agenda-create-user-avatar inc-create-user-avatar avatar-host is-fallback" data-avatar-host="true" data-avatar-user-id="${attr(user.userId)}" aria-hidden="true">${escapeHtml(initials)}</span>`;
+  return `<span class="${attr(clases)}" data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${attr(String(presentation.tone))}" data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}" data-has-avatar="${avatar ? "true" : "false"}" data-avatar-user-id="${attr(user.userId)}">${avatar ? `<img data-avatar-image="true" src="${attr(avatar)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ""}<span data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span></span>`;
 }
 
 function userSubtitle(user = {}) {

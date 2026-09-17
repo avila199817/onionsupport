@@ -20,6 +20,7 @@
 
 import { escapeHtml } from "../../core/escape-html.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { errorCode } from "../../core/errors.js";
 
 import {
   createModalHost,
@@ -734,7 +735,8 @@ function createController(host, context = {}) {
 
       createState.submitting = false;
 
-      if (cleanText(error?.code || error?.data?.code, "") === "CITA_EN_PASADO") {
+      /* El código lo lee la autoridad de errores, que lo normaliza. */
+      if (errorCode(error) === "CITA_EN_PASADO") {
         /* No se mueve la fecha: se avisa y se pide confirmación explícita. */
         createState.pastWarning = agendaErrorMessage(error, "Ese momento ya ha pasado.");
         createState.form.confirmarPasado = true;

@@ -45,6 +45,10 @@ const CONSUMERS = Object.freeze({
   "src/views/server/server.api.js": "payloadFirst",
   "src/views/usuarios/usuarios.template.create.js": "payloadFirst",
   "src/views/whatsapp/index.js": "payloadFirst",
+  /* Agenda: los códigos de `router/citas` traen su propia explicación (qué
+     hora no existe, qué campos no se pueden fijar, qué versión falta), así
+     que manda el texto del backend sobre el del Error envoltorio. */
+  "src/views/agenda/agenda.api.js": "payloadFirst",
 });
 // Extractors with a policy of their own that stay local (upper bound; each has a reason):
 // - clientes.api errorMessage(response): reads a response envelope and falls back to its error/code text (envelope reader, not an Error reader)

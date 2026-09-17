@@ -17,6 +17,7 @@
 
 import Http from "../../core/http.js";
 import { presentError } from "../../core/error-rules.js";
+import { errorMessage, ERROR_MESSAGE_POLICIES } from "../../core/errors.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { safeObject } from "../../core/objects.js";
@@ -73,10 +74,12 @@ export const AGENDA_ERROR_RULES = Object.freeze([
     message: "Tu sesión ha caducado. Vuelve a iniciar sesión.",
   },
   {
-    /* Los errores de validación del dominio ya traen su explicación. */
+    /* Los errores de validación del dominio ya traen su explicación: la
+       extrae la autoridad de errores, con la política que da prioridad al
+       texto del backend sobre el del Error envoltorio. */
     codeIncludes: ["CITA_"],
-    message: ({ error }) => cleanText(error?.data?.message || error?.message, "") ||
-      "No se ha podido completar la operación.",
+    message: ({ error }) =>
+      errorMessage(error, "No se ha podido completar la operación.", ERROR_MESSAGE_POLICIES.payloadFirst),
   },
   { minStatus: 500, message: "El servidor no ha podido completar la operación." },
 ]);

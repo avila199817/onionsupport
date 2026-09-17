@@ -22,8 +22,6 @@
 
 .clientes-history-subtitle:focus-visible {
   border-radius: var(--radius-xs);
-  outline: none;
-  box-shadow: var(--focus-ring);
 }
 
 .clientes-table { min-inline-size: var(--cli-table-min); }
@@ -182,9 +180,7 @@
 
 .clientes-contact-link:hover { color: var(--text-strong); }
 .clientes-contact-link:focus-visible {
-  outline: none;
   border-radius: var(--radius-xs);
-  box-shadow: var(--focus-ring);
 }
 
 .clientes-contact-empty {
@@ -256,9 +252,7 @@
 
 .clientes-fatal-error:focus-visible,
 .clientes-infinite:focus-visible {
-  outline: none;
   border-radius: var(--radius-md);
-  box-shadow: var(--focus-ring);
 }
 
 .clientes-inline-error {

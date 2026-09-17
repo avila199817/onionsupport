@@ -1186,7 +1186,6 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
 
 [data-correo-host="true"] .correo-search input:focus,
 [data-correo-host="true"] .correo-search input:focus-visible {
-  outline: 0;
   box-shadow: none;
 }
 

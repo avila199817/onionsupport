@@ -79,11 +79,6 @@
   line-height: 1.55;
 }
 
-.fpc-btn:focus-visible {
-  outline: 0;
-  box-shadow: var(--focus-ring);
-}
-
 .fpc-btn:disabled,
 .fpc-btn[aria-disabled="true"] {
   cursor: not-allowed;

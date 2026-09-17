@@ -405,7 +405,6 @@
 ========================================================= */
 
 .sidebar :where(a, button):focus-visible {
-  outline: none;
   box-shadow:
     0 0 0 2px var(--sb-bg),
     0 0 0 4px color-mix(in srgb, var(--sb-text-strong) 52%, transparent);

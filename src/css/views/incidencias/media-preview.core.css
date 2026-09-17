@@ -225,7 +225,8 @@ body.incidencias-media-viewer-open {
 }
 
 .incidencias-modal-preview--viewer:focus-visible {
-  box-shadow: var(--ui-detail-modal-shadow), var(--focus-ring);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 2px;
 }
 
 .incidencias-modal-preview--viewer .incidencias-modal-preview-head {

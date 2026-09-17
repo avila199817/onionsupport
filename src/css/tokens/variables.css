@@ -629,6 +629,13 @@
   --focus-ring: 0 0 0 3px rgba(255,255,255,.46);
   --focus-ring-strong: 0 0 0 3px rgba(255,255,255,.62);
 
+  /* Ver la nota de tokens/light.css: el anillo pasa a ser un contorno para
+     dejar de competir con las sombras de los componentes. Mismo grosor, mismo
+     color, mismo contraste. */
+  --focus-ring-width: 3px;
+  --focus-ring-color: rgba(255,255,255,.46);
+  --focus-ring-strong-color: rgba(255,255,255,.62);
+
   --selection-bg: rgba(255,255,255,.28);
   --selection-text: #ffffff;
 
@@ -1629,6 +1636,10 @@ body[data-route-mode="app"] {
     /* Tramo de más contraste: se sube por encima del base. */
     --focus-ring: 0 0 0 4px rgba(255,255,255,.62);
     --focus-ring-strong: 0 0 0 4px rgba(255,255,255,.78);
+
+    --focus-ring-width: 4px;
+    --focus-ring-color: rgba(255,255,255,.62);
+    --focus-ring-strong-color: rgba(255,255,255,.78);
 
     --topbar-search-border: rgba(255,255,255,.34);
     --topbar-search-glass-bg: var(--graphite-500);

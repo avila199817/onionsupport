@@ -212,9 +212,20 @@ assert.match(
   homeExtremeEntitiesCss,
   /\.home-view-root \.home-entity-row\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?display:\s*grid;/
 );
+/* La fila enfocada se distingue. El ANILLO ya no lo pinta esta hoja: lo pinta
+   la autoridad (components/focus-system.css) con un `outline`, que es lo que
+   permite que la fila conserve su sombra al enfocarse. Aquí sólo queda lo que
+   es propio de la fila --el borde de realce--, y lo que se comprueba es que
+   la hoja no vuelva a declarar el anillo por su cuenta: dos anillos, uno de
+   sombra y otro de contorno. Quien mide que el anillo se VE es
+   tools/focus-visible-browser-contract.mjs. */
 assert.match(
   homeExtremeEntitiesCss,
-  /\.home-view-root \.home-entity-row:focus-visible\s*\{[\s\S]*?box-shadow:\s*var\(--focus-ring\);/
+  /\.home-view-root \.home-entity-row:focus-visible\s*\{[\s\S]*?border-color:/
+);
+assert.doesNotMatch(
+  homeExtremeEntitiesCss,
+  /:focus-visible\s*\{[^}]*box-shadow:[^}]*var\(--focus-ring/
 );
 assert.match(
   homeExtremeEntitiesCss,

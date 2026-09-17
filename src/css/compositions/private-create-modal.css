@@ -350,7 +350,6 @@
 ):focus {
   background: var(--input-bg-focus);
   border-color: var(--input-border-focus);
-  box-shadow: var(--focus-ring);
 }
 
 :is(
@@ -471,17 +470,6 @@
   background: var(--btn-secondary-bg-hover);
   border-color: var(--border-strong);
   color: var(--text-strong);
-}
-
-:is(
-  .inc-create-selected-user-clear,
-  .cli-create-selected-user-clear,
-  .cli-create-selected-user-copy-action,
-  .fac-create-link-btn,
-  .fac-create-chip-btn
-):focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
 }
 
 /* =========================================================

@@ -4,26 +4,36 @@
 
    QUÉ PROTEGE ESTO
 
-   El indicador de foco se pinta con `box-shadow`. Dos cosas lo rompían, y las
-   dos son silenciosas:
+   Tres cosas rompían el indicador de foco, y las tres en silencio:
 
-   1 · Estaba declarado en @layer core, la tercera de diez. Las sombras no se
-       suman: se sustituyen. Cualquier regla posterior con `box-shadow` sobre
-       el mismo elemento --lo normal en un botón o una tarjeta de las capas
-       components, views o compositions-- borraba el indicador por completo.
-       Por eso 83 sitios del proyecto repiten
-       `outline: none; box-shadow: var(--focus-ring)`.
+   1 · Estaba declarado en @layer core, la tercera de diez, y se pintaba con
+       `box-shadow`. Las sombras no se suman: se sustituyen. Cualquier regla
+       posterior con `box-shadow` sobre el mismo elemento borraba el indicador.
+       Por eso 67 reglas del proyecto lo volvían a declarar.
 
    2 · El anillo no tenía contraste suficiente. WCAG 2.4.11 pide 3:1 para un
-       indicador de foco. Medido contra la superficie real, antes de corregirlo:
-       1,19:1 en claro y 1,79:1 en oscuro.
+       indicador de foco. Medido contra la superficie real, antes de
+       corregirlo: 1,19:1 en claro y 1,79:1 en oscuro.
 
-   Este contrato mide el CONTRASTE REAL del indicador sobre el fondo real, en
-   los dos temas, y lo hace en tres casos: un botón sin sombra propia, uno con
-   sombra declarada en @layer components y otro con sombra en @layer views.
-   Los dos últimos son los que fallaban.
+   3 · Llevarlo a la última capa arregló el 1 al revés: al ganar siempre, el
+       anillo BORRABA la sombra del componente. Medido en navegador sobre
+       `.ui-btn-primary`, con la transición ya asentada: dos sombras en reposo,
+       UNA sola al enfocar. Las doce reglas que declaraban
+       `box-shadow: <su sombra>, var(--focus-ring)` para conservar las dos no
+       conservaban ninguna.
 
-   No comprueba que exista una regla: comprueba que el anillo se vea.
+   El anillo es ahora un `outline`, que es otra propiedad y convive con la
+   sombra. Este contrato mide, en los dos temas y en tres casos --un botón sin
+   sombra propia, uno con sombra en @layer components y otro con sombra en
+   @layer views--:
+
+     - que el anillo EXISTE como outline y no es transparente;
+     - su CONTRASTE REAL sobre la superficie real;
+     - y que la sombra decorativa del componente SIGUE ahí al enfocar, que es
+       lo que el mecanismo anterior no podía dar.
+
+   No comprueba que exista una regla: comprueba que el anillo se vea y que no
+   se lleve nada por delante.
 ========================================================= */
 
 import assert from "node:assert/strict";
@@ -133,10 +143,10 @@ const parseShadowColor = (shadow) => {
   return { rgb: parts.slice(0, 3), alpha: parts.length > 3 ? parts[3] : 1 };
 };
 
-/* Un anillo de foco es una sombra SIN desplazamiento ni difuminado: los tres
-   primeros valores de longitud son 0 y sólo hay extensión. Así el contrato no
-   confunde una sombra decorativa que haya sobrevivido con el indicador. */
-const isRing = (shadow) => /\s0px\s+0px\s+0px\s+\d/.test(String(shadow));
+/* Cuenta las sombras de un `box-shadow` calculado, respetando los paréntesis
+   de `rgba(...)` y `color-mix(...)`. */
+const countShadows = (value) =>
+  String(value) === "none" ? 0 : String(value).split(/,(?![^(]*\))/).length;
 
 const browser = await chromium.launch({
   executablePath,
@@ -167,6 +177,12 @@ try {
     await page.evaluate((value) => { document.body.style.background = value; }, surface.css);
 
     for (const id of ["plain", "in-components", "in-views"]) {
+      /* La sombra decorativa ANTES de enfocar, para poder comprobar después
+         que el anillo no se la ha llevado por delante. */
+      const restShadows = countShadows(
+        await page.evaluate((selector) => getComputedStyle(document.querySelector(selector)).boxShadow, `#${id}`)
+      );
+
       /* Foco de TECLADO: `:focus-visible` no se activa con .focus() en un
          botón, así que se llega tabulando. */
       await page.evaluate(() => document.body.focus());
@@ -182,26 +198,47 @@ try {
         `${theme}/${id}: no se pudo enfocar con el teclado`
       );
 
+      /* Las hojas declaran transiciones sobre box-shadow y sobre el color del
+         outline. Leer inmediatamente devuelve valores a medio interpolar: hay
+         que esperar a que la transición termine. */
+      await page.evaluate(() => Promise.all(
+        document.querySelectorAll("*").length ? [new Promise((r) => setTimeout(r, 400))] : []
+      ));
+
       const style = await page.evaluate((selector) => {
         const element = document.querySelector(selector);
         const computed = getComputedStyle(element);
         return {
           boxShadow: computed.boxShadow,
+          outlineStyle: computed.outlineStyle,
+          outlineWidth: computed.outlineWidth,
+          outlineColor: computed.outlineColor,
           matchesFocusVisible: element.matches(":focus-visible"),
         };
       }, `#${id}`);
 
       assert.ok(style.matchesFocusVisible, `${theme}/${id}: el control no está en :focus-visible`);
 
+      /* 1 · El anillo existe, es un contorno de verdad y tiene grosor. */
+      assert.notEqual(
+        style.outlineStyle,
+        "none",
+        `${theme}/${id}: el indicador de foco no está: no hay outline.`
+      );
       assert.ok(
-        isRing(style.boxShadow),
-        `${theme}/${id}: el indicador de foco no está: la sombra calculada es ` +
-          `"${style.boxShadow}". Una regla posterior con box-shadow lo ha sustituido.`
+        parseFloat(style.outlineWidth) > 0,
+        `${theme}/${id}: el outline tiene grosor ${style.outlineWidth}`
       );
 
-      const color = parseShadowColor(style.boxShadow);
-      assert.ok(color, `${theme}/${id}: no se pudo leer el color del anillo (${style.boxShadow})`);
+      const color = parseShadowColor(style.outlineColor);
+      assert.ok(color, `${theme}/${id}: no se pudo leer el color del anillo (${style.outlineColor})`);
+      assert.ok(
+        color.alpha > 0,
+        `${theme}/${id}: el anillo es transparente (${style.outlineColor}). ` +
+          `Era el hueco del mecanismo anterior: un outline invisible que sólo servía para forced-colors.`
+      );
 
+      /* 2 · Contraste real sobre la superficie real. */
       const ratio = contrast(composite(color, surface.rgb), surface.rgb);
       assert.ok(
         ratio >= MINIMUM_CONTRAST,
@@ -209,7 +246,19 @@ try {
           `WCAG 2.4.11 pide ${MINIMUM_CONTRAST}:1`
       );
 
-      measured.push(`${theme}/${id}: ${ratio.toFixed(2)}:1 sobre ${surface.css}`);
+      /* 3 · La sombra del componente sigue ahí. Esto es lo que el mecanismo
+         anterior no podía dar: el anillo la sustituía. */
+      const focusShadows = countShadows(style.boxShadow);
+      assert.ok(
+        focusShadows >= restShadows,
+        `${theme}/${id}: al enfocar se pierden sombras del componente ` +
+          `(${restShadows} en reposo, ${focusShadows} enfocado). El anillo vuelve a competir con ellas.`
+      );
+
+      measured.push(
+        `${theme}/${id}: ${ratio.toFixed(2)}:1 sobre ${surface.css} · ` +
+          `outline ${style.outlineWidth} · sombras ${restShadows}->${focusShadows}`
+      );
     }
   }
 

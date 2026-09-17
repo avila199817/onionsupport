@@ -187,7 +187,8 @@ position: relative;
 }
 
 .ui-detail-modal-panel:focus-visible {
-box-shadow: var(--ui-detail-modal-shadow), var(--focus-ring);
+outline: var(--focus-ring-width) solid var(--focus-ring-color);
+outline-offset: 2px;
 }
 
 .ui-detail-modal-root[data-modal-height="auto"] .ui-detail-modal-panel {
@@ -403,13 +404,6 @@ border-color: var(--error-strong, var(--error));
   background: var(--error-soft);
   color: var(--error-strong, var(--error));
   transform: scale(.97);
-}
-
-.ui-detail-modal-close-btn:focus-visible,
-.ui-detail-modal-view-btn:focus-visible,
-.ui-detail-modal-submit-btn:focus-visible {
-outline: none;
-  box-shadow: var(--focus-ring);
 }
 
 .ui-detail-modal-close-btn:disabled,

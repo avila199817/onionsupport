@@ -116,7 +116,6 @@
   #usuarios-create-btn,
   .usuarios-btn--create
 ):focus-visible {
-  outline: none;
   box-shadow:
     var(--btn-primary-shadow),
     0 0 0 3px rgba(26, 115, 232, .24);
@@ -159,7 +158,6 @@
 }
 
 .inc-create-submit:focus-visible {
-  outline: none;
   box-shadow:
     var(--btn-primary-shadow),
     0 0 0 3px rgba(26, 115, 232, .24);
@@ -232,7 +230,6 @@
 }
 
 .incidencias-modal-submit-btn.ui-detail-modal-submit-btn:focus-visible {
-  outline: none;
   box-shadow:
     0 1px 2px rgba(60, 64, 67, .22),
     0 0 0 3px rgba(26, 115, 232, .24);
@@ -511,20 +508,6 @@
 }
 
 :is(
-  .incidencias-filter-pill,
-  .incidencias-sort-pill,
-  .incidencias-meta-pill--action,
-  .facturas-filter-pill,
-  .facturas-sort-pill,
-  .clientes-filter-pill,
-  .clientes-sort-pill,
-  .usuarios-filter-pill
-):focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-:is(
   .incidencias-stat-card,
   .clientes-stat-card,
   .usuarios-stat-card
@@ -570,7 +553,6 @@
   .clientes-search-input,
   .usuarios-search-input
 ):focus-visible {
-  outline: none;
   box-shadow: none;
 }
 

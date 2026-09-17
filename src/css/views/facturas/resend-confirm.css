@@ -129,11 +129,6 @@
   transform: translateY(-1px);
 }
 
-.facturas-resend-confirm-btn:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 @media (max-width: 560px) {
   .facturas-resend-confirm-body {
     grid-template-columns: 40px minmax(0, 1fr);

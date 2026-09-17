@@ -196,7 +196,7 @@
 }
 
 .facturas-detail-btn:active:not(:disabled) { transform: translateY(0); background: var(--btn-secondary-bg-active); }
-.facturas-detail-btn:focus-visible { outline: 0; box-shadow: var(--btn-secondary-shadow, none), var(--focus-ring); }
+.facturas-detail-btn:focus-visible { box-shadow: var(--btn-secondary-shadow, none); }
 .facturas-detail-btn:disabled,
 .facturas-detail-btn[aria-disabled="true"] { cursor: not-allowed; opacity: .48; transform: none; }
 
@@ -293,7 +293,7 @@
 
 .facturas-detail-incidencia-btn > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .facturas-detail-incidencia-btn:hover { color: var(--text-strong); text-decoration: underline; text-underline-offset: 3px; }
-.facturas-detail-incidencia-btn:focus-visible { outline: 0; border-radius: var(--radius-xs); box-shadow: var(--focus-ring); }
+.facturas-detail-incidencia-btn:focus-visible { border-radius: var(--radius-xs); }
 
 /* =========================================================
    BODY / SECTIONS

@@ -588,56 +588,6 @@ button[aria-disabled="true"] {
    No anulamos :focus-visible global.
 ========================================================= */
 
-:where(
-  button,
-  a[href],
-  input,
-  select,
-  textarea,
-  summary,
-  [role="button"],
-  [role="menuitem"],
-  [role="option"],
-  [tabindex]:not([tabindex="-1"])
-):focus-visible {
-  outline:
-    2px solid transparent;
-
-  outline-offset: 2px;
-
-  box-shadow:
-    var(--focus-ring);
-}
-
-.focus-ring:focus-visible {
-  outline:
-    2px solid transparent;
-
-  outline-offset: 2px;
-
-  box-shadow:
-    var(--focus-ring);
-}
-
-.focus-ring-strong:focus-visible {
-  outline:
-    2px solid transparent;
-
-  outline-offset: 2px;
-
-  box-shadow:
-    var(--focus-ring-strong);
-}
-
-.focus-outline:focus-visible {
-  outline:
-    2px solid currentColor;
-
-  outline-offset: 2px;
-
-  box-shadow: none;
-}
-
 
 /* =========================================================
    INTERACTIVE HELPERS
@@ -1408,11 +1358,6 @@ pre::-webkit-scrollbar-thumb:hover {
     var(--border-default);
 }
 
-.ring-focus {
-  box-shadow:
-    var(--focus-ring);
-}
-
 
 /* =========================================================
    OPACITY
@@ -1549,8 +1494,7 @@ pre::-webkit-scrollbar-thumb:hover {
     var(--text-strong);
 
   box-shadow:
-    var(--shadow-lg),
-    var(--focus-ring);
+    var(--shadow-lg);
 }
 
 

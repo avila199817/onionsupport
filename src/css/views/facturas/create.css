@@ -200,7 +200,6 @@
 .fac-create-textarea:focus {
   background: var(--input-bg-focus);
   border-color: var(--input-border-focus);
-  box-shadow: var(--focus-ring);
 }
 
 .fac-create-input:disabled,
@@ -293,11 +292,6 @@
   background: var(--solid-bg-hover, var(--input-bg-hover));
   border-color: var(--border-strong);
   transform: translateY(-1px);
-}
-
-.fac-create-search-result:focus-visible {
-  outline: 0;
-  box-shadow: var(--focus-ring);
 }
 
 .fac-create-result-copy,
@@ -612,13 +606,6 @@
   transform: translateY(-1px);
 }
 
-.fac-create-link-btn:focus-visible,
-.fac-create-chip-btn:focus-visible,
-.fac-create-icon-btn:focus-visible {
-  outline: 0;
-  box-shadow: var(--focus-ring);
-}
-
 .fac-create-link-btn:disabled,
 .fac-create-chip-btn:disabled,
 .fac-create-icon-btn:disabled {
@@ -709,7 +696,8 @@
 }
 
 .fac-create-toggle:has(input:focus-visible) {
-  box-shadow: var(--focus-ring);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 2px;
 }
 
 /* =========================================================

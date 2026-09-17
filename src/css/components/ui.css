@@ -135,14 +135,6 @@
   vector-effect: non-scaling-stroke;
 }
 
-.ui-btn:focus-visible,
-.ui-input:focus-visible,
-.ui-textarea:focus-visible,
-.toast-close:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 .ui-btn:where(:disabled, [aria-disabled="true"], .is-disabled),
 .ui-input:where(:disabled, [aria-disabled="true"], .is-disabled),
 .ui-textarea:where(:disabled, [aria-disabled="true"], .is-disabled) {
@@ -373,8 +365,7 @@
 
 .ui-btn-primary:focus-visible {
   box-shadow:
-    var(--btn-primary-shadow),
-    var(--focus-ring-strong);
+    var(--btn-primary-shadow);
 }
 
 .ui-btn-secondary {
@@ -466,7 +457,6 @@
 
 .ui-input:focus,
 .ui-textarea:focus {
-  outline: none;
 
   background: var(--input-bg-focus);
   border-color: var(--input-border-focus);

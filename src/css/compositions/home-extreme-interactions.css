@@ -41,11 +41,6 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-.home-view-root .home-entity-row[aria-haspopup="dialog"]:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 @media (forced-colors: active) {
   .home-view-root .home-entity-row[aria-haspopup="dialog"]:focus-visible {
     outline: 2px solid Highlight;

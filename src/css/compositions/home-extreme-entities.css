@@ -85,9 +85,7 @@
 }
 
 .home-view-root .home-entity-row:focus-visible {
-  outline: none;
   border-color: var(--border-info, var(--border-strong));
-  box-shadow: var(--focus-ring);
 }
 
 .home-view-root .home-entity-row--static {

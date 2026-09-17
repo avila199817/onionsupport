@@ -280,12 +280,6 @@
   transform: translateY(0);
 }
 
-.facturas-action-btn:focus-visible,
-.facturas-incidencia-link:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 .facturas-action-btn--primary {
   border-color: var(--btn-primary-border);
   background: var(--btn-primary-bg);
@@ -338,9 +332,7 @@
 .facturas-infinite:focus-visible,
 .facturas-error:focus-visible,
 .facturas-empty:focus-visible {
-  outline: none;
   border-radius: var(--radius-sm);
-  box-shadow: var(--focus-ring);
 }
 
 .facturas-alert {
@@ -463,9 +455,7 @@
   color: var(--text-muted);
   font-size: var(--font-sm);
   text-align: center;
-  outline: none;
   border-radius: var(--radius-sm);
-  box-shadow: var(--focus-ring);
 }
 
 .facturas-inline-loading,

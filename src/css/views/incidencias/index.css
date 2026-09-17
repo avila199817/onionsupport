@@ -427,11 +427,6 @@
   color: var(--text-strong);
 }
 
-.incidencias-infinite-retry:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 .incidencias-sort-pill:disabled,
 .incidencias-sort-pill[aria-disabled="true"] {
   cursor: not-allowed;

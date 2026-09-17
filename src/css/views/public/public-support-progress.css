@@ -144,7 +144,6 @@ body.public-support-submission-active {
 }
 
 .public-home .public-support-submit:focus-visible {
-  outline: none;
   border-color: rgb(136 229 255 / .74);
   box-shadow:
     0 0 0 4px rgb(49 184 255 / .18),

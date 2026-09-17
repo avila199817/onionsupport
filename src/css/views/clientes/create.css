@@ -194,7 +194,6 @@
 .cli-create-select:focus {
   background: var(--input-bg-focus);
   border-color: var(--input-border-focus);
-  box-shadow: var(--focus-ring);
 }
 
 .cli-create-input:disabled,
@@ -347,12 +346,6 @@
   color: var(--text-strong);
 }
 
-.cli-create-selected-user-clear:focus-visible,
-.cli-create-selected-user-copy-action:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 .cli-create-user-avatar,
 .cli-create-target-user-avatar {
   --cli-create-avatar-a: var(--accent);
@@ -450,12 +443,6 @@
 .cli-create-search-item:focus-visible {
   border-color: var(--border-default);
   background: var(--solid-hover);
-  outline: none;
-}
-
-.cli-create-user-result:focus-visible,
-.cli-create-search-item:focus-visible {
-  box-shadow: var(--focus-ring);
 }
 
 /* =========================================================
@@ -585,8 +572,7 @@
 }
 
 .cli-create-submit:focus-visible {
-  outline: none;
-  box-shadow: var(--btn-primary-shadow), var(--focus-ring);
+  box-shadow: var(--btn-primary-shadow);
 }
 
 .cli-create-submit:disabled,

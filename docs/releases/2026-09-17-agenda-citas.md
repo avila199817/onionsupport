@@ -53,6 +53,8 @@ El combobox accesible (teclado, ARIA, `aria-activedescendant`, IME, Enter que no
 
 Es toda la intervención sobre Incidencias: **un atributo añadido y una constante generalizada**. Ningún comportamiento suyo cambia, y sus tres contratos de alta (combobox, selección de usuario y validación) pasan sin tocarlos.
 
+La **presentación** del selector, en cambio, es de cada alta y vive en su hoja de ruta, como hace Clientes con sus `cli-create-user-*`. Agenda emite sus `agenda-create-user-*` junto a las clases prestadas y las estiliza en `views/agenda/index.css`: así `/agenda` **no depende de la hoja de Incidencias**, que su ruta no carga. Separar así comportamiento y presentación es lo que permite compartir la autoridad sin compartir hojas de estilo.
+
 La búsqueda usa el **mismo endpoint autorizado** (`/api/users`) con la misma forma de consulta. Agenda no arrastra el módulo de Incidencias a su chunk: su frontera HTTP es propia y pequeña. La selección es por identificador estable; un texto escrito **no** habilita la acción principal, y una respuesta tardía no puede sustituir a la búsqueda vigente (secuencia + `AbortController`).
 
 ## Guardar una vez

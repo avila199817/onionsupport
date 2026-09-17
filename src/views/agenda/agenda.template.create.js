@@ -92,12 +92,12 @@ function renderUserAvatar(user = {}) {
   const initials = cleanText(user.nombre, "?").slice(0, 1).toLocaleUpperCase("es-ES");
 
   if (user.avatarUrl) {
-    return `<span class="inc-create-user-avatar avatar-host" data-avatar-host="true" data-avatar-user-id="${attr(user.userId)}">
+    return `<span class="agenda-create-user-avatar inc-create-user-avatar avatar-host" data-avatar-host="true" data-avatar-user-id="${attr(user.userId)}">
       <img src="${attr(user.avatarUrl)}" alt="" loading="lazy" decoding="async">
     </span>`;
   }
 
-  return `<span class="inc-create-user-avatar avatar-host is-fallback" data-avatar-host="true" data-avatar-user-id="${attr(user.userId)}" aria-hidden="true">${escapeHtml(initials)}</span>`;
+  return `<span class="agenda-create-user-avatar inc-create-user-avatar avatar-host is-fallback" data-avatar-host="true" data-avatar-user-id="${attr(user.userId)}" aria-hidden="true">${escapeHtml(initials)}</span>`;
 }
 
 function userSubtitle(user = {}) {
@@ -113,15 +113,15 @@ function renderSelectedUser(vm = {}) {
   if (!user?.userId) return "";
 
   return `
-    <div class="inc-create-selected-user" data-create-selected-user="true">
-      <div class="inc-create-selected-user-main">
+    <div class="agenda-create-selected-user inc-create-selected-user" data-create-selected-user="true">
+      <div class="agenda-create-selected-user-main inc-create-selected-user-main">
         ${renderUserAvatar(user)}
-        <span class="inc-create-selected-user-copy">
+        <span class="agenda-create-user-copy inc-create-selected-user-copy">
           <strong>${escapeHtml(user.nombre || "Usuario seleccionado")}</strong>
           <span>${escapeHtml(userSubtitle(user))}</span>
         </span>
       </div>
-      <button type="button" class="inc-create-selected-user-clear" data-create-action="${AGENDA_CREATE_ACTIONS.USER_CLEAR}" ${disabledAttrs(vm.submitting)}>Quitar</button>
+      <button type="button" class="agenda-create-user-clear inc-create-selected-user-clear" data-create-action="${AGENDA_CREATE_ACTIONS.USER_CLEAR}" ${disabledAttrs(vm.submitting)}>Quitar</button>
     </div>`;
 }
 
@@ -129,25 +129,25 @@ function renderUserSearchResults(vm = {}) {
   const search = vm.userSearch;
 
   if (search.loading) {
-    return `<div class="inc-create-user-search-state" data-user-search-state="loading" aria-live="polite"><span class="inc-create-spinner" aria-hidden="true"></span><span>Buscando usuarios...</span></div>`;
+    return `<div class="agenda-create-user-state inc-create-user-search-state" data-user-search-state="loading" aria-live="polite"><span class="inc-create-spinner" aria-hidden="true"></span><span>Buscando usuarios...</span></div>`;
   }
 
   if (search.error) {
-    return `<div class="inc-create-user-search-state is-error" data-user-search-state="error" role="alert">${escapeHtml(search.error)}</div>`;
+    return `<div class="agenda-create-user-state is-error inc-create-user-search-state" data-user-search-state="error" role="alert">${escapeHtml(search.error)}</div>`;
   }
 
   if (search.empty) {
-    return `<div class="inc-create-user-search-state" data-user-search-state="empty" aria-live="polite">No hay usuarios para esta búsqueda.</div>`;
+    return `<div class="agenda-create-user-state inc-create-user-search-state" data-user-search-state="empty" aria-live="polite">No hay usuarios para esta búsqueda.</div>`;
   }
 
   if (!search.results.length) return "";
 
   return `
-    <div class="inc-create-user-results" role="listbox" data-create-user-results="true" aria-label="Resultados de búsqueda de usuarios">
+    <div class="agenda-create-user-results inc-create-user-results" role="listbox" data-create-user-results="true" aria-label="Resultados de búsqueda de usuarios">
       ${search.results.map((user) => `
         <button
           type="button"
-          class="inc-create-user-result"
+          class="agenda-create-user-result inc-create-user-result"
           role="option"
           data-create-action="${AGENDA_CREATE_ACTIONS.USER_SELECT}"
           data-user-id="${attr(user.userId)}"
@@ -158,7 +158,7 @@ function renderUserSearchResults(vm = {}) {
           ${disabledAttrs(vm.submitting)}
         >
           ${renderUserAvatar(user)}
-          <span class="inc-create-user-result-copy">
+          <span class="agenda-create-user-copy inc-create-user-result-copy">
             <strong>${escapeHtml(user.nombre)}</strong>
             <span>${escapeHtml(userSubtitle(user))}</span>
           </span>

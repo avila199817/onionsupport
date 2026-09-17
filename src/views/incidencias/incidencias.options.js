@@ -137,51 +137,92 @@ const CATEGORY_ALIASES = Object.freeze({
  * etiqueta no es el sitio donde recortar una taxonomía.
  *
  * Desconocido y ausente no son lo mismo: un valor ausente cae en el valor por defecto
- * declarado del campo; uno desconocido se muestra legible tal cual llega, sin inventarle un
- * estado que no tiene. */
-const STATUS_LEGACY_LABELS = Object.freeze({
+ * declarado del campo; uno desconocido NO se disfraza (ver ETIQUETAS DE LO DESCONOCIDO).
+ *
+ * ESTAS LECTURAS NO NORMALIZAN NADA. `labelWith` las consulta antes que los alias y
+ * `normalizeWith` no las mira, así que declarar cómo se lee un valor no cambia a qué se
+ * normaliza, ni lo que se envía a la API, ni en qué grupo cae, ni cuántos cuenta un filtro.
+ * Por eso aquí caben valores que la taxonomía vigente no admite para ESCRIBIR pero que sí
+ * llegan para LEER.
+ *
+ * Un mismo significado no puede leerse de tres maneras según cómo lo escriba el backend:
+ * `in_progress`, `progress` y `en_proceso` son el mismo estado. Y un estado admitido no se
+ * aplana en la etiqueta de su grupo: archivada no es lo mismo que cerrada, aunque para
+ * filtrar y contar vivan en el mismo cajón. */
+const STATUS_DECLARED_LABELS = Object.freeze({
   progress: "En proceso",
+  in_progress: "En proceso",
+  inprogress: "En proceso",
+  en_proceso: "En proceso",
+  proceso: "En proceso",
+  working: "En proceso",
+  assigned: "En proceso",
+  asignada: "En proceso",
+  asignado: "En proceso",
+
   resolved: "Resuelta",
+  resuelta: "Resuelta",
+  resuelto: "Resuelta",
+  solved: "Resuelta",
+
+  archived: "Archivada",
+  archivada: "Archivada",
+  archivado: "Archivada",
+
+  cancelled: "Cancelada",
+  canceled: "Cancelada",
+  cancelada: "Cancelada",
+  cancelado: "Cancelada",
 });
 
-function readableValue(value = "") {
-  const text = String(value ?? "")
-    .replace(/[_-]+/gu, " ")
-    .replace(/\s+/gu, " ")
-    .trim();
+/* La prioridad tiene los suyos: la lista sabe leer escalas que la taxonomía de escritura no
+ * declara. Se leen en castellano sin convertirse en valores escribibles. */
+const PRIORITY_DECLARED_LABELS = Object.freeze({
+  minor: "Baja",
+  p3: "Baja",
+  p2: "Media",
+});
 
-  if (!text) return "";
+/* ETIQUETAS DE LO DESCONOCIDO.
+ *
+ * Capitalizar un token no es traducirlo. «Chimney Sweeping» o «Awaiting Customer» no son
+ * etiquetas en castellano: son el identificador del backend con una mayúscula, presentado
+ * como si esta autoridad lo hubiera declarado. Un código que no reconocemos se nombra por lo
+ * que es --un valor no reconocido de ESE campo-- y su valor técnico se conserva aparte, para
+ * diagnóstico, sin cambiarlo ni inventarle significado.
+ *
+ * Esto NO alcanza al texto libre de una persona (asunto, descripción, comentarios): ese no
+ * pasa por aquí, se muestra escapado tal cual y no se traduce. */
+const UNKNOWN_VALUE_LABELS = Object.freeze({
+  status: "Estado no reconocido",
+  priority: "Prioridad no reconocida",
+  category: "Tipo no reconocido",
+});
 
-  return text
-    .split(" ")
-    .map((word) => (word ? `${word.charAt(0).toLocaleUpperCase("es-ES")}${word.slice(1)}` : ""))
-    .join(" ");
-}
-
-function labelWith(options, aliases, legacy, value, fallback) {
+function labelWith(field, options, aliases, declaredLabels, value, fallback) {
   const raw = String(value ?? "").trim();
   if (!raw) return fallback;
 
   const key = slugKey(raw);
-  if (legacy?.[key]) return legacy[key];
+  if (declaredLabels?.[key]) return declaredLabels[key];
 
   const canonical = aliases[key] || "";
   const declared = options.find((entry) => entry.value === canonical);
   if (declared) return declared.label;
 
-  return readableValue(raw) || fallback;
+  return UNKNOWN_VALUE_LABELS[field] || fallback;
 }
 
 export function incidenciaStatusLabel(value = "", fallback = "Abierta") {
-  return labelWith(INCIDENCIA_STATUS_OPTIONS, STATUS_ALIASES, STATUS_LEGACY_LABELS, value, fallback);
+  return labelWith("status", INCIDENCIA_STATUS_OPTIONS, STATUS_ALIASES, STATUS_DECLARED_LABELS, value, fallback);
 }
 
 export function incidenciaPriorityLabel(value = "", fallback = "Media") {
-  return labelWith(INCIDENCIA_PRIORITY_OPTIONS, PRIORITY_ALIASES, null, value, fallback);
+  return labelWith("priority", INCIDENCIA_PRIORITY_OPTIONS, PRIORITY_ALIASES, PRIORITY_DECLARED_LABELS, value, fallback);
 }
 
 export function incidenciaCategoryLabel(value = "", fallback = "General") {
-  return labelWith(INCIDENCIA_CATEGORY_OPTIONS, CATEGORY_ALIASES, null, value, fallback);
+  return labelWith("category", INCIDENCIA_CATEGORY_OPTIONS, CATEGORY_ALIASES, null, value, fallback);
 }
 
 function normalizeWith(map, value, fallback = "") {

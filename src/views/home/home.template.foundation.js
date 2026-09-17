@@ -146,9 +146,24 @@ export function statusKey(value = "") {
   return "neutral";
 }
 
+/* Un IDENTIFICADOR no es una etiqueta. Home resume varios dominios y recibe dos
+ * clases de valor: códigos del backend (`pending_payment`, `in_progress`) y texto
+ * ya redactado (home.template.activity.js:255 admite `source.text`). Mezclarlos
+ * hacía que un código sin lectura declarada se pintara tal cual, en inglés y con
+ * guiones bajos, como si fuera una etiqueta de esta tabla.
+ *
+ * - Código conocido  -> su lectura declarada arriba.
+ * - Código NO conocido -> cadena vacía, para que mande el texto por defecto que
+ *   declara cada llamada («Emitida», «Actualizada», «Sin estado»). No se inventa
+ *   su significado ni se enseña el identificador.
+ * - Texto libre      -> se conserva tal cual; no es un enum y no se traduce. */
+const CODE_SHAPE = /^[a-z0-9]+(?:[_-][a-z0-9]+)*$/u;
+
 export function visibleStatus(value = "") {
   const raw = cleanText(value, "");
-  return STATUS_LABELS[homeLabelKey(raw)] || raw || "Sin estado";
+  const declared = STATUS_LABELS[homeLabelKey(raw)];
+  if (declared) return declared;
+  return CODE_SHAPE.test(raw.toLowerCase()) ? "" : raw;
 }
 
 export function visibleText(value = "", fallback = "") {

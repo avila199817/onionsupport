@@ -8,7 +8,11 @@ import {
   incidenciaStatusLabel,
   incidenciaPriorityLabel,
   incidenciaCategoryLabel,
+  normalizeIncidenciaStatus,
+  normalizeIncidenciaPriority,
+  normalizeIncidenciaCategory,
 } from "../src/views/incidencias/incidencias.options.js";
+import { visibleStatus } from "../src/views/home/home.template.foundation.js";
 import { renderIncidenciasDetailModal } from "../src/views/incidencias/incidencias.template.modal.js";
 
 // UNA AUTORIDAD DECLARA EL VALOR Y CÓMO SE LEE.
@@ -24,20 +28,28 @@ import { renderIncidenciasDetailModal } from "../src/views/incidencias/incidenci
 const STATUS_TABLE = Object.freeze({
   pending: "Pendiente", open: "Abierta", closed: "Cerrada",
   progress: "En proceso", resolved: "Resuelta",
-  in_progress: "Abierta", abierta: "Abierta", cerrada: "Cerrada", Nueva: "Pendiente",
-  "": "Abierta", "  ": "Abierta", "weird-value": "Weird Value",
+  in_progress: "En proceso", inprogress: "En proceso", en_proceso: "En proceso",
+  working: "En proceso", asignada: "En proceso",
+  resuelta: "Resuelta", resuelto: "Resuelta", solved: "Resuelta",
+  archived: "Archivada", archivada: "Archivada",
+  cancelled: "Cancelada", cancelada: "Cancelada",
+  abierta: "Abierta", cerrada: "Cerrada", Nueva: "Pendiente",
+  "": "Abierta", "  ": "Abierta",
+  // Un código que nadie ha declarado NO se disfraza de etiqueta.
+  "weird-value": "Estado no reconocido", awaiting_customer: "Estado no reconocido",
 });
 const PRIORITY_TABLE = Object.freeze({
   low: "Baja", medium: "Media", high: "Alta",
   urgent: "Alta", critical: "Alta", p0: "Alta", baja: "Baja", alta: "Alta",
-  "": "Media", weird: "Weird",
+  minor: "Baja", p3: "Baja", p2: "Media", "crítica": "Alta",
+  "": "Media", weird: "Prioridad no reconocida", trivial: "Prioridad no reconocida",
 });
 const CATEGORY_TABLE = Object.freeze({
   general: "General", technical: "Técnica", billing: "Facturación", access: "Acceso",
   hardware: "Hardware", software: "Software", account: "Cuenta", network: "Redes",
   documentation: "Documentación", sales: "Ventas",
   tecnica: "Técnica", facturacion: "Facturación", redes: "Redes",
-  "": "General", weird_value: "Weird Value",
+  "": "General", weird_value: "Tipo no reconocido", chimney_sweeping: "Tipo no reconocido",
 });
 
 for (const [value, expected] of Object.entries(STATUS_TABLE)) {
@@ -122,6 +134,56 @@ assert.match(source, /incidenciaPriorityLabel/u);
 assert.match(source, /incidenciaCategoryLabel/u);
 assert.equal(/"Técnica"|"Technical"/u.test(source), false, "no local translation of a taxonomy value lives in the template");
 console.log("PASS 4 · no local label map and no local translation left in the detail template");
+
+// 5 · NOMBRAR NO ES NORMALIZAR. Declarar cómo se lee un valor no puede mover ni un valor
+//     enviado a la API, ni el cajón en el que cae, ni por tanto un contador o un filtro.
+const NORMALIZED = Object.freeze({
+  open: "open", pending: "pending", closed: "closed",
+  in_progress: "open", progress: "open", en_proceso: "open",
+  resolved: "closed", resuelta: "closed", cancelled: "closed",
+  // Fuera de la taxonomía de escritura: se leen, no se escriben.
+  archived: "", archivada: "", awaiting_customer: "", "weird-value": "",
+});
+for (const [value, expected] of Object.entries(NORMALIZED)) {
+  assert.equal(normalizeIncidenciaStatus(value), expected, `normalizar ${JSON.stringify(value)} no puede cambiar`);
+}
+const NORMALIZED_PRIORITY = Object.freeze({
+  low: "low", medium: "medium", high: "high", urgent: "high", p0: "high",
+  minor: "", p3: "", trivial: "",
+});
+for (const [value, expected] of Object.entries(NORMALIZED_PRIORITY)) {
+  assert.equal(normalizeIncidenciaPriority(value), expected, `normalizar prioridad ${JSON.stringify(value)} no puede cambiar`);
+}
+// Y un FALLBACK visual no puede colarse como valor: si se editara una incidencia cuyo estado
+// no reconocemos, lo que se guardaría jamás puede ser el texto que se le mostró.
+// (Los alias en castellano --«cancelada», «archivada»-- sí son entrada válida desde siempre:
+//  son alias declarados del dominio, no fallbacks de presentación.)
+for (const label of ["Estado no reconocido", "Prioridad no reconocida", "Tipo no reconocido"]) {
+  assert.equal(normalizeIncidenciaStatus(label), "", `una etiqueta jamás es un valor: ${label}`);
+  assert.equal(normalizeIncidenciaPriority(label), "", `una etiqueta jamás es un valor: ${label}`);
+  assert.equal(normalizeIncidenciaCategory(label), "", `una etiqueta jamás es un valor: ${label}`);
+}
+console.log(`PASS 5 · ${Object.keys(NORMALIZED).length + Object.keys(NORMALIZED_PRIORITY).length} normalizaciones intactas y ninguna etiqueta escribible`);
+
+// 6 · La lista agrupa con su mapa y nombra con la autoridad: ninguna copia local de etiquetas.
+const listSource = await readFile(new URL("../src/views/incidencias/incidencias.template.js", import.meta.url), "utf8");
+assert.equal(/const STATUS_LABELS\b/u.test(listSource), false, "la lista no puede conservar su propia tabla de etiquetas de estado");
+assert.equal(/const PRIORITY_LABELS\b/u.test(listSource), false, "la lista no puede conservar su propia tabla de etiquetas de prioridad");
+assert.match(listSource, /const STATUS_MAP/u, "la lista conserva su modelo de agrupación");
+assert.match(listSource, /const PRIORITY_MAP/u, "la lista conserva su modelo de agrupación");
+assert.match(listSource, /OPEN_STATUS_KEYS|CLOSED_STATUS_KEYS/u, "la lista conserva sus claves de filtrado");
+console.log("PASS 6 · la lista conserva agrupación y filtrado, y ya no traduce por su cuenta");
+
+// 7 · Home resume varios dominios: un IDENTIFICADOR no conocido no se presenta como etiqueta,
+//     pero el texto ya redactado que su contrato admite se conserva tal cual.
+assert.equal(visibleStatus("paid"), "Pagada", "Home lee los códigos que declara");
+assert.equal(visibleStatus("in_progress"), "En curso", "Home conserva su propia lectura multidominio");
+assert.equal(visibleStatus("awaiting_customer"), "", "un código sin lectura declarada no se pinta");
+assert.equal(visibleStatus("pending_review"), "", "tampoco con guion bajo");
+assert.equal(visibleStatus("Incidencia actualizada por el técnico"), "Incidencia actualizada por el técnico", "el texto libre se conserva");
+assert.equal(visibleStatus("Sin factura disponible"), "Sin factura disponible", "el texto libre con espacios no es un enum");
+assert.equal(visibleStatus(""), "", "vacío deja mandar al texto por defecto de cada llamada");
+console.log("PASS 7 · Home distingue código conocido, código desconocido y texto libre");
 
 console.log(
   `Incidencia labels contract: PASS · one authority for value and label · ` +

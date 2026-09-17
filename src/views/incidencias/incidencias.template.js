@@ -342,15 +342,18 @@ function getCurrency(it = {}) {
 
 /* LA LISTA AGRUPA; EL DOMINIO NOMBRA.
  *
- * Estos mapas no son una segunda traducción de la taxonomía: son el modelo de agrupación de
- * la lista, que necesita cinco cajones (abierta, pendiente, en proceso, resuelta, cerrada) y
- * tres prioridades para colorear filas, contar pestañas y filtrar. Sustituirlos por
- * incidenciaStatusLabel() degradaría lo que hoy se lee bien: `in_progress` pasaría de
- * «En proceso» a «Abierta» y `archived` de «Cerrada» a «Archived».
+ * Cuatro cosas distintas que antes vivían juntas: el VALOR técnico que llega, su
+ * NORMALIZACIÓN a un cajón, la ETIQUETA que se lee y la POLÍTICA de agrupación.
  *
- * Lo que sí es de la autoridad de dominio es NOMBRAR: la categoría siempre, y el estado o la
- * prioridad cuando la lista no reconoce el valor. Hasta ahora ese hueco enseñaba el token del
- * backend tal cual —«awaiting_customer», «trivial»— en medio de una columna en castellano.
+ * Estos mapas se quedan porque son lo segundo y lo cuarto: el modelo de agrupación de la
+ * lista, que necesita cinco cajones (abierta, pendiente, en proceso, resuelta, cerrada) y
+ * tres prioridades para colorear filas, contar pestañas y filtrar. Ni un valor enviado a la
+ * API ni un contador dependen de cómo se lea nada.
+ *
+ * Lo tercero ya no está aquí: nombrar es de la autoridad del dominio, para TODO valor. Que
+ * la lista reutilizara su clasificación como etiqueta era lo que hacía leer «Cerrada» a una
+ * incidencia archivada, y dejaba salir el token crudo del backend --«awaiting_customer»,
+ * «trivial»-- en medio de una columna en castellano cuando el cajón no reconocía el valor.
  */
 const STATUS_MAP = Object.freeze({
   open: "open", opened: "open", abierta: "open", abierto: "open",
@@ -360,7 +363,6 @@ const STATUS_MAP = Object.freeze({
   closed: "closed", close: "closed", cerrada: "closed", cerrado: "closed",
   cancelled: "closed", canceled: "closed", cancelada: "closed", cancelado: "closed", archived: "closed", archivada: "closed", archivado: "closed",
 });
-const STATUS_LABELS = Object.freeze({ open: "Abierta", pending: "Pendiente", progress: "En proceso", resolved: "Resuelta", closed: "Cerrada" });
 const PRIORITY_MAP = Object.freeze({
   low: "low", baja: "low", minor: "low", p3: "low",
   medium: "medium", media: "medium", normal: "medium", p2: "medium",
@@ -368,7 +370,6 @@ const PRIORITY_MAP = Object.freeze({
   urgent: "high", urgente: "high",
   critical: "high", critica: "high", critico: "high", crítico: "high", crítica: "high", p0: "high",
 });
-const PRIORITY_LABELS = Object.freeze({ low: "Baja", medium: "Media", high: "Alta" });
 const OPEN_STATUS_KEYS = new Set(["open", "pending", "progress"]);
 const CLOSED_STATUS_KEYS = new Set(["resolved", "closed"]);
 const URGENT_PRIORITY_KEYS = new Set(["high"]);
@@ -378,16 +379,14 @@ function statusKey(v = "") {
   return STATUS_MAP[k] || k || "open";
 }
 function statusLabel(v = "") {
-  const normalized = statusKey(v);
-  return STATUS_LABELS[normalized] || incidenciaStatusLabel(v, "Abierta");
+  return incidenciaStatusLabel(v, "Abierta");
 }
 function priorityKey(it = {}) {
   const k = slugKey(getPriorityRaw(it) || "medium");
   return PRIORITY_MAP[k] || k || "medium";
 }
 function priorityLabel(it = {}) {
-  const normalized = priorityKey(it);
-  return PRIORITY_LABELS[normalized] || incidenciaPriorityLabel(getPriorityRaw(it), "Media");
+  return incidenciaPriorityLabel(getPriorityRaw(it), "Media");
 }
 const isOpen = (it = {}) => OPEN_STATUS_KEYS.has(statusKey(getStatusRaw(it)));
 const isClosed = (it = {}) => CLOSED_STATUS_KEYS.has(statusKey(getStatusRaw(it)));

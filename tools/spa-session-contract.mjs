@@ -120,11 +120,11 @@ try {
     categoria: fila.querySelector(".incidencias-category-pill")?.textContent.trim() || "",
     textos: [...fila.querySelectorAll("span")].map((nodo) => nodo.textContent.trim()).filter(Boolean),
   })), FILA);
-  /* Un token crudo es una de estas tres cosas, y ninguna es «un valor que la
-     aplicación no declara»: el término inglés de un valor que SÍ tiene nombre en
-     castellano, un identificador con guion bajo, o un slug en minúsculas. Que un
-     valor desconocido se lea «Trivial» o «Chimney Sweeping» es lo correcto: se
-     hace legible, no se traduce el dato de nadie. */
+  /* Un token crudo es una de estas tres cosas: el término inglés de un valor que
+     SÍ tiene nombre en castellano, un identificador con guion bajo, o un slug en
+     minúsculas. Un código que la aplicación no declara tampoco se capitaliza para
+     aparentar una etiqueta: se nombra como valor no reconocido de su campo y su
+     valor técnico queda para diagnóstico, no para la pantalla. */
   const CON_NOMBRE_PROPIO = new Set([
     "technical", "billing", "access", "network", "documentation", "sales", "account",
     "open", "pending", "closed", "resolved", "in progress",
@@ -141,7 +141,7 @@ try {
   assert.equal(porId["INC-SINT-1"], "Técnica");
   assert.equal(porId["INC-SINT-2"], "Facturación");
   assert.equal(porId["INC-SINT-3"], "Redes");
-  assert.equal(porId["INC-SINT-4"], "Chimney Sweeping", "Un valor no declarado se lee, no se traduce ni se inventa");
+  assert.equal(porId["INC-SINT-4"], "Tipo no reconocido", "Un código que la aplicación no declara se nombra por lo que es, no se disfraza de etiqueta capitalizando el identificador");
   paso(5, `categorías ${JSON.stringify(porId)} · 0 tokens crudos (N5)`);
 
   /* 6 · La misma incidencia se lee igual en la lista y en el detalle. */

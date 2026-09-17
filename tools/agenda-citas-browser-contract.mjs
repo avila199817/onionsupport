@@ -99,10 +99,19 @@ const origin = `http://127.0.0.1:${server.address().port}`;
    Doble de la API
 --------------------------------------------------------- */
 
-function createApi({ admin = true, citas = [], fallosDetalle = 0, pasado = false } = {}) {
+/* El `_etag` real de Cosmos rota cada vez que el outbox reescribe el documento
+   --lease, estado del envío, resultado--, sin que la VERSIÓN de negocio cambie.
+   El doble lo reproduce con un contador aparte, `etagSalt`, para poder provocar
+   ese conflicto sin simular una edición ajena. */
+function etagDe(cita) {
+  return `"etag-${cita.version}.${cita.etagSalt || 0}-${cita.id}"`;
+}
+
+function createApi({ admin = true, citas = [], fallosDetalle = 0, pasado = false, sinCambios = false } = {}) {
   const state = {
     fallosDetallePendientes: fallosDetalle,
-    citas: [...citas],
+    sinCambios,
+    citas: citas.map((cita) => ({ etagSalt: 0, ...cita })),
     calls: { list: 0, create: 0, detail: 0, patch: 0, cancel: 0, users: 0 },
     createdPayloads: [],
     idempotencyKeys: [],
@@ -132,7 +141,7 @@ function createApi({ admin = true, citas = [], fallosDetalle = 0, pasado = false
       userId: cita.userId,
       destinatarioNombre: cita.destinatarioNombre,
       organizadorNombre: "Admin Onion",
-      etag: `"etag-${cita.version}-${cita.id}"`,
+      etag: etagDe(cita),
       cancelacion: cita.estado === "cancelada" ? { at: cita.canceladaEn, porNombre: "Admin Onion", motivo: cita.motivo || null } : null,
       notificacion: {
         tipo: cita.notifKind || "creada",
@@ -233,6 +242,15 @@ function createApi({ admin = true, citas = [], fallosDetalle = 0, pasado = false
       if (!cita) return json({ ok: false, code: "CITA_NO_ENCONTRADA" }, 404);
       const payload = JSON.parse(request.postData() || "{}");
       state.patchPayloads.push(payload);
+      /* Precondición real: un If-Match que no es el vigente no aplica nada. */
+      if ((request.headers()["if-match"] || "") !== etagDe(cita)) {
+        return json({ ok: false, code: "CITA_VERSION_CONFLICTO",
+                      message: "La cita ha cambiado desde que la leíste." }, 409);
+      }
+      if (state.sinCambios) {
+        return json({ ok: false, code: "CITA_SIN_CAMBIOS",
+                      message: "No hay ningún cambio que guardar." }, 400);
+      }
       if (pasado && payload.confirmarPasado !== true) {
         return json({ ok: false, code: "CITA_EN_PASADO",
                       message: "La fecha y hora indicadas ya han pasado." }, 409);
@@ -248,6 +266,14 @@ function createApi({ admin = true, citas = [], fallosDetalle = 0, pasado = false
       const cita = state.citas.find((item) => item.id === decodeURIComponent(cancelMatch[1]));
       if (!cita) return json({ ok: false, code: "CITA_NO_ENCONTRADA" }, 404);
       const payload = JSON.parse(request.postData() || "{}");
+      if (cita.estado === "cancelada") {
+        return json({ ok: false, code: "CITA_YA_CANCELADA",
+                      message: "Esta cita ya está cancelada." }, 409);
+      }
+      if ((request.headers()["if-match"] || "") !== etagDe(cita)) {
+        return json({ ok: false, code: "CITA_VERSION_CONFLICTO",
+                      message: "La cita ha cambiado desde que la leíste." }, 409);
+      }
       Object.assign(cita, {
         estado: "cancelada",
         canceladaEn: "2026-01-02T00:00:00.000Z",
@@ -264,8 +290,8 @@ function createApi({ admin = true, citas = [], fallosDetalle = 0, pasado = false
   return { state, handle };
 }
 
-async function openAgenda(browser, { admin = true, citas = [], width = 1280, query = "", fallosDetalle = 0, pasado = false } = {}) {
-  const api = createApi({ admin, citas, fallosDetalle, pasado });
+async function openAgenda(browser, { admin = true, citas = [], width = 1280, query = "", fallosDetalle = 0, pasado = false, sinCambios = false } = {}) {
+  const api = createApi({ admin, citas, fallosDetalle, pasado, sinCambios });
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   await page.route(`${API_ORIGIN}/**`, api.handle);
   await page.goto(`${origin}/agenda${query}`, { waitUntil: "load" });
@@ -614,7 +640,7 @@ try {
     assert.match(detail, /Trae el port/u, "y la nota visible");
 
     assert.equal(await page.locator('[data-detail-action="detail-edit"]').count(), 0, "sin editar");
-    assert.equal(await page.locator('[data-detail-action="detail-cancel-cita"]').count(), 0, "sin cancelar");
+    assert.equal(await page.locator('[data-detail-action="detail-eliminar"]').count(), 0, "sin eliminar");
     assert.equal(detail.includes("Comunicación"), false, "sin estado de notificación");
 
     ok("7 · el destinatario ve su cita y no ve ninguna acción de gestión");
@@ -648,26 +674,27 @@ try {
     await page.waitForFunction(() => !document.querySelector('[data-agenda-detail-form="true"]'));
 
     assert.equal(api.state.calls.patch, 1);
-    assert.equal(api.state.ifMatch[0], '"etag-1-CITA-EDIT-0001"', "la edición envía If-Match con la versión leída");
+    assert.equal(api.state.ifMatch[0], '"etag-1.0-CITA-EDIT-0001"', "la edición envía If-Match con la versión leída");
     assert.equal(api.state.citas[0].horaLocal, "17:30");
 
     /* El calendario se actualiza sin recargar la SPA. */
     await page.waitForFunction(() =>
       document.querySelector(".agenda-day-event-time")?.textContent?.trim() === "17:30");
 
-    await page.locator('[data-detail-action="detail-cancel-cita"]').click();
-    await page.locator(".agenda-detail-confirm").waitFor({ state: "visible" });
-    await page.locator('#agenda-detail-modal [data-field="motivo"]').fill("El cliente no puede");
-    await page.locator('[data-detail-action="detail-cancel-confirm"]').click();
+    /* «Eliminar cita» abre la confirmación COMPARTIDA, no una caja propia. */
+    await page.locator('[data-detail-action="detail-eliminar"]').click();
+    await page.locator('[data-agenda-delete-confirm-dialog="true"]').waitFor({ state: "visible" });
+    await page.locator('[data-agenda-delete-confirm] [data-field="motivo"]').fill("El cliente no puede");
+    await page.locator('[data-agenda-delete-action="confirm"]').click();
 
     await page.waitForFunction(() => document.querySelector(".agenda-day-event.is-cancelada"));
 
     assert.equal(api.state.calls.cancel, 1);
-    assert.equal(api.state.ifMatch[1], '"etag-2-CITA-EDIT-0001"', "la cancelación usa la versión vigente");
+    assert.equal(api.state.ifMatch[1], '"etag-2.0-CITA-EDIT-0001"', "la cancelación usa la versión vigente");
     assert.equal(api.state.citas[0].estado, "cancelada", "el registro se conserva cancelado");
     assert.equal(api.state.citas[0].motivo, "El cliente no puede", "con su motivo");
 
-    ok("8 · editar y cancelar: If-Match correcto, calendario actualizado y registro conservado");
+    ok("8 · editar y eliminar: If-Match correcto, calendario actualizado y registro conservado");
     await page.close();
   }
 
@@ -965,6 +992,293 @@ try {
     assert.notEqual(alerta.fondoAviso, alerta.fondoBase, "el aviso tiene su propio tono, no el informativo");
 
     ok("15 · presentación: buscador, avatar con su autoridad y alertas en dos columnas");
+    await page.close();
+  }
+
+
+  /* =========================================================
+     AGENDA V1.1 · ACCIONES DEL DETALLE
+  ========================================================= */
+
+  const sembrar = (extra = {}) => ([{
+    id: "CITA-V11-0001",
+    userId: "usr-ana",
+    destinatarioNombre: "Ana Pérez",
+    fechaLocal: ANCHOR,
+    horaLocal: "10:00",
+    lugar: "Oficina de Sant Vicenç",
+    nota: "Traer el portátil",
+    estado: "programada",
+    version: 1,
+    ...extra,
+  }]);
+
+  async function abrirDetalle(opciones = {}) {
+    const abierto = await openAgenda(browser, { citas: sembrar(opciones.cita || {}), ...opciones });
+    const cell = abierto.page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"]`);
+    await cell.locator(".agenda-day-event").first().click();
+    await openedDetail(abierto.page);
+    return abierto;
+  }
+
+  /* 16 · QUIÉN VE LAS ACCIONES */
+  {
+    const { page } = await abrirDetalle();
+    assert.equal(await page.locator('[data-detail-action="detail-edit"]').count(), 1,
+      "el administrador ve Editar sobre una cita programada");
+    const eliminar = page.locator('[data-detail-action="detail-eliminar"]');
+    assert.equal(await eliminar.count(), 1, "y ve Eliminar cita");
+    assert.equal((await eliminar.textContent()).trim(), "Eliminar cita",
+      "la acción de producto se llama «Eliminar cita»");
+    assert.ok(await eliminar.evaluate((node) => node.className.includes("danger")),
+      "y tiene tratamiento destructivo");
+    await page.close();
+
+    /* Una cita cancelada es de sólo lectura, incluso para el administrador. */
+    const cancelada = await abrirDetalle({ cita: { estado: "cancelada", canceladaEn: "2026-01-02T00:00:00.000Z" } });
+    assert.equal(await cancelada.page.locator('[data-detail-action="detail-edit"]').count(), 0,
+      "una cita cancelada no ofrece edición");
+    assert.equal(await cancelada.page.locator('[data-detail-action="detail-eliminar"]').count(), 0,
+      "ni eliminación");
+    await cancelada.page.close();
+
+    /* El rol usuario lo acredita el escenario 7, con su montaje real. */
+
+    ok("16 · Editar y Eliminar cita: presentes para el administrador, ausentes sobre una cita cancelada");
+  }
+
+  /* 17 · EDITAR · PRECARGA, DESCARTE SIN PETICIÓN, CUERPO SIN userId, SIN DOBLE ENVÍO */
+  {
+    const { page, api } = await abrirDetalle();
+
+    await page.locator('[data-detail-action="detail-edit"]').click();
+    await page.locator('[data-agenda-detail-form="true"]').waitFor({ state: "visible" });
+
+    const precargado = await page.evaluate(() => {
+      const raiz = document.querySelector("#agenda-detail-modal");
+      const leer = (campo) => raiz.querySelector(`[data-field="${campo}"]`)?.value ?? null;
+      return { fechaLocal: leer("fechaLocal"), horaLocal: leer("horaLocal"),
+               lugar: leer("lugar"), nota: leer("nota") };
+    });
+    assert.deepEqual(precargado, { fechaLocal: ANCHOR, horaLocal: "10:00",
+      lugar: "Oficina de Sant Vicenç", nota: "Traer el portátil" },
+      "la edición precarga exactamente los valores actuales");
+
+    /* Descartar no hace ninguna petición. */
+    await page.locator('[data-detail-action="detail-edit-cancel"]').click();
+    await page.waitForFunction(() => !document.querySelector('[data-agenda-detail-form="true"]'));
+    assert.equal(api.state.calls.patch, 0, "descartar la edición no envía ningún PATCH");
+
+    /* Guardar: doble clic, una sola petición. */
+    await page.locator('[data-detail-action="detail-edit"]').click();
+    await page.locator('[data-agenda-detail-form="true"]').waitFor({ state: "visible" });
+    await page.locator('#agenda-detail-modal [data-field="lugar"]').fill("Sala 2");
+    const guardar = page.locator('[data-detail-action="detail-save"]');
+    await guardar.click();
+    await guardar.click({ force: true }).catch(() => {});
+    await page.waitForFunction(() => !document.querySelector('[data-agenda-detail-form="true"]'));
+
+    assert.equal(api.state.calls.patch, 1, "el envío repetido no duplica el PATCH");
+    const cuerpo = api.state.patchPayloads[0];
+    assert.equal("userId" in cuerpo, false, "el cuerpo del PATCH no lleva el destinatario");
+    assert.deepEqual(Object.keys(cuerpo).sort(), ["fechaLocal", "horaLocal", "lugar", "nota"],
+      "sólo viajan los campos editables");
+    assert.equal(api.state.citas[0].lugar, "Sala 2");
+
+    ok("17 · editar: precarga exacta, descarte sin petición, cuerpo sin userId y sin doble envío");
+    await page.close();
+  }
+
+  /* 18 · EL OUTBOX ROTA EL ETAG SIN TOCAR LA VERSIÓN: UNA RECONCILIACIÓN */
+  {
+    const { page, api } = await abrirDetalle();
+
+    await page.locator('[data-detail-action="detail-edit"]').click();
+    await page.locator('[data-agenda-detail-form="true"]').waitFor({ state: "visible" });
+    await page.locator('#agenda-detail-modal [data-field="lugar"]').fill("Sala 3");
+
+    /* Entre la lectura fresca y la escritura, el outbox reescribe el documento:
+       el ETag cambia, la versión de negocio NO. Nadie ha editado nada. */
+    let rotado = false;
+    const original = api.handle;
+    api.rotarUnaVez = true;
+    await page.unroute(`${API_ORIGIN}/**`).catch(() => {});
+    await page.route(`${API_ORIGIN}/**`, async (route) => {
+      const url = new URL(route.request().url());
+      if (!rotado && route.request().method() === "PATCH" && url.pathname.includes("/api/citas/")) {
+        rotado = true;
+        api.state.citas[0].etagSalt = (api.state.citas[0].etagSalt || 0) + 1;
+      }
+      return original(route);
+    });
+
+    await page.locator('[data-detail-action="detail-save"]').click();
+    await page.waitForFunction(() => !document.querySelector('[data-agenda-detail-form="true"]'));
+
+    assert.equal(api.state.calls.patch, 2, "el conflicto por rotación se reconcilia con UNA petición más");
+    assert.equal(api.state.citas[0].lugar, "Sala 3", "y el cambio se aplica");
+    assert.equal(api.state.citas[0].version, 2, "la versión de negocio avanza una sola vez");
+
+    ok("18 · conflicto de ETag causado sólo por el outbox: una reconciliación y el cambio se guarda");
+    await page.close();
+  }
+
+  /* 19 · LA VERSIÓN DE NEGOCIO CAMBIÓ: NO SE PISA, Y EL BORRADOR SOBREVIVE */
+  {
+    const { page, api } = await abrirDetalle();
+
+    await page.locator('[data-detail-action="detail-edit"]').click();
+    await page.locator('[data-agenda-detail-form="true"]').waitFor({ state: "visible" });
+    await page.locator('#agenda-detail-modal [data-field="lugar"]').fill("Mi borrador");
+
+    /* Otra persona guarda mientras tanto: la versión de negocio avanza. */
+    api.state.citas[0].version = 5;
+    api.state.citas[0].lugar = "Lo que puso el otro";
+
+    await page.locator('[data-detail-action="detail-save"]').click();
+    await page.locator('[data-detail-conflict="true"]').waitFor({ state: "visible" });
+
+    assert.equal(api.state.calls.patch, 0, "no se escribe nada: el conflicto se detecta antes de intentarlo");
+    assert.equal(
+      await page.locator('#agenda-detail-modal [data-field="lugar"]').inputValue(),
+      "Mi borrador",
+      "el borrador del usuario se conserva intacto");
+    assert.equal(api.state.citas[0].lugar, "Lo que puso el otro", "y el servidor no se ha pisado");
+
+    ok("19 · versión de negocio distinta: cero escrituras, aviso visible y borrador preservado");
+    await page.close();
+  }
+
+  /* 20 · CITA_SIN_CAMBIOS NO DESTRUYE EL BORRADOR */
+  {
+    const { page, api } = await abrirDetalle({ sinCambios: true });
+
+    await page.locator('[data-detail-action="detail-edit"]').click();
+    await page.locator('[data-agenda-detail-form="true"]').waitFor({ state: "visible" });
+    await page.locator('#agenda-detail-modal [data-field="lugar"]').fill("Sigue aquí");
+    await page.locator('[data-detail-action="detail-save"]').click();
+
+    /* El error se pinta EN LÍNEA, sin tragarse el formulario. */
+    await page.locator('[data-detail-error="true"]').waitFor({ state: "visible" });
+    assert.match(await page.locator('[data-detail-error="true"]').textContent(), /cambio/iu,
+      "el mensaje sale de la autoridad de errores compartida");
+
+    assert.equal(api.state.calls.patch, 1, "se intentó una vez y no se reintentó");
+    assert.equal(await page.locator('[data-agenda-detail-form="true"]').count(), 1,
+      "el formulario sigue en pie");
+    assert.equal(
+      await page.locator('#agenda-detail-modal [data-field="lugar"]').inputValue(),
+      "Sigue aquí",
+      "el borrador sobrevive al rechazo");
+
+    ok("20 · CITA_SIN_CAMBIOS: un solo intento, mensaje comprensible y borrador intacto");
+    await page.close();
+  }
+
+  /* 21 · ELIMINAR · CONFIRMACIÓN COMPARTIDA Y RECHAZO SIN ESCRITURA */
+  {
+    const { page, api } = await abrirDetalle();
+
+    await page.locator('[data-detail-action="detail-eliminar"]').click();
+    const dialogo = page.locator('[data-agenda-delete-confirm-dialog="true"]');
+    await dialogo.waitFor({ state: "visible" });
+
+    const copia = await page.locator("#agenda-delete-confirm-description").textContent();
+    assert.match(copia, /cancelada/u, "el texto dice que se marcará como cancelada");
+    assert.match(copia, /no se eliminará/iu, "y que no se elimina físicamente");
+
+    await page.locator('[data-agenda-delete-action="cancel"]').click();
+    await dialogo.waitFor({ state: "detached" });
+    assert.equal(api.state.calls.cancel, 0, "rechazar la confirmación no escribe nada");
+    assert.equal(api.state.citas[0].estado, "programada");
+
+    /* Y el detalle sigue ahí, utilizable. */
+    assert.equal(await page.locator('[data-detail-action="detail-eliminar"]').count(), 1);
+
+    ok("21 · Eliminar cita: confirmación compartida, texto honesto y rechazo sin escritura");
+    await page.close();
+  }
+
+  /* 22 · ELIMINAR · CONFLICTO Y ESTADO FINAL */
+  {
+    /* a) conflicto por rotación del ETag: una reconciliación, una cancelación. */
+    const conflicto = await abrirDetalle();
+    let rotado = false;
+    const originalConflicto = conflicto.api.handle;
+    await conflicto.page.unroute(`${API_ORIGIN}/**`).catch(() => {});
+    await conflicto.page.route(`${API_ORIGIN}/**`, async (route) => {
+      const url = new URL(route.request().url());
+      if (!rotado && route.request().method() === "POST" && url.pathname.endsWith("/cancelar")) {
+        rotado = true;
+        conflicto.api.state.citas[0].etagSalt = (conflicto.api.state.citas[0].etagSalt || 0) + 1;
+      }
+      return originalConflicto(route);
+    });
+
+    await conflicto.page.locator('[data-detail-action="detail-eliminar"]').click();
+    await conflicto.page.locator('[data-agenda-delete-confirm-dialog="true"]').waitFor({ state: "visible" });
+    await conflicto.page.locator('[data-agenda-delete-action="confirm"]').click();
+    await conflicto.page.waitForFunction(() => document.querySelector(".agenda-day-event.is-cancelada"));
+
+    assert.equal(conflicto.api.state.calls.cancel, 2, "un conflicto de versión permite UNA reconciliación");
+    assert.equal(conflicto.api.state.citas[0].estado, "cancelada");
+    await conflicto.page.close();
+
+    /* b) ya estaba cancelada: estado final, sin ninguna segunda escritura. */
+    const yaCancelada = await abrirDetalle();
+    yaCancelada.api.state.citas[0].estado = "cancelada";
+    yaCancelada.api.state.citas[0].canceladaEn = "2026-01-02T00:00:00.000Z";
+
+    await yaCancelada.page.locator('[data-detail-action="detail-eliminar"]').click();
+    await yaCancelada.page.locator('[data-agenda-delete-confirm-dialog="true"]').waitFor({ state: "visible" });
+    await yaCancelada.page.locator('[data-agenda-delete-action="confirm"]').click();
+    await yaCancelada.page.waitForFunction(() =>
+      !document.querySelector('[data-detail-action="detail-eliminar"]'));
+
+    assert.equal(yaCancelada.api.state.calls.cancel, 0,
+      "si ya está cancelada no se vuelve a escribir");
+    assert.equal(yaCancelada.api.state.citas[0].version, 1, "y la versión no se toca");
+    await yaCancelada.page.close();
+
+    ok("22 · eliminar: una reconciliación por conflicto de versión; ya cancelada es estado final sin escritura");
+  }
+
+  /* 23 · FOCO Y LEYENDA RETIRADA */
+  {
+    const { page } = await abrirDetalle();
+
+    /* Eliminar → rechazar → el foco vuelve a un objetivo vivo, no al body. */
+    await page.locator('[data-detail-action="detail-eliminar"]').click();
+    await page.locator('[data-agenda-delete-confirm-dialog="true"]').waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    await page.locator('[data-agenda-delete-confirm-dialog="true"]').waitFor({ state: "detached" });
+
+    const focoTrasRechazo = await page.evaluate(() => {
+      const activo = document.activeElement;
+      return { esBody: activo === document.body, conectado: Boolean(activo?.isConnected) };
+    });
+    assert.equal(focoTrasRechazo.esBody, false, "el foco no cae al body tras rechazar la eliminación");
+    assert.equal(focoTrasRechazo.conectado, true, "y apunta a un nodo vivo");
+
+    /* Editar → descartar → el foco sigue dentro del detalle. */
+    await page.locator('[data-detail-action="detail-edit"]').click();
+    await page.locator('[data-agenda-detail-form="true"]').waitFor({ state: "visible" });
+    await page.locator('[data-detail-action="detail-edit-cancel"]').click();
+    await page.waitForFunction(() => !document.querySelector('[data-agenda-detail-form="true"]'));
+    assert.equal(await page.evaluate(() => document.activeElement === document.body), false,
+      "descartar la edición tampoco deja el foco en el body");
+
+    /* La leyenda «Aquí ves tus citas» no existe: ni texto, ni punto, ni caja. */
+    const leyenda = await page.evaluate(() => ({
+      texto: document.body.textContent.toLowerCase().includes("ves tus citas"),
+      variante: document.body.textContent.toLowerCase().includes("puedes crear citas"),
+      caja: document.querySelectorAll(".agenda-side-note").length,
+      punto: document.querySelectorAll(".agenda-side-note-dot").length,
+    }));
+    assert.deepEqual(leyenda, { texto: false, variante: false, caja: 0, punto: 0 },
+      "la leyenda, su variante, su caja y su punto verde han desaparecido del DOM");
+
+    ok("23 · foco vivo tras rechazar eliminación y tras descartar edición; la leyenda ya no existe");
     await page.close();
   }
 

@@ -489,4 +489,67 @@ pass("1 · versiones y zona canónica declaradas");
   pass(`12 · el avatar usa la autoridad compartida y los ${modificadores.size} tonos de alerta existen`);
 }
 
+/* =========================================================
+   13 · «ELIMINAR CITA» ES LA CANCELACIÓN CONTRACTUAL, Y LA LEYENDA SE FUE
+
+   Tres cosas que sólo se ven leyendo el origen:
+
+   a) no se ha inventado un DELETE. El backend no lo expone, y el botón que
+      producto llama «Eliminar cita» tiene que acabar en `POST /:id/cancelar`;
+   b) el frontend no habla con Cosmos: habla con la API;
+   c) la leyenda «Aquí ves tus citas» --texto, punto verde y caja-- ha
+      desaparecido del origen, no está escondida con `display:none`, y no ha
+      dejado selectores huérfanos en ninguna hoja.
+========================================================= */
+{
+  const raiz = resolve(fileURLToPath(new URL("../", import.meta.url)));
+  const leer = (ruta) => readFileSync(join(raiz, ruta), "utf8");
+
+  const ficherosAgenda = [
+    "src/views/agenda/index.js",
+    "src/views/agenda/agenda.api.js",
+    "src/views/agenda/agenda.template.detail.js",
+    "src/views/agenda/agenda.template.create.js",
+  ];
+  const fuenteAgenda = ficherosAgenda.map(leer).join("\n");
+
+  /* a) Ningún DELETE de citas, ni por método ni por ayudante. */
+  assert.doesNotMatch(fuenteAgenda, /method:\s*["']DELETE["']/iu,
+    "Agenda no emite ningún DELETE");
+  assert.doesNotMatch(fuenteAgenda, /\bHttp\s*\.\s*del(ete)?\s*\(/u,
+    "Agenda no usa el ayudante de borrado del cliente HTTP");
+  assert.match(leer("src/views/agenda/agenda.api.js"), /\/cancelar/u,
+    "la eliminación pasa por la ruta de cancelación del backend");
+
+  /* Y el botón destructivo desemboca ahí, no en otra cosa. */
+  const detalle = leer("src/views/agenda/agenda.template.detail.js");
+  assert.match(detalle, /DELETE_CITA:\s*"detail-eliminar"/u,
+    "la acción destructiva del detalle está declarada");
+  assert.match(detalle, /Eliminar cita/u, "y se presenta con el nombre de producto");
+  assert.match(detalle, /no se eliminará físicamente/iu,
+    "la confirmación dice que el documento se conserva");
+  assert.match(leer("src/views/agenda/index.js"),
+    /AGENDA_DETAIL_ACTIONS\.DELETE_CITA\) return void requestDeleteCita\(\)/u,
+    "y el manejador la enruta a la cancelación contractual");
+
+  /* b) Nada de Cosmos desde el navegador. */
+  for (const patron of [/@azure\/cosmos/u, /documents\.azure\.com/u, /CosmosClient/u]) {
+    assert.doesNotMatch(fuenteAgenda, patron, `Agenda no habla con Cosmos: ${patron}`);
+  }
+
+  /* c) La leyenda ya no existe en ningún origen, ni oculta. */
+  const hojas = [
+    "src/css/views/agenda/index.css",
+    "src/css/compositions/private-create-modal.css",
+  ].map(leer).join("\n");
+  const todo = `${fuenteAgenda}\n${hojas}`;
+
+  for (const rastro of [/ves tus citas/iu, /puedes crear citas/iu,
+                        /agenda-side-note/u, /agenda-detail-confirm/u]) {
+    assert.doesNotMatch(todo, rastro, `queda un rastro de la leyenda retirada: ${rastro}`);
+  }
+
+  pass("13 · «Eliminar cita» cancela por contrato, sin DELETE ni Cosmos, y la leyenda no deja rastro");
+}
+
 console.log(`\nAgenda citas contract: PASS · ${checks.length} bloques · fechas civiles, proyección por rol, errores y habilitación`);

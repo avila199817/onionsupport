@@ -72,7 +72,9 @@ import {
 } from "./agenda.template.create.js";
 
 import {
+  AGENDA_DELETE_CONFIRM_ACTION,
   AGENDA_DETAIL_ACTIONS,
+  renderAgendaDeleteConfirm,
   renderAgendaDetailModal,
 } from "./agenda.template.detail.js";
 
@@ -81,6 +83,7 @@ const AGENDA_VIEW_VERSION = "agenda.view.v3-citas";
 const CREATE_HOST_ID = "agenda-create-modal-root";
 const DETAIL_HOST_ID = "agenda-detail-modal-root";
 const EXIT_CONFIRM_HOST_ID = "agenda-exit-confirm-root";
+const DELETE_CONFIRM_HOST_ID = "agenda-delete-confirm-root";
 
 const SEARCH_DEBOUNCE_MS = 220;
 /* Citas visibles en una casilla antes de ofrecer «+N más». */
@@ -333,11 +336,6 @@ function renderWorkspace(state) {
               <i aria-hidden="true">${icon("check")}</i>
             </div>
           </section>
-
-          <div class="agenda-side-note">
-            <span class="agenda-side-note-dot" aria-hidden="true"></span>
-            <span>${escapeHtml(state.canCreate ? "Puedes crear citas" : "Aquí ves tus citas")}</span>
-          </div>
         </aside>
 
         <main class="agenda-main-panel">
@@ -406,7 +404,6 @@ function createController(host, context = {}) {
     loading: false,
     saving: false,
     editing: false,
-    cancelling: false,
     error: "",
     errors: {},
     cita: null,
@@ -415,6 +412,13 @@ function createController(host, context = {}) {
     opener: null,
     form: { fechaLocal: "", horaLocal: "", lugar: "", nota: "", motivo: "", confirmarPasado: false },
     pastWarning: "",
+    /* Aviso de que el servidor cambió por debajo mientras se editaba. */
+    conflict: "",
+    /* Versión de NEGOCIO con la que se entró a editar. El `_etag` rota cada
+       vez que el outbox reescribe el documento --lease, estado del envío,
+       resultado--, sin que el contenido haya cambiado; la versión no. Por eso
+       la referencia para decidir si se pisa algo es ésta, no el ETag. */
+    baselineVersion: 0,
   };
 
   let destroyed = false;
@@ -888,7 +892,6 @@ function createController(host, context = {}) {
       loading: true,
       saving: false,
       editing: false,
-      cancelling: false,
       error: "",
       errors: {},
       cita: null,
@@ -930,14 +933,8 @@ function createController(host, context = {}) {
     try {
       const cita = await loadCitaDetail(detailState.citaId, { userId: detailState.userHint });
       if (destroyed || !detailState.open) return false;
-      detailState.cita = cita;
-      detailState.form = {
-        fechaLocal: cita.fechaLocal,
-        horaLocal: cita.horaLocal,
-        lugar: cita.lugar,
-        nota: cita.nota,
-        motivo: "",
-      };
+      sincronizarDesde(cita);
+      detailState.conflict = "";
       return true;
     } catch (error) {
       if (destroyed || !detailState.open) return false;
@@ -976,13 +973,52 @@ function createController(host, context = {}) {
     const hora = node.querySelector('[data-field="horaLocal"]');
     const lugar = node.querySelector('[data-field="lugar"]');
     const nota = node.querySelector('[data-field="nota"]');
-    const motivo = node.querySelector('[data-field="motivo"]');
 
     if (fecha) detailState.form.fechaLocal = cleanText(fecha.value, "");
     if (hora) detailState.form.horaLocal = cleanText(hora.value, "");
     if (lugar) detailState.form.lugar = cleanText(lugar.value, "");
     if (nota) detailState.form.nota = String(nota.value ?? "");
-    if (motivo) detailState.form.motivo = String(motivo.value ?? "");
+  }
+
+  /*
+    Lectura fresca justo antes de escribir.
+
+    El `_etag` de Cosmos rota cada vez que el outbox reescribe el documento
+    --reserva de lease, «preparando», «enviando», resultado--, y eso ocurre de
+    forma asíncrona tras CADA escritura. Un ETag capturado al abrir el detalle
+    puede estar caducado sin que nadie haya tocado el contenido. Por eso la
+    referencia de «esto no ha cambiado» es la VERSIÓN de negocio, que sólo
+    avanza cuando cambia el contenido comunicable, y el ETag se toma siempre
+    recién leído.
+  */
+  function leerCitaFresca() {
+    return loadCitaDetail(detailState.citaId, { userId: detailState.userHint });
+  }
+
+  function sincronizarDesde(cita) {
+    detailState.cita = cita;
+    detailState.baselineVersion = Number(cita.version) || 0;
+    detailState.form = {
+      fechaLocal: cita.fechaLocal,
+      horaLocal: cita.horaLocal,
+      lugar: cita.lugar,
+      nota: cita.nota,
+      motivo: "",
+    };
+  }
+
+  /*
+    El servidor avanzó por debajo: NO se pisa. Se trae el estado real para que
+    se vea con qué se está comparando, se conserva el borrador tal cual, y la
+    nueva versión pasa a ser la referencia, de modo que un segundo «Guardar»
+    --ya deliberado, viendo el aviso-- sí procede.
+  */
+  function avisarConflicto(fresca) {
+    detailState.cita = fresca;
+    detailState.baselineVersion = Number(fresca.version) || 0;
+    detailState.conflict = "Revisa los datos actualizados antes de guardar.";
+    detailState.error = "";
+    return false;
   }
 
   async function saveDetail() {
@@ -1003,37 +1039,55 @@ function createController(host, context = {}) {
 
     detailState.saving = true;
     detailState.error = "";
+    detailState.conflict = "";
     paintDetail();
 
-    try {
-      const { cita } = await AgendaApi.updateCita(
-        detailState.citaId,
-        {
-          fechaLocal: detailState.form.fechaLocal,
-          horaLocal: detailState.form.horaLocal,
-          lugar: detailState.form.lugar,
-          nota: detailState.form.nota,
-          /* Reprogramar a un instante ya pasado exige confirmación EXPLÍCITA,
-             igual que el alta: el backend responde 409 CITA_EN_PASADO hasta
-             que llega. Sin enviarla, ese cambio no tenía salida. */
-          ...(detailState.form.confirmarPasado ? { confirmarPasado: true } : {}),
-        },
-        { etag: detailState.cita.etag, userId: detailState.cita.userId || detailState.userHint }
-      );
+    /* El destinatario NO viaja en el cuerpo: se fija al crear y el backend
+       rechaza el campo. La partición va en la query. */
+    const cuerpo = {
+      fechaLocal: detailState.form.fechaLocal,
+      horaLocal: detailState.form.horaLocal,
+      lugar: detailState.form.lugar,
+      nota: detailState.form.nota,
+      /* Reprogramar a un instante ya pasado exige confirmación EXPLÍCITA,
+         igual que el alta: el backend responde 409 CITA_EN_PASADO hasta
+         que llega. Sin enviarla, ese cambio no tenía salida. */
+      ...(detailState.form.confirmarPasado ? { confirmarPasado: true } : {}),
+    };
 
-      if (destroyed) return false;
-      detailState.cita = cita;
-      detailState.editing = false;
-      detailState.pastWarning = "";
-      detailState.form = {
-        fechaLocal: cita.fechaLocal,
-        horaLocal: cita.horaLocal,
-        lugar: cita.lugar,
-        nota: cita.nota,
-        motivo: "",
-      };
-      await loadVisibleRange({ force: true });
-      return true;
+    try {
+      let fresca = await leerCitaFresca();
+      if (destroyed || !detailState.open) return false;
+      if (Number(fresca.version) !== Number(detailState.baselineVersion)) return avisarConflicto(fresca);
+
+      let reconciliado = false;
+      for (;;) {
+        try {
+          const { cita } = await AgendaApi.updateCita(detailState.citaId, cuerpo, {
+            etag: fresca.etag,
+            userId: fresca.userId || detailState.userHint,
+          });
+
+          if (destroyed) return false;
+          sincronizarDesde(cita);
+          detailState.editing = false;
+          detailState.pastWarning = "";
+          detailState.conflict = "";
+          await loadVisibleRange({ force: true });
+          return true;
+        } catch (error) {
+          /* Una sola reconciliación, y SÓLO por conflicto de versión: un 409
+             `If-Match` garantiza que la escritura no se aplicó. Ningún otro
+             error se reintenta, porque ahí sí pudo aplicarse. */
+          if (reconciliado || errorCode(error) !== "CITA_VERSION_CONFLICTO") throw error;
+          reconciliado = true;
+
+          fresca = await leerCitaFresca();
+          if (destroyed || !detailState.open) return false;
+          /* Si la versión de negocio cambió, el conflicto es real: no se pisa. */
+          if (Number(fresca.version) !== Number(detailState.baselineVersion)) return avisarConflicto(fresca);
+        }
+      }
     } catch (error) {
       if (destroyed) return false;
 
@@ -1055,30 +1109,98 @@ function createController(host, context = {}) {
     }
   }
 
-  async function confirmCancelCita() {
+  /* -------------------------------------------------------
+     ELIMINAR CITA
+
+     No existe DELETE: la operación contractual es la cancelación, y el
+     documento se conserva. El botón se llama «Eliminar cita» porque es la
+     acción de producto, y el texto de la confirmación lo dice sin adornos.
+  ------------------------------------------------------- */
+
+  async function aplicarCancelada(cita) {
+    sincronizarDesde(cita);
+    detailState.editing = false;
+    detailState.conflict = "";
+    detailState.pastWarning = "";
+    await loadVisibleRange({ force: true });
+    return true;
+  }
+
+  async function requestDeleteCita() {
+    if (!detailState.open || detailState.saving || !detailState.cita) return false;
+    if (detailState.cita.estado === "cancelada") return false;
+
+    const aceptado = await openModalConfirmation({
+      host: { id: DELETE_CONFIRM_HOST_ID, attributes: { "data-agenda-delete-confirm-root": "true" } },
+      render: (root) => {
+        root.innerHTML = renderAgendaDeleteConfirm({ motivo: detailState.form.motivo });
+        /* El motivo vive en el diálogo, que se destruye al resolverse: se
+           sincroniza mientras se escribe, sin listeners que sobrevivan. */
+        const motivo = root.querySelector('[data-field="motivo"]');
+        motivo?.addEventListener("input", () => {
+          detailState.form.motivo = String(motivo.value ?? "");
+        });
+        return {
+          panel: root.querySelector('[data-agenda-delete-confirm-dialog="true"]'),
+          cancel: root.querySelector(`[data-${AGENDA_DELETE_CONFIRM_ACTION}="cancel"]`),
+          confirm: root.querySelector(`[data-${AGENDA_DELETE_CONFIRM_ACTION}="confirm"]`),
+        };
+      },
+      opener: host.ownerDocument.activeElement,
+      bodyClasses: ["agenda-delete-confirm-open"],
+    });
+
+    if (!aceptado) return false;
+    return eliminarCita();
+  }
+
+  async function eliminarCita() {
     if (!detailState.open || detailState.saving || !detailState.cita) return false;
 
-    readDetailForm();
     detailState.saving = true;
     detailState.error = "";
     paintDetail();
 
-    try {
-      const cita = await cancelCita(
-        detailState.citaId,
-        cleanText(detailState.form.motivo, "") ? { motivo: detailState.form.motivo } : {},
-        { etag: detailState.cita.etag, userId: detailState.cita.userId || detailState.userHint }
-      );
+    const cuerpo = cleanText(detailState.form.motivo, "") ? { motivo: detailState.form.motivo } : {};
 
-      if (destroyed) return false;
-      detailState.cita = cita;
-      detailState.cancelling = false;
-      detailState.editing = false;
-      await loadVisibleRange({ force: true });
-      return true;
+    try {
+      let fresca = await leerCitaFresca();
+      if (destroyed || !detailState.open) return false;
+      /* Ya estaba cancelada: estado final, se refleja y no se escribe nada. */
+      if (fresca.estado === "cancelada") return await aplicarCancelada(fresca);
+
+      let reconciliado = false;
+      for (;;) {
+        try {
+          const cita = await cancelCita(detailState.citaId, cuerpo, {
+            etag: fresca.etag,
+            userId: fresca.userId || detailState.userHint,
+          });
+          if (destroyed) return false;
+          return await aplicarCancelada(cita);
+        } catch (error) {
+          const code = errorCode(error);
+
+          /* El backend dice que ya está cancelada: es el estado que
+             buscábamos. Se refresca y NO se vuelve a escribir. */
+          if (code === "CITA_YA_CANCELADA") {
+            const actual = await leerCitaFresca();
+            if (destroyed || !detailState.open) return false;
+            return await aplicarCancelada(actual);
+          }
+
+          if (reconciliado || code !== "CITA_VERSION_CONFLICTO") throw error;
+          reconciliado = true;
+
+          fresca = await leerCitaFresca();
+          if (destroyed || !detailState.open) return false;
+          /* Si alguien se adelantó, el objetivo funcional ya está cumplido. */
+          if (fresca.estado === "cancelada") return await aplicarCancelada(fresca);
+        }
+      }
     } catch (error) {
       if (destroyed) return false;
-      detailState.error = agendaErrorMessage(error, "No se ha podido cancelar la cita.");
+      detailState.error = agendaErrorMessage(error, "No se ha podido eliminar la cita.");
       return false;
     } finally {
       if (!destroyed) {
@@ -1193,40 +1315,27 @@ function createController(host, context = {}) {
       if (action === AGENDA_DETAIL_ACTIONS.EDIT) {
         detailState.editing = true;
         detailState.errors = {};
+        detailState.conflict = "";
+        /* Referencia con la que se entra a editar: si el servidor la supera,
+           no se pisa lo que haya escrito otro. */
+        detailState.baselineVersion = Number(detailState.cita?.version) || 0;
         paintDetail();
         return;
       }
 
       if (action === AGENDA_DETAIL_ACTIONS.EDIT_CANCEL) {
+        /* Descartar no hace ninguna petición: vuelve al detalle con los
+           valores del servidor y sin restos del intento anterior. */
         detailState.editing = false;
         detailState.errors = {};
-        if (detailState.cita) {
-          detailState.form = {
-            fechaLocal: detailState.cita.fechaLocal,
-            horaLocal: detailState.cita.horaLocal,
-            lugar: detailState.cita.lugar,
-            nota: detailState.cita.nota,
-            motivo: "",
-          };
-        }
+        detailState.conflict = "";
+        detailState.pastWarning = "";
+        if (detailState.cita) sincronizarDesde(detailState.cita);
         paintDetail();
         return;
       }
 
-      if (action === AGENDA_DETAIL_ACTIONS.CANCEL_CITA) {
-        detailState.cancelling = true;
-        paintDetail();
-        return;
-      }
-
-      if (action === AGENDA_DETAIL_ACTIONS.CANCEL_DISMISS) {
-        readDetailForm();
-        detailState.cancelling = false;
-        paintDetail();
-        return;
-      }
-
-      if (action === AGENDA_DETAIL_ACTIONS.CANCEL_CONFIRM) return void confirmCancelCita();
+      if (action === AGENDA_DETAIL_ACTIONS.DELETE_CITA) return void requestDeleteCita();
     }
   }
 

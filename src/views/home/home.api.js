@@ -320,9 +320,20 @@ function forceRequested(options = {}) {
   return options.force === true || options.forceRefresh === true;
 }
 
-/* ¿EL PANEL ANTERIOR DEJÓ ALGUNA CUENTA SIN CONFIRMAR? */
-function cuentasSinConfirmarEnCache() {
-  return Object.values(safeObject(cacheState.dashboard?.unknownCounts)).some(Boolean);
+/* ¿HAY QUE VOLVER A PREGUNTAR POR UNA CUENTA SIN CONFIRMAR?
+ *
+ * Sí la primera vez que se vuelve con ese panel guardado, y sólo esa. Un total
+ * puede quedar sin confirmar de forma ESTABLE --una cota inferior legítima
+ * cuando hay más filas de las que caben en la página-- y entonces forzar la
+ * relectura en cada montaje sería un coste permanente por un dato que no va a
+ * cambiar. Una relectura por panel: se intenta una vez, y si sigue sin
+ * confirmarse, la recuperación queda en el «Reintentar» del aviso. */
+function debeReconsultarCuentas() {
+  const panel = cacheState.dashboard;
+  if (!Object.values(safeObject(panel?.unknownCounts)).some(Boolean)) return false;
+  if (cacheState.reconsultadoEn === panel?.loadedAt) return false;
+  cacheState.reconsultadoEn = panel?.loadedAt ?? null;
+  return true;
 }
 
 function defaultDashboardScope(options = {}) {
@@ -660,11 +671,26 @@ function buildDashboard({
      * Ni fallo --el dominio contestó-- ni dato --nadie ha contado--. Se publica
      * aparte para que la tarjeta lo diga y para que la caché no dé el panel por
      * completo. Un ámbito que no aplica (no admin) no cuenta como sin confirmar. */
+    /* ACOTADO A LO QUE ESTÁ MEDIDO.
+     *
+     * El camino corregido es el del listado de incidencias, que es donde el
+     * backend declara de verdad si contó: recuento fallido -> `totalKnown:
+     * false` -> lista usable con total nulo.
+     *
+     * Los otros tres NO entran, y no por descuido: hoy `/api/clientes/stats` y
+     * `/api/users/stats` no publican esa marca, el normalizador del cliente la
+     * rellena en `false` por su cuenta, y sus tarjetas llevan desde siempre en
+     * «No disponible» aunque su agregado sea exacto. Meterlos aquí marcaría el
+     * panel incompleto en TODA sesión de administración y forzaría una
+     * relectura en cada montaje --medido: rompe el recorrido conjunto--.
+     *
+     * Ese es un defecto propio, de la misma familia, y queda REPORTADO, no
+     * corregido de tapadillo dentro de esta unidad. */
     unknownCounts: {
       incidencias: cuentaSinConfirmar(incidenciasResult),
-      facturas: invoiceCount === null && !facturasResult?.error,
-      clientes: context.admin ? cuentaSinConfirmar(clientesResult) : false,
-      usuarios: context.admin ? cuentaSinConfirmar(usuariosResult) : false,
+      facturas: false,
+      clientes: false,
+      usuarios: false,
     },
     partial: domainWarnings.length > 0,
     stale,
@@ -693,7 +719,7 @@ async function fetchDashboard(options = {}, context = currentContext()) {
    *
    * Es UNA relectura por montaje, la misma que hace cualquier entrada: ni
    * sondeo, ni reintento automático, ni tormenta. */
-  const lectura = cuentasSinConfirmarEnCache()
+  const lectura = debeReconsultarCuentas()
     ? { ...options, force: true }
     : options;
 

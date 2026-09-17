@@ -326,7 +326,18 @@ export async function openSpaSession(browser, origin, options = {}) {
 
     if (method === "GET") {
       if (path === "/api/tickets") {
-        return respond({ ok: true, items: world.tickets, total: world.tickets.length, data: world.tickets });
+        /* El backend DECLARA si contó. Un arnés que se lo calla obliga al
+           cliente a adivinarlo, y entonces la prueba no ejerce el contrato
+           real: aquí el recuento es exacto y se dice. */
+        return respond({
+          ok: true,
+          items: world.tickets,
+          data: world.tickets,
+          total: world.tickets.length,
+          totalCount: world.tickets.length,
+          totalKnown: true,
+          totalIsLowerBound: false,
+        });
       }
       const attachment = path.match(/^\/api\/tickets\/([^/]+)\/(?:attachments|files|adjuntos)\/([^/]+)\/view$/u);
       if (attachment) {

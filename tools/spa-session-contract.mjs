@@ -122,6 +122,24 @@ function mundo() {
 
 const espera = (ms) => new Promise((sigue) => setTimeout(sigue, ms));
 
+/* PULSAR ALGO QUE PUEDE ESTAR REPINTÁNDOSE.
+ *
+ * Home refresca su resumen tras montarse, así que una entrada de actividad
+ * puede desaparecer y volver entre la espera y el clic. Eso NO es un fallo: es
+ * el repintado normal. Se reintenta el clic sobre el MISMO selector hasta que
+ * el nodo está ahí en el instante de pulsarlo; ninguna comprobación se relaja. */
+async function pulsarEstable(page, selector, intentos = 12) {
+  for (let intento = 1; intento <= intentos; intento += 1) {
+    try {
+      return await clickInPage(page, selector);
+    } catch (error) {
+      if (intento === intentos) throw error;
+      await page.waitForTimeout(250);
+    }
+  }
+  return false;
+}
+
 async function recorrer(entorno) {
   const pasos = [];
   const paso = (n, texto) => pasos.push(`${String(n).padStart(2, " ")} · ${texto}`);
@@ -604,7 +622,7 @@ async function recorrer(entorno) {
       /* Referencia: la MISMA ficha, desde su propia ruta. */
       await clickInPage(page, `a[href='${RUTA}${ruta}']`);
       await page.waitForSelector(lista, { timeout: 20000 });
-      await clickInPage(page, `${lista}[data-${tipo === "incidencia" ? "ticket" : "factura"}-id='${identidad}']`);
+      await pulsarEstable(page, `${lista}[data-${tipo === "incidencia" ? "ticket" : "factura"}-id='${identidad}']`);
       await untilTrue(page, (sel) => Boolean(document.querySelector(sel)), { arg: panel, timeout: 20000, message: `${identidad} no abrió desde su ruta` });
       const referencia = await asentar(panel);
       await cerrar(panel);
@@ -612,7 +630,7 @@ async function recorrer(entorno) {
       /* Y ahora desde Home, con la hoja de ese dominio ya aparcada. */
       await clickInPage(page, `a[href='${RUTA}']`);
       await untilTrue(page, (sel) => Boolean(document.querySelector(sel)), { arg: `${disparador}[data-entity-id='${identidad}']`, timeout: 20000, message: "Home no volvió a pintar su entrada" });
-      await clickInPage(page, `${disparador}[data-entity-id='${identidad}']`);
+      await pulsarEstable(page, `${disparador}[data-entity-id='${identidad}']`);
       await untilTrue(page, (sel) => Boolean(document.querySelector(sel)), { arg: panel, timeout: 20000, message: `${identidad} no abrió desde ${fuente}` });
       const desdeHome = await asentar(panel);
       const distintos = comparar(referencia, desdeHome);

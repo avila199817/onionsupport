@@ -86,12 +86,17 @@ Ningún contrato envía correo ni toca datos de cliente.
 
 ## Presupuestos medidos
 
-El cierre bootstrap/Home pasa de **218567** a **218698** raw bytes (+131). Los cinco chunks raíz (`main`, `app`, `enhancements` y los dos `home`) son **byte a byte idénticos** a `main`: el crecimiento son listas de precarga dentro de `routes`, porque la ruta `/agenda` ahora depende del sistema modal compartido y del combobox. La reutilización es la regla, no el payload. El techo pasa a 218750, dejando 52 bytes. Incidencias **encoge** 3.511 bytes, porque el combobox se extrae a un chunk compartido.
+El cierre bootstrap/Home pasa de **218563** (main `d5db0bdb`) a **218694** raw bytes: **+131**. Los otros quince chunks del cierre son **byte a byte idénticos** a `main`; los 131 bytes son enteros de `routes` (20774 → 20905) y se explican uno a uno: 57 del nombre del chunk del combobox, 43 del de la confirmación modal y 31 de los índices que `/agenda` añade a su lista de dependencias. No es payload nuevo: es que dos módulos **pasan a compartirse**, y compartirlos obliga a nombrarlos en la tabla de precarga. El techo pasa a 218750, dejando 56 bytes. Incidencias **encoge** 3.511 bytes (222994 → 219483), porque el combobox sale de su chunk.
 
 El baseline de superficie exportada de Agenda pasa de 1 a 52, a conciencia: Agenda deja de ser una vista sin datos y pasa a ser un dominio con frontera HTTP, autoridad de fecha y dos plantillas de diálogo. Cada exportación tiene consumidor.
 
 ## Limitaciones declaradas
 
+- **El gate «Validate dist with trusted base tooling» no puede aprobar esta entrega tal cual.** Ese job construye el candidato pero ejecuta el `tools/` de `main`, a propósito: así un PR no puede relajar su propio control. Tres contratos de la base la rechazan, y no por un defecto de Agenda:
+  - `invoice-api-split-dist-contract`: el techo del cierre bootstrap/Home vive en `main` (218600). Es una **cota superior**, así que se resuelve como ya se resolvió R05 en el PR #681: un PR **sólo de tooling** que suba el techo a `main` antes del cambio que lo consume.
+  - `error-extraction-contract` y `format-contract`: comparan el mapa de consumidores con `deepEqual`, en los dos sentidos. Un módulo **nuevo** que use `errorMessage` o `dateFormatter` aparece medido y no listado, y falla. Y **no se puede preparar en `main`**: si `main` listara `src/views/agenda/agenda.api.js`, su propio `check:dist` fallaría, porque ese archivo todavía no existe allí. No es un orden de PRs: es que, tal y como están escritos hoy, esos dos contratos impiden que cualquier PR estrene un consumidor de esas dos autoridades.
+
+  Con el tooling del propio candidato —el que corre en `Build candidate dist without secrets`— los tres pasan, y el mapa queda completo y honesto. Resolverlo es una decisión sobre el CI, no sobre esta función, y queda fuera de esta entrega.
 - El texto plano de **todos** los correos de Onion Support sale en una sola línea: `normalizeRendererOutput` aplica `safeText` a esa alternativa. Las citas heredan ese comportamiento; la información está completa, incluido el enlace. Corregirlo es un cambio de una línea en la autoridad compartida que altera Incidencias y Facturas, y queda fuera de esta entrega.
 - El contrato de navegador aísla la red con un doble; **no acredita** un recorrido autenticado contra el backend de producción.
 - La Agenda del rol usuario reutiliza la misma vista. No hay vista de semana ni de día: la V1 es mensual.

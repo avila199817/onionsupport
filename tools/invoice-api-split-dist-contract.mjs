@@ -29,17 +29,21 @@ const JS_ROOT = resolve(DIST, "assets/js");
 // what the SPA loads, so it belongs in this closure; the ceiling moves to
 // 218600, leaving 57 bytes. Nothing is preloaded: the growth is the rule, not
 // the payload. app and auth keep their ceilings.
-// Agenda deja de ser una vista sin datos y pasa a consumir el sistema modal
-// compartido (entity-overlay: shell, host, lifecycle y confirmaciones) y el
-// combobox accesible de selección de usuario. Esa reutilización es la regla,
-// no el payload: Vite extrae dos chunks compartidos nuevos (el combobox sale
-// de incidencias, que ENCOGE 3.511 bytes) y la lista de precarga de la ruta
-// /agenda crece dentro de `routes`, que sí está en el cierre bootstrap/Home.
-// Medido sobre el mismo build: 218567 en 399fa844 (main) -> 218698 con Agenda
-// conectada, +131 raw bytes, todos de listas de precarga. Ningún módulo nuevo
-// entra en el cierre: los cinco chunks raíz (main, app, enhancements y los dos
-// home) son byte a byte idénticos a main. El techo pasa a 218750, dejando 52
-// bytes. app y auth conservan los suyos.
+// R06 (2026-09-17): Agenda deja de ser una vista sin datos y pasa a consumir
+// el sistema modal compartido (entity-overlay: shell, host, lifecycle y
+// confirmaciones) y el combobox accesible de seleccion de usuario. Esa
+// reutilizacion es la regla, no el payload: al compartirlos, Vite extrae dos
+// chunks nuevos --el combobox sale de Incidencias, que ENCOGE-- y sus dos
+// nombres entran en la tabla de precarga que vive dentro de `routes`, que si
+// esta en el cierre bootstrap/Home.
+// Medido sobre el mismo build, main d5db0bdb -> esta rama: 218563 -> 218694,
+// +131 raw bytes. NINGUN modulo nuevo entra en el cierre: los quince chunks
+// restantes (main, app, enhancements, home, core, http, errors, styles...)
+// son byte a byte identicos a main; los 131 bytes son enteros de `routes`
+// (20774 -> 20905) y se explican uno a uno: 57 del nombre del chunk del
+// combobox, 43 del de la confirmacion modal y 31 de los indices que la ruta
+// /agenda anade a su lista de dependencias. El techo pasa a 218750, dejando
+// 56 bytes. app y auth conservan los suyos.
 const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218750 });
 
 function staticImports(code, identifier) {

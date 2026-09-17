@@ -78,6 +78,9 @@ const SHELL_CONSUMERS = [
   "src/features/incidencias-technician-profile/index.js",
   "src/views/usuarios/usuarios.template.modal.js",
   "src/features/incidencias-video-preview/core.js",
+  "src/views/agenda/agenda.template.create.js",
+  "src/views/agenda/agenda.template.detail.js",
+  "src/views/agenda/index.js",
 ];
 
 const STRUCTURAL_CLASS = /\.ui-detail-modal-(?:root|overlay|panel|header|body|footer|close-btn)\b/u;

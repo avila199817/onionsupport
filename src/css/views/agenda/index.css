@@ -693,9 +693,159 @@
     font-weight: 700;
   }
 
-  .agenda-day-space {
+  /* =======================================================
+     DAY CELL · SELECTION SURFACE, "+" AND EVENTS
+  ======================================================= */
+
+  /* La casilla es un contenedor; la superficie de selección la cubre por
+     debajo del número, del «+» y de las citas, que son sus hermanos. Así
+     ningún clic viaja de un botón a otro. */
+  .agenda-day-surface {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .agenda-day-surface:focus-visible {
+    outline: 2px solid var(--agenda-blue);
+    outline-offset: -2px;
+  }
+
+  .agenda-day-number {
+    position: relative;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  /* Caja del «+», en la esquina superior derecha. No desplaza el número
+     porque está fuera del flujo. */
+  .agenda-day-create {
+    position: absolute;
+    z-index: 2;
+    inset-block-start: 5px;
+    inset-inline-end: 5px;
+    display: grid;
+    place-items: center;
+    inline-size: 23px;
+    block-size: 23px;
+    border: 1px solid var(--agenda-border);
+    border-radius: 6px;
+    background: var(--agenda-panel-soft);
+    opacity: 0;
+    transition: opacity .12s ease, background .12s ease, border-color .12s ease;
+  }
+
+  .agenda-day-create-btn {
+    inline-size: 100%;
+    block-size: 100%;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: inherit;
+    background: transparent;
+    color: var(--agenda-text-2);
+    cursor: pointer;
+  }
+
+  .agenda-day-create-btn svg {
+    inline-size: 13px;
+    block-size: 13px;
+  }
+
+  /* Aparece por SELECCIÓN, no sólo por hover: así funciona con teclado y en
+     pantallas táctiles, donde no hay hover. */
+  .agenda-day.is-selected .agenda-day-create,
+  .agenda-day:hover .agenda-day-create,
+  .agenda-day-create:focus-within {
+    opacity: 1;
+  }
+
+  .agenda-day-create:hover,
+  .agenda-day-create:focus-within {
+    border-color: var(--agenda-blue);
+    background: var(--agenda-panel-hover);
+  }
+
+  .agenda-day-create-btn:focus-visible {
+    outline: 2px solid var(--agenda-blue);
+    outline-offset: 1px;
+  }
+
+  .agenda-day-events {
+    position: relative;
+    z-index: 1;
+    min-inline-size: 0;
     min-block-size: 0;
     flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    list-style: none;
+  }
+
+  .agenda-day-events > li {
+    min-inline-size: 0;
+  }
+
+  .agenda-day-event,
+  .agenda-day-more {
+    inline-size: 100%;
+    min-inline-size: 0;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 5px;
+    border: 0;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--agenda-blue-strong) 34%, var(--agenda-panel));
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.3;
+    text-align: start;
+    cursor: pointer;
+    /* Sin desbordamiento horizontal aunque el nombre sea largo. */
+    overflow: hidden;
+  }
+
+  .agenda-day-event.is-cancelada {
+    background: color-mix(in srgb, #b33a3a 30%, var(--agenda-panel));
+    text-decoration: line-through;
+  }
+
+  .agenda-day-event-time {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .agenda-day-event-text {
+    min-inline-size: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agenda-day-more {
+    justify-content: flex-start;
+    background: transparent;
+    color: var(--agenda-text-2);
+    font-weight: 650;
+  }
+
+  .agenda-day-event:focus-visible,
+  .agenda-day-more:focus-visible {
+    outline: 2px solid var(--agenda-blue);
+    outline-offset: 1px;
   }
 
   /* =======================================================
@@ -1130,6 +1280,435 @@
     }
   }
 
+  /* =======================================================
+     INSPECTOR · LIST OF THE SELECTED DAY
+  ======================================================= */
+
+  .agenda-inspector-list {
+    min-inline-size: 0;
+    min-block-size: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 12px 14px;
+    overflow: auto;
+    list-style: none;
+  }
+
+  .agenda-inspector-item {
+    inline-size: 100%;
+    min-inline-size: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 10px;
+    border: 1px solid var(--agenda-border-soft);
+    border-radius: 8px;
+    background: var(--agenda-panel-soft);
+    color: var(--agenda-text);
+    text-align: start;
+    cursor: pointer;
+  }
+
+  .agenda-inspector-item:hover {
+    border-color: var(--agenda-blue);
+    background: var(--agenda-panel-hover);
+  }
+
+  .agenda-inspector-item:focus-visible {
+    outline: 2px solid var(--agenda-blue);
+    outline-offset: 1px;
+  }
+
+  .agenda-inspector-item-time {
+    color: var(--agenda-text);
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .agenda-inspector-item-copy {
+    min-inline-size: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .agenda-inspector-item-copy strong {
+    overflow: hidden;
+    color: var(--agenda-text);
+    font-size: 12px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agenda-inspector-item-copy small {
+    overflow: hidden;
+    color: var(--agenda-text-3);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agenda-inspector-item.is-cancelada .agenda-inspector-item-time,
+  .agenda-inspector-item.is-cancelada .agenda-inspector-item-copy strong {
+    text-decoration: line-through;
+  }
+
+  .agenda-inspector-loading,
+  .agenda-inspector-error,
+  .agenda-inspector-truncated {
+    margin: 0 14px 10px;
+    padding: 9px 11px;
+    border: 1px solid var(--agenda-border-soft);
+    border-radius: 8px;
+    background: var(--agenda-panel-soft);
+    color: var(--agenda-text-2);
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .agenda-inspector-error {
+    border-color: #7a3030;
+    background: color-mix(in srgb, #b33a3a 18%, var(--agenda-panel));
+    color: #ffd9d9;
+  }
+
+  /* =======================================================
+     DIALOGS · CONTENT ONLY
+
+     La estructura, el backdrop, el pie, el cierre y el bloqueo de scroll son
+     del shell compartido (`components/detail-modal.css`). Aquí sólo vive el
+     contenido propio de Agenda; no se reestiliza ninguna clase estructural.
+  ======================================================= */
+
+  .agenda-status-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: var(--font-xs, 11px);
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .agenda-create-fixed-date {
+    min-block-size: var(--btn-height-lg, 40px);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 0 12px;
+    border: 1px solid var(--border-soft, #3a3a3a);
+    border-radius: var(--radius-md, 8px);
+    background: var(--surface-2, #262626);
+    color: var(--text-strong, #f2f2f2);
+    font-size: var(--font-sm, 13px);
+    font-weight: var(--weight-medium, 500);
+  }
+
+  .agenda-create-fixed-date-icon {
+    display: grid;
+    place-items: center;
+    color: var(--text-muted, #a1a1a1);
+  }
+
+  .agenda-create-fixed-date-icon svg {
+    inline-size: 16px;
+    block-size: 16px;
+  }
+
+  /* -------------------------------------------------------
+     SELECTOR DE USUARIO · presentación propia
+
+     El COMPORTAMIENTO (teclado, ARIA, IME) es de la autoridad compartida y
+     se engancha por marcadores `data-*`, no por clases. La PRESENTACIÓN es
+     de cada alta y vive en su hoja de ruta, como hace Clientes con sus
+     `cli-create-user-*`: así /agenda no depende de la hoja de Incidencias.
+  ------------------------------------------------------- */
+
+  .agenda-create-selected-user {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md, 14px);
+    margin-block-end: var(--space-sm, 8px);
+    padding: 10px 12px;
+    border: 1px solid var(--border-soft, #3a3a3a);
+    border-radius: var(--radius-md, 8px);
+    background: var(--surface-2, #262626);
+  }
+
+  .agenda-create-selected-user-main {
+    min-inline-size: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .agenda-create-user-avatar {
+    flex: 0 0 auto;
+    inline-size: 34px;
+    block-size: 34px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border-radius: 50%;
+    background: var(--surface-3, #2f2f2f);
+    color: var(--text-strong, #f2f2f2);
+    font-size: var(--font-sm, 13px);
+    font-weight: var(--weight-bold, 700);
+    line-height: 1;
+  }
+
+  .agenda-create-user-avatar img {
+    inline-size: 100%;
+    block-size: 100%;
+    object-fit: cover;
+  }
+
+  .agenda-create-user-copy {
+    min-inline-size: 0;
+    display: grid;
+    gap: 2px;
+    text-align: start;
+  }
+
+  .agenda-create-user-copy strong {
+    overflow: hidden;
+    color: var(--text-strong, #f2f2f2);
+    font-size: var(--font-sm, 13px);
+    font-weight: var(--weight-semibold, 600);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agenda-create-user-copy span {
+    overflow: hidden;
+    color: var(--text-muted, #a1a1a1);
+    font-size: var(--font-xs, 11px);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agenda-create-user-clear {
+    flex: 0 0 auto;
+    min-block-size: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--border-soft, #3a3a3a);
+    border-radius: var(--radius-sm, 6px);
+    background: transparent;
+    color: var(--text-muted, #a1a1a1);
+    font-size: var(--font-xs, 11px);
+    font-weight: var(--weight-semibold, 600);
+    cursor: pointer;
+  }
+
+  .agenda-create-user-clear:hover:not(:disabled) {
+    border-color: var(--border-strong, #4a4a4a);
+    color: var(--text-strong, #f2f2f2);
+  }
+
+  .agenda-create-user-results {
+    max-block-size: 264px;
+    display: grid;
+    gap: 4px;
+    margin-block-start: var(--space-sm, 8px);
+    padding: 4px;
+    overflow: auto;
+    border: 1px solid var(--border-soft, #3a3a3a);
+    border-radius: var(--radius-md, 8px);
+    background: var(--surface-2, #262626);
+  }
+
+  .agenda-create-user-result {
+    inline-size: 100%;
+    min-inline-size: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm, 6px);
+    background: transparent;
+    color: var(--text-strong, #f2f2f2);
+    text-align: start;
+    cursor: pointer;
+  }
+
+  .agenda-create-user-result:hover:not(:disabled),
+  .agenda-create-user-result[aria-selected="true"] {
+    border-color: var(--border-strong, #4a4a4a);
+    background: var(--surface-3, #2f2f2f);
+  }
+
+  .agenda-create-user-result:focus-visible {
+    outline: 2px solid var(--focus-ring, #479ef5);
+    outline-offset: 1px;
+  }
+
+  .agenda-create-user-state {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-block-start: var(--space-sm, 8px);
+    padding: 10px 12px;
+    border: 1px solid var(--border-soft, #3a3a3a);
+    border-radius: var(--radius-md, 8px);
+    background: var(--surface-2, #262626);
+    color: var(--text-muted, #a1a1a1);
+    font-size: var(--font-xs, 11px);
+  }
+
+  .agenda-create-user-state.is-error {
+    border-color: #7a3030;
+    color: #ff9a9a;
+  }
+
+  .agenda-create-actions-group {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm, 8px);
+  }
+
+  .agenda-create-cancel,
+  .agenda-detail-danger {
+    appearance: none;
+    min-block-size: var(--btn-height-lg, 40px);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 16px;
+    border: 1px solid var(--border-soft, #3a3a3a);
+    border-radius: var(--radius-md, 8px);
+    background: transparent;
+    color: var(--text-strong, #f2f2f2);
+    font-size: var(--font-sm, 13px);
+    font-weight: var(--weight-semibold, 600);
+    cursor: pointer;
+  }
+
+  .agenda-create-cancel:hover:not(:disabled),
+  .agenda-detail-danger:hover:not(:disabled) {
+    background: var(--surface-3, #2f2f2f);
+  }
+
+  .agenda-detail-danger {
+    border-color: #7a3030;
+    color: #ff9a9a;
+  }
+
+  .agenda-create-cancel:disabled,
+  .agenda-detail-danger:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+  }
+
+  .agenda-detail-grid {
+    display: grid;
+    gap: 0;
+    margin: 0;
+  }
+
+  .agenda-detail-row {
+    display: grid;
+    grid-template-columns: minmax(96px, auto) minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-md, 14px);
+    padding: 10px 0;
+    border-block-end: 1px solid var(--border-soft, #3a3a3a);
+  }
+
+  .agenda-detail-row:last-child {
+    border-block-end: 0;
+  }
+
+  .agenda-detail-row dt {
+    color: var(--text-muted, #a1a1a1);
+    font-size: var(--font-xs, 11px);
+    font-weight: var(--weight-semibold, 600);
+    letter-spacing: .02em;
+    text-transform: uppercase;
+  }
+
+  .agenda-detail-row dd {
+    min-inline-size: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    color: var(--text-strong, #f2f2f2);
+    font-size: var(--font-sm, 13px);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .agenda-detail-row dd.is-multiline {
+    display: block;
+  }
+
+  .agenda-detail-row dd small {
+    color: var(--text-muted, #a1a1a1);
+    font-size: var(--font-xs, 11px);
+  }
+
+  .agenda-detail-notice {
+    color: var(--text-strong, #f2f2f2);
+  }
+
+  .agenda-detail-hint {
+    display: block;
+    margin-block-start: 10px;
+    color: var(--text-muted, #a1a1a1);
+    font-size: var(--font-xs, 11px);
+    line-height: 1.5;
+  }
+
+  .agenda-detail-confirm {
+    display: grid;
+    gap: var(--space-sm, 8px);
+    margin-block-start: var(--space-md, 14px);
+    padding: var(--space-md, 14px);
+    border: 1px solid #7a3030;
+    border-radius: var(--radius-md, 8px);
+    background: color-mix(in srgb, #b33a3a 12%, transparent);
+  }
+
+  .agenda-detail-confirm strong {
+    color: var(--text-strong, #f2f2f2);
+    font-size: var(--font-sm, 13px);
+  }
+
+  .agenda-detail-confirm p {
+    margin: 0;
+    color: var(--text-muted, #a1a1a1);
+    font-size: var(--font-xs, 11px);
+    line-height: 1.5;
+  }
+
+  .agenda-detail-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-sm, 8px);
+  }
+
+  @media (max-width: 720px) {
+    .agenda-create-actions-group {
+      inline-size: 100%;
+      flex-direction: column-reverse;
+      align-items: stretch;
+    }
+
+    .agenda-create-cancel,
+    .agenda-detail-danger {
+      inline-size: 100%;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .agenda-view-root *,
     .agenda-view-root *::before,
@@ -1161,4 +1740,220 @@
       border-color: CanvasText;
     }
   }
+
+/* =========================================================
+   SELECTOR DE USUARIO DEL ALTA · presentación propia de /agenda
+
+   El COMPORTAMIENTO del combobox accesible es compartido y se ata por
+   atributos de datos (`data-create-user-picker-root`), nunca por clase. La
+   PRESENTACIÓN, en cambio, es de cada ruta: `/agenda` sólo carga esta hoja,
+   así que vestirse con nombres de `views/incidencias/create.css` dejaba todo
+   este bloque sin estilo --medido: once clases inertes--. Mismas medidas y
+   mismos tokens que el original; lo que cambia es de quién es la regla.
+========================================================= */
+
+.agenda-picker-selected-slot,
+.agenda-picker-search-slot,
+.agenda-picker-error-slot {
+  min-inline-size: 0;
 }
+
+.agenda-picker-selected {
+  min-inline-size: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: 10px 11px;
+  border: 1px solid var(--border-success);
+  border-radius: var(--radius-sm);
+  background: var(--success-bg);
+}
+
+.agenda-picker-selected-main {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agenda-picker-selected-copy,
+.agenda-picker-result-copy {
+  min-inline-size: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.agenda-picker-selected-copy strong,
+.agenda-picker-result-copy strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agenda-picker-selected-copy span,
+.agenda-picker-result-copy span {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* El navegador decora por su cuenta un input de búsqueda: se anula aquí,
+   porque la regla que lo hacía vivía en una hoja que /agenda no carga. */
+.agenda-picker-search-input::-webkit-search-decoration,
+.agenda-picker-search-input::-webkit-search-cancel-button,
+.agenda-picker-search-input::-webkit-search-results-button,
+.agenda-picker-search-input::-webkit-search-results-decoration {
+  -webkit-appearance: none;
+}
+
+.agenda-picker-search-state {
+  min-block-size: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1, var(--input-bg));
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+}
+
+.agenda-picker-search-state.is-error {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error-strong, var(--error));
+}
+
+.agenda-picker-results {
+  max-block-size: 250px;
+  display: grid;
+  gap: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1, var(--panel-bg));
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.agenda-picker-results::-webkit-scrollbar {
+  inline-size: var(--scrollbar-size, 9px);
+}
+
+.agenda-picker-results::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.agenda-picker-results::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.agenda-picker-result {
+  appearance: none;
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+
+.agenda-picker-result:hover:not(:disabled),
+.agenda-picker-result:focus-visible {
+  border-color: var(--border-default);
+  background: var(--solid-hover);
+  outline: none;
+}
+
+.agenda-picker-result:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.agenda-picker-result:disabled {
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+.agenda-picker-error-slot .inc-create-field-error {
+  margin: 0;
+  color: var(--error-strong, var(--error));
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.35;
+}
+
+/* =========================================================
+   TEXTOS AUXILIARES DEL FORMULARIO Y AVISO DE FECHA PASADA
+========================================================= */
+
+.agenda-form-hint {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  line-height: 1.4;
+}
+
+.agenda-form-required {
+  margin-inline-start: 2px;
+  color: var(--error-strong, var(--error));
+  font-weight: var(--weight-bold);
+}
+
+.agenda-create-actions,
+.agenda-detail-note {
+  min-inline-size: 0;
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.agenda-alert-icon {
+  inline-size: 18px;
+  block-size: 18px;
+  border-radius: var(--radius-pill);
+  background: var(--warning-strong, var(--text-muted));
+  opacity: .28;
+}
+
+.agenda-alert-copy {
+  min-inline-size: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.agenda-alert-copy p {
+  margin: 0;
+  font-size: var(--font-xs);
+  line-height: 1.4;
+}
+
+/* El bloque que agrupa el destinatario: hereda la caja de `.inc-create-block`
+   (compartida) y sólo declara lo suyo. Antes se llamaba `inc-create-block--target`
+   y no existía en ninguna hoja, así que no hacía absolutamente nada. */
+.agenda-picker-block {
+  min-inline-size: 0;
+  display: grid;
+  gap: var(--space-xs);
+}
+}  /* @layer views */

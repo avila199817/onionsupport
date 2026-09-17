@@ -53,7 +53,6 @@ const DATE_CONSUMERS = Object.freeze({
 });
 // Upper bound of es-ES DateTimeFormat constructions outside the authority: presets one module shows.
 const LOCAL_DATE_FORMATTERS = Object.freeze({
-  "src/views/agenda/index.js": 3,
   "src/views/clientes/clientes.template.js": 1,
   "src/views/correo/correo.template.js": 3,
   "src/views/incidencias/incidencias.template.js": 2,

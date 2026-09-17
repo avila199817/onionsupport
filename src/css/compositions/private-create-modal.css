@@ -517,6 +517,15 @@
   background: var(--error-bg);
 }
 
+/* El aviso vivía sólo en la hoja de Agenda y FUERA de capa, así que ganaba
+   por accidente; y Usuarios, que ya emitía `is-warning`, lo perdía contra
+   esta base porque `compositions` va después de `views`. El tono es del
+   componente, así que su regla vive aquí, con las otras dos. */
+:is(.inc-create-alert, .cli-create-alert, .fac-create-alert, .usr-create-alert).is-warning {
+  border-color: var(--border-warning);
+  background: var(--warning-bg);
+}
+
 /* Facturas emits compact error/success text without an icon wrapper. */
 .fac-create-alert {
   grid-template-columns: minmax(0, 1fr);

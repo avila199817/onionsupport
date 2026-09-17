@@ -25,7 +25,15 @@ const BASELINE = Object.freeze({
   // releer un documento sólo por refrescar una imagen.
   "src/features/avatar-system": 49,
   "src/ui/chrome": 4,
-  "src/views/agenda": 1,
+  // 1 -> 52: Agenda deja de ser un calendario sin datos y pasa a ser un
+  // dominio con su frontera HTTP (agenda.api.js), su autoridad de fecha civil
+  // (agenda.dates.js) y sus dos plantillas de diálogo sobre el shell
+  // compartido. Cada exportación tiene consumidor: el controlador, las
+  // plantillas entre sí, o los dos contratos de Agenda
+  // (tools/agenda-citas-contract.mjs y tools/agenda-citas-browser-contract.mjs),
+  // que fijan fechas civiles, proyección por rol, mensajes de error y el
+  // recorrido real en navegador.
+  "src/views/agenda": 52,
   "src/ui/sidebar": 7,
   "src/ui/toast": 18,
   "src/ui/topbar": 10,

@@ -59,7 +59,26 @@ const JS_ROOT = resolve(DIST, "assets/js");
 // suman al techo: se suman DENTRO de él. Con Agenda (#690) fusionada, la
 // unión medida quedará en torno a 218742 y el margen en unas decenas de
 // bytes: el siguiente que la roce vuelve a medir y a subirla a mano.
-const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218750 });
+// R08 (2026-09-17): seis vistas dejan de decidir por su cuenta el tono de un
+// estado --«Cancelada» llegó a pintarse verde en Incidencias, roja en Agenda y
+// en Home, y neutra en Facturas-- y se lo preguntan a src/core/status-tone.js.
+// Al compartirlo seis vistas, el bundler le da su propio chunk y la tabla de
+// precarga que vive en `routes` --que sí está en el cierre-- nombra uno más.
+//   base      95ce9d67f86079ff48d63f757952c750f1ac6831 -> 218747
+//   candidato con la autoridad                         -> 218807
+//   crecimiento +60 raw bytes, TODOS dentro de `routes` (el resto del cierre
+//   no se mueve un byte; medido fichero a fichero). El chunk nuevo pesa 1073
+//   bytes y NO entra en el cierre: no se precarga para la Home pública, que no
+//   pinta estados.
+// Se midió la alternativa: meter la autoridad en un módulo que ya está en el
+// cierre (presentation-text) evita el nombre en `routes` pero mete los 1073
+// bytes de la tabla DENTRO del arranque. Sale 18 veces peor, así que el chunk
+// aparte es la forma barata. En el resto de la app las vistas ADELGAZAN al
+// perder sus lecturas privadas (facturas -315, home -135).
+// El techo pasa de 218750 a 218863 y deja 56 bytes de margen, el mismo que
+// dejaron R05 y R06. El siguiente que lo roce vuelve a medir y a subirlo a
+// mano.
+const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218863 });
 
 function staticImports(code, identifier) {
   // PARSE ONLY. Never link, evaluate or supply a dynamic-import callback.

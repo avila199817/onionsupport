@@ -1706,18 +1706,41 @@
    TOAST
 ========================================================= */
 
-.toast {
-  --toast-accent: var(--info);
-  --toast-progress-height: 3px;
-  --toast-progress-bottom: 8px;
-
+/*
+  El contenedor es quien se fija en pantalla y apila. Antes cada `.toast`
+  llevaba `position: fixed` con el MISMO inset, de modo que dos avisos
+  simultáneos se pintaban uno encima de otro; y `.toast-container`, que el
+  runtime crea (src/ui/toast/index.js:83), no tenía ninguna regla.
+*/
+.toast-container {
   position: fixed;
   inset-block-start: var(--ui-toast-top, 16px);
   inset-inline-end: var(--ui-toast-right, 16px);
   z-index: var(--z-toast);
 
-  inline-size: var(--ui-toast-width);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+
+  gap: 10px;
+
   max-inline-size: calc(100vw - 24px);
+
+  /* Un contenedor vacío no debe interceptar clics de la vista que tapa. */
+  pointer-events: none;
+}
+
+.toast-container > * {
+  pointer-events: auto;
+}
+
+.toast {
+  --toast-accent: var(--info);
+  --toast-progress-height: 3px;
+  --toast-progress-bottom: 8px;
+
+  inline-size: var(--ui-toast-width);
+  max-inline-size: 100%;
 
   display: flex;
   align-items: flex-start;
@@ -1744,19 +1767,48 @@
   backdrop-filter: var(--blur-md);
   -webkit-backdrop-filter: var(--blur-md);
 
-  opacity: 0;
-  visibility: hidden;
-
-  pointer-events: none;
-
-  transform: translateY(-10px) scale(.985);
+  /*
+    El aviso está en el DOM sólo mientras debe verse: el runtime lo añade al
+    mostrarlo y lo retira al descartarlo. Su presencia ES su visibilidad, así
+    que no se condiciona a ninguna clase. Antes la base era
+    `opacity: 0; visibility: hidden` y sólo se revelaba con `.show`,
+    `.is-visible` o `[data-state="open"]`; el runtime no pone ninguna de las
+    tres, de modo que los 40 avisos de la aplicación eran invisibles.
+  */
+  animation: toast-enter var(--duration-normal) var(--ease-standard) both;
 
   transition:
-    opacity var(--duration-normal) var(--ease-standard),
-    visibility var(--duration-normal) var(--ease-standard),
-    transform var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
     box-shadow var(--duration-normal) var(--ease-standard);
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation-duration: 1ms;
+  }
+}
+
+.toast-body {
+  min-inline-size: 0;
+
+  display: flex;
+  align-items: flex-start;
+
+  flex: 1 1 auto;
+
+  gap: var(--ui-toast-gap);
 }
 
 .toast::before {
@@ -1801,22 +1853,6 @@
   z-index: 1;
 }
 
-.toast.show,
-.toast.is-visible,
-.toast[data-state="open"] {
-  opacity: 1;
-  visibility: visible;
-
-  pointer-events: auto;
-
-  transform: translateY(0) scale(1);
-}
-
-.toast:hover {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
 .toast.success {
   --toast-accent: var(--success);
   border-inline-start: 4px solid var(--success);
@@ -1855,22 +1891,6 @@
   color: var(--text-dim);
 
   font-size: 16px;
-}
-
-.toast.success .toast-icon {
-  color: var(--success);
-}
-
-.toast.warning .toast-icon {
-  color: var(--warning);
-}
-
-.toast.error .toast-icon {
-  color: var(--error);
-}
-
-.toast.info .toast-icon {
-  color: var(--info);
 }
 
 .toast.loading .toast-icon {

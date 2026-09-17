@@ -34,7 +34,7 @@ const fixedLayer = (file, reason) => ({ kind: "layer", file, reason });
 const FIXED_INVENTORY = new Map([
   // dialog shells pending migration
   // fixed layers that are not dialogs
-  [".toast", fixedLayer("src/css/components/ui.css", "toast stack")],
+  [".toast-container", fixedLayer("src/css/components/ui.css", "toast stack; each toast is in flow inside it")],
   [".correo-toast-stack", fixedLayer("src/css/views/correo/index.css", "toast stack of the mail workspace")],
   [".login-page-glow, .login-page-grid", fixedLayer("src/css/auth/login.css", "decorative login background")],
   [".home-view-root .home-welcome-pilot", fixedLayer("src/css/compositions/home-onboarding-pilot.css", "non-blocking welcome helper")],

@@ -20,6 +20,9 @@ const AUTHORITY = "src/core/format.js";
 const ENTRY_AND_LEAF = Object.freeze(["src/main.js", "src/analytics/google-tag.js"]);
 // Measured before the migration: every consumer with the currency policies it names.
 const CONSUMERS = Object.freeze({
+  /* Agenda consume `dateFormatter` con sus propios presets de día civil
+     (`views/agenda/agenda.dates.js`); no formatea importes. */
+  "src/views/agenda/agenda.dates.js": [],
   "src/features/facturas-paid-confirm/index.js": ["standard"],
   "src/features/incidencias-detail-state/index.js": [],
   "src/features/incidencias-technician-profile/index.js": [],
@@ -53,7 +56,6 @@ const DATE_CONSUMERS = Object.freeze({
 });
 // Upper bound of es-ES DateTimeFormat constructions outside the authority: presets one module shows.
 const LOCAL_DATE_FORMATTERS = Object.freeze({
-  "src/views/agenda/index.js": 3,
   "src/views/clientes/clientes.template.js": 1,
   "src/views/correo/correo.template.js": 3,
   "src/views/incidencias/incidencias.template.js": 2,

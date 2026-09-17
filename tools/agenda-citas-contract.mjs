@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 const {
   AGENDA_DATES_VERSION,
   AGENDA_TIME_ZONE,
-  AGENDA_DATE_PRESETS,
+  AGENDA_DAY_PRESETS,
   dateKey,
   dateFromKey,
   isDateKey,
@@ -141,8 +141,8 @@ pass("1 · versiones y zona canónica declaradas");
   assert.equal(longDateLabel(dateFromKey("2026-09-17")), expected);
 
   /* Los presets son los que declara este módulo, no una copia suelta. */
-  assert.deepEqual(Object.keys(AGENDA_DATE_PRESETS), ["longWeekday", "monthYear", "month"]);
-  assert.equal(AGENDA_DATE_PRESETS.longWeekday.weekday, "long");
+  assert.deepEqual(Object.keys(AGENDA_DAY_PRESETS), ["longWeekday", "monthYear", "month"]);
+  assert.equal(AGENDA_DAY_PRESETS.longWeekday.weekday, "long");
 
   /* La misma fecha civil produce la misma etiqueta bajo cualquier zona del
      proceso: la fecha nunca pasa por un instante. */

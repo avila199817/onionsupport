@@ -32,7 +32,7 @@ export const AGENDA_TIME_ZONE = "Europe/Madrid";
   que es lo que hace que el calendario, el modal, el detalle y el correo
   representen el mismo momento.
 */
-export const AGENDA_DATE_PRESETS = Object.freeze({
+export const AGENDA_DAY_PRESETS = Object.freeze({
   /* "jueves, 17 de septiembre de 2026" */
   longWeekday: Object.freeze({
     weekday: "long",
@@ -172,7 +172,7 @@ function format(date, preset) {
 
 /* "Jueves, 17 de septiembre de 2026" */
 export function longDateLabel(date) {
-  const text = format(date, AGENDA_DATE_PRESETS.longWeekday);
+  const text = format(date, AGENDA_DAY_PRESETS.longWeekday);
   return text ? capitalize(text) : date instanceof Date ? date.toLocaleDateString() : "";
 }
 
@@ -183,12 +183,12 @@ export function longDateLabelFromKey(value = "") {
 }
 
 export function monthLabel(date) {
-  const text = format(date, AGENDA_DATE_PRESETS.monthYear);
+  const text = format(date, AGENDA_DAY_PRESETS.monthYear);
   return text ? capitalize(text) : `${date.getMonth() + 1}/${date.getFullYear()}`;
 }
 
 export function miniMonthLabel(date) {
-  const text = format(date, AGENDA_DATE_PRESETS.month);
+  const text = format(date, AGENDA_DAY_PRESETS.month);
   return text ? capitalize(text) : String(date.getMonth() + 1);
 }
 
@@ -220,7 +220,7 @@ export function browserZoneDiffers(zona = AGENDA_TIME_ZONE) {
 export default {
   AGENDA_DATES_VERSION,
   AGENDA_TIME_ZONE,
-  AGENDA_DATE_PRESETS,
+  AGENDA_DAY_PRESETS,
   dateKey,
   dateFromKey,
   isDateKey,

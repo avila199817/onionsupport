@@ -5,8 +5,8 @@ debilitar la validación confiable. Este documento es el modelo de amenaza y el
 procedimiento; el código vive en `tools/toolchain-transition.mjs` y su contrato
 en `tools/toolchain-transition-contract.mjs`.
 
-Estado: **capacidad fusionada, ninguna transición autorizada.** Sin declaración
-en `main`, el comportamiento es exactamente el que había antes de existir esto.
+Estado: **Vite 8.3.0 adoptado y transición cerrada.** No hay declaración activa
+en `main`; el modo estricto vuelve a ser el comportamiento normal.
 
 ---
 

@@ -184,6 +184,16 @@ function isCacheFresh(options = {}) {
    * que hace cualquier montaje. No hay sondeo ni reintento infinito. */
   if (cacheState.dashboard?.partial === true) return false;
 
+  /* NI UNA CUENTA SIN CONFIRMAR CUENTA COMO PANEL COMPLETO.
+   *
+   * Un recuento que el backend declara desconocido no genera aviso, así que el
+   * panel no es `partial` y se guardaba como fresco: volver a Home no volvía a
+   * preguntar y la tarjeta se quedaba sin recuperación. Misma regla y mismo
+   * coste que arriba: la siguiente entrada pregunta UNA vez. */
+  if (Object.values(safeObject(cacheState.dashboard?.unknownCounts)).some(Boolean)) {
+    return false;
+  }
+
   const ttlMs = parseAmount(
     options.ttlMs ?? options.cacheTtlMs ?? null,
     HOME_CACHE_TTL_MS,
@@ -256,6 +266,11 @@ function unwrapList(value = null, depth = 0) {
   return [];
 }
 
+/* El dominio contestó --no hay error-- pero su recuento no está confirmado. */
+function cuentaSinConfirmar(result = null) {
+  return Boolean(result) && !result.error && result.totalKnown !== true;
+}
+
 function collectionFromResponse(response = null) {
   const object = safeObject(response);
   const totalKnown = firstNonEmpty(
@@ -264,11 +279,20 @@ function collectionFromResponse(response = null) {
   const lowerBound = [object, object.meta, object.pagination]
     .some((value) => value?.totalIsLowerBound === true);
 
+  const exacto = totalKnown && !lowerBound;
+
   return {
     items: unwrapList(response),
     // Domain pagination metadata is authoritative. A page's count/length is
     // never an exact total, including an empty page after an unavailable count.
-    total: totalKnown && !lowerBound ? exactCount(object.total) : null,
+    total: exacto ? exactCount(object.total) : null,
+    /* UN TOTAL SIN CONFIRMAR NO ES UN DOMINIO CAÍDO.
+     *
+     * La lista puede llegar entera y el recuento no: el backend lo declara con
+     * `totalKnown`. Ese caso no produce aviso, así que el panel no salía
+     * `partial` y su tarjeta se quedaba en «No disponible» para siempre. Se
+     * distingue aquí, donde ya se sabe. */
+    totalKnown: exacto,
     stale: object.stale === true,
     error: object.error || null,
   };
@@ -294,6 +318,22 @@ function currencyFromStats(stats = {}, invoices = []) {
 
 function forceRequested(options = {}) {
   return options.force === true || options.forceRefresh === true;
+}
+
+/* ¿HAY QUE VOLVER A PREGUNTAR POR UNA CUENTA SIN CONFIRMAR?
+ *
+ * Sí la primera vez que se vuelve con ese panel guardado, y sólo esa. Un total
+ * puede quedar sin confirmar de forma ESTABLE --una cota inferior legítima
+ * cuando hay más filas de las que caben en la página-- y entonces forzar la
+ * relectura en cada montaje sería un coste permanente por un dato que no va a
+ * cambiar. Una relectura por panel: se intenta una vez, y si sigue sin
+ * confirmarse, la recuperación queda en el «Reintentar» del aviso. */
+function debeReconsultarCuentas() {
+  const panel = cacheState.dashboard;
+  if (!Object.values(safeObject(panel?.unknownCounts)).some(Boolean)) return false;
+  if (cacheState.reconsultadoEn === panel?.loadedAt) return false;
+  cacheState.reconsultadoEn = panel?.loadedAt ?? null;
+  return true;
 }
 
 function defaultDashboardScope(options = {}) {
@@ -392,6 +432,7 @@ async function loadAdminCount(loader, options = {}) {
   return {
     items: [],
     total: response.totalKnown === true ? exactCount(response.total) : null,
+    totalKnown: response.totalKnown === true,
     stale: response.stale === true,
     error: response.error || null,
   };
@@ -410,6 +451,12 @@ async function loadDomain(domain = "home", loader = null) {
       total: Object.hasOwn(result, "total")
         ? exactCount(result.total)
         : collection.total,
+      /* Si se recompone el total hay que recomponer también si está
+         CONFIRMADO: sin esto, un recuento desconocido llegaba al panel
+         indistinguible de uno confirmado y se perdía el estado. */
+      totalKnown: Object.hasOwn(result, "totalKnown")
+        ? result.totalKnown === true
+        : collection.totalKnown === true,
       stats: safeObject(result.stats),
       statsAvailable: result.statsAvailable === true,
       stale: result.stale === true,
@@ -423,6 +470,7 @@ async function loadDomain(domain = "home", loader = null) {
       domain,
       items: [],
       total: null,
+      totalKnown: false,
       stats: {},
       statsAvailable: false,
       stale: false,
@@ -618,6 +666,32 @@ function buildDashboard({
     activity: buildActivity({ incidencias, facturas }),
 
     warnings: domainWarnings,
+    /* CUENTAS SIN CONFIRMAR: la lista llegó, el recuento no.
+     *
+     * Ni fallo --el dominio contestó-- ni dato --nadie ha contado--. Se publica
+     * aparte para que la tarjeta lo diga y para que la caché no dé el panel por
+     * completo. Un ámbito que no aplica (no admin) no cuenta como sin confirmar. */
+    /* ACOTADO A LO QUE ESTÁ MEDIDO.
+     *
+     * El camino corregido es el del listado de incidencias, que es donde el
+     * backend declara de verdad si contó: recuento fallido -> `totalKnown:
+     * false` -> lista usable con total nulo.
+     *
+     * Los otros tres NO entran, y no por descuido: hoy `/api/clientes/stats` y
+     * `/api/users/stats` no publican esa marca, el normalizador del cliente la
+     * rellena en `false` por su cuenta, y sus tarjetas llevan desde siempre en
+     * «No disponible» aunque su agregado sea exacto. Meterlos aquí marcaría el
+     * panel incompleto en TODA sesión de administración y forzaría una
+     * relectura en cada montaje --medido: rompe el recorrido conjunto--.
+     *
+     * Ese es un defecto propio, de la misma familia, y queda REPORTADO, no
+     * corregido de tapadillo dentro de esta unidad. */
+    unknownCounts: {
+      incidencias: cuentaSinConfirmar(incidenciasResult),
+      facturas: false,
+      clientes: false,
+      usuarios: false,
+    },
     partial: domainWarnings.length > 0,
     stale,
     cached: false,
@@ -635,6 +709,20 @@ function buildDashboard({
 }
 
 async function fetchDashboard(options = {}, context = currentContext()) {
+  /* RECONSULTAR DE VERDAD, UNA VEZ.
+   *
+   * No basta con que la caché de Home deje de dar el panel por fresco: cada
+   * dominio tiene además su propia caché por tiempo, así que la vuelta se
+   * servía de ella y NO llegaba a la red --medido: una sola llamada a la lista
+   * en toda la sesión--. Si el panel anterior dejó una cuenta sin confirmar,
+   * esta lectura se pide forzada.
+   *
+   * Es UNA relectura por montaje, la misma que hace cualquier entrada: ni
+   * sondeo, ni reintento automático, ni tormenta. */
+  const lectura = debeReconsultarCuentas()
+    ? { ...options, force: true }
+    : options;
+
   const emptyDomain = (domain) => ({
     domain,
     items: [],
@@ -648,13 +736,13 @@ async function fetchDashboard(options = {}, context = currentContext()) {
 
   const [incidenciasResult, facturasResult, clientesResult, usuariosResult] =
     await Promise.all([
-      loadDomain("incidencias", () => loadIncidenciasForHome(options)),
-      loadDomain("facturas", () => loadFacturasForHome(options)),
+      loadDomain("incidencias", () => loadIncidenciasForHome(lectura)),
+      loadDomain("facturas", () => loadFacturasForHome(lectura)),
       context.admin
-        ? loadDomain("clientes", () => loadAdminCount(fetchClientesStatsRequest, options))
+        ? loadDomain("clientes", () => loadAdminCount(fetchClientesStatsRequest, lectura))
         : Promise.resolve(emptyDomain("clientes")),
       context.admin
-        ? loadDomain("usuarios", () => loadAdminCount(fetchUsuariosStatsRequest, options))
+        ? loadDomain("usuarios", () => loadAdminCount(fetchUsuariosStatsRequest, lectura))
         : Promise.resolve(emptyDomain("usuarios")),
     ]);
 

@@ -25,6 +25,7 @@
      N12 · reabrir un perfil no cuenta dos veces                    [guarda]
      N13 · sin autorización no se dice «sin valoraciones»           [guarda]
      N14 · del resumen sólo llega a pantalla el agregado            [guarda]
+     N15 · un recuento sin confirmar no se queda sin recuperación   [defecto]
 
    N3 es una GUARDA, no la reproducción de un defecto observado: no encontré
    ningún camino en el que la aplicación reutilice hoy una lectura abortada.
@@ -42,12 +43,17 @@
    real y cada una haciendo caer SU paso:
      N10 · preguntar por la identidad de quien mira en vez de la del técnico
            (`technicianRatingIdentity` devolviendo el usuario conectado)
-           → el paso 21 no llega a «value»: el resumen pedido es de otro.
+           → el paso 22 no llega a «value»: el resumen pedido es de otro.
      N11 · pintar la escala con un cero cuando no hay valoraciones
-           → el paso 22 falla: «Sin dato el marcador es una raya, no 0,0 / 5».
+           → el paso 23 falla: «Sin dato el marcador es una raya, no 0,0 / 5».
      N13 · devolver «empty» ante un 401/403 en vez de «restricted»
-           → el paso 25 no llega a «restricted»: la falta de permiso se estaría
+           → el paso 26 no llega a «restricted»: la falta de permiso se estaría
              contando como ausencia de opiniones.
+     N15 · el runtime de `main`, sin la distinción entre «no confirmado» y «no
+           disponible» (mismas herramientas, `src` de main, build real)
+           → el paso 19 cae con estado «unavailable» y la tarjeta diciendo
+             «Incidencias — No disponible», que es donde se quedaba toda la
+             sesión: ninguna salida ni ningún regreso la recuperaban.
 
    Datos sintéticos. Ninguna persona real, ninguna escritura de dominio.
 ========================================================= */
@@ -556,7 +562,65 @@ async function recorrer(entorno) {
       { arg: USUARIO, timeout: 20000, message: "Al volver a Usuarios no reapareció el directorio" });
     paso(18, "Usuarios: búsqueda, dos filtros por identidad, apertura correcta, cierre por teclado y vuelta sin recargar");
 
-    /* 19-20 · Una ficha abierta desde SU ruta y desde una entrada de Home, en
+    /* =================================================================
+       19 · UN RECUENTO SIN CONFIRMAR NO SE QUEDA ASÍ PARA SIEMPRE
+       =================================================================
+       Home reutiliza la lista que ya trajo /incidencias, y esa lista se pidió
+       en modo cursor y SIN total: el backend no cuenta cuando no se lo piden,
+       así que el recuento llega sin confirmar. Medido sobre el build de `main`,
+       la tarjeta se quedaba en «No disponible» durante TODA la sesión: ninguna
+       salida ni ningún regreso la recuperaban, porque un panel sin aviso se
+       guardaba como completo.
+
+       Aquí se comprueba el recorrido entero, sin recargar: el estado honesto
+       primero, la recuperación al volver después, y ni una lectura de más
+       cuando ya no hay nada que confirmar. (N15) */
+    const tarjetaIncidencias = () => page.evaluate(() => {
+      const nodo = document.querySelector("[data-home-stat='incidencias']");
+      if (!nodo) return null;
+      return {
+        estado: nodo.getAttribute("data-home-stat-state"),
+        texto: (nodo.textContent || "").replace(/\s+/gu, " ").trim(),
+      };
+    });
+    const listados = () => sesion.calls.filter(({ method, path }) => method === "GET" && path === "/api/tickets").length;
+
+    await clickInPage(page, `a[href='${RUTA}']`);
+    await untilTrue(page, () => Boolean(document.querySelector("[data-home-stat='incidencias']")),
+      { timeout: 20000, message: "Home no pintó la tarjeta de Incidencias" });
+    const sinConfirmar = await tarjetaIncidencias();
+    assert.equal(sinConfirmar.estado, "unknown",
+      `Un total que el backend no confirma no es un dato: la tarjeta dice «${sinConfirmar.texto}»`);
+    assert.match(sinConfirmar.texto, /Sin confirmar/u, `La tarjeta no declara su estado: «${sinConfirmar.texto}»`);
+    assert.equal(/No disponible/u.test(sinConfirmar.texto), false,
+      "Un recuento sin confirmar no es un dominio caído (N15)");
+    assert.equal(/\d/u.test(sinConfirmar.texto.replace(/Sin confirmar/gu, "")), false,
+      `Sin recuento confirmado no se pinta ningún número: «${sinConfirmar.texto}»`);
+
+    /* Salir y volver: el ciclo de vida normal de la SPA, sin recargar. */
+    const antesDeVolver = listados();
+    await clickInPage(page, `a[href='${RUTA}/incidencias']`);
+    await page.waitForSelector(FILA, { timeout: 20000 });
+    await clickInPage(page, `a[href='${RUTA}']`);
+    await untilTrue(page, () => document.querySelector("[data-home-stat='incidencias']")?.getAttribute("data-home-stat-state") === "value",
+      { timeout: 20000, message: "El recuento sin confirmar no se recuperó al volver a Home" });
+    const recuperada = await tarjetaIncidencias();
+    assert.match(recuperada.texto, /\b8\b/u, `El recuento recuperado no es el real: «${recuperada.texto}»`);
+    const releídas = listados() - antesDeVolver;
+    assert.equal(releídas, 1, `La recuperación pidió ${releídas} listados: ni cero ni tormenta, exactamente uno`);
+
+    /* Y una vez confirmado, no se vuelve a preguntar: ni sondeo ni bucle. */
+    const trasRecuperar = listados();
+    await clickInPage(page, `a[href='${RUTA}/incidencias']`);
+    await page.waitForSelector(FILA, { timeout: 20000 });
+    await clickInPage(page, `a[href='${RUTA}']`);
+    await untilTrue(page, () => document.querySelector("[data-home-stat='incidencias']")?.getAttribute("data-home-stat-state") === "value",
+      { timeout: 20000, message: "La tarjeta recuperada dejó de decir su número" });
+    assert.equal(listados() - trasRecuperar, 0,
+      "Con el recuento ya confirmado, volver a Home no vuelve a leer la lista (N15)");
+    paso(19, `contador de Incidencias: «Sin confirmar» → salir y volver → 8, con 1 relectura y ninguna más (N15)`);
+
+    /* 20-21 · Una ficha abierta desde SU ruta y desde una entrada de Home, en
        la misma sesión caliente, tiene que verse exactamente igual. No se
        comprueba que exista un <link>: se compara la huella del panel. (N9) */
     const huella = (sel) => page.evaluate((selector) => {
@@ -591,8 +655,8 @@ async function recorrer(entorno) {
     };
 
     for (const [numero, tipo, ruta, lista, panel, fuente] of [
-      [19, "incidencia", "/incidencias", FILA, DETALLE, "home.activity"],
-      [20, "factura", "/facturas", "[data-factura-id]", "[data-facturas-detail-modal='true']", "home.invoices"],
+      [20, "incidencia", "/incidencias", FILA, DETALLE, "home.activity"],
+      [21, "factura", "/facturas", "[data-factura-id]", "[data-facturas-detail-modal='true']", "home.invoices"],
     ]) {
       await clickInPage(page, `a[href='${RUTA}']`);
       await untilTrue(page, ({ f, t }) => Boolean(document.querySelector(`[data-home-entity-source='${f}'][data-entity-type='${t}']`)),
@@ -623,7 +687,7 @@ async function recorrer(entorno) {
     }
 
     /* =================================================================
-       21-25 · VALORACIONES DEL TÉCNICO, EN LA MISMA SESIÓN CALIENTE
+       22-26 · VALORACIONES DEL TÉCNICO, EN LA MISMA SESIÓN CALIENTE
 
        Todo lo que sigue ocurre sin recargar y con el mundo ya recorrido: dos
        clientes, dos técnicos y un administrador conectado que NO es ninguno de
@@ -691,9 +755,9 @@ async function recorrer(entorno) {
     const preguntas = resumen.peticiones.slice(antes);
     assert.deepEqual(preguntas, ["u-tecnico-1"], `Se preguntó por ${JSON.stringify(preguntas)}`);
     await cerrarPerfilYDetalle();
-    paso(21, `INC-SINT-1 → u-tecnico-1: 2 valoraciones, media 4,0 y una sola pregunta, por su identidad (N10)`);
+    paso(22, `INC-SINT-1 → u-tecnico-1: 2 valoraciones, media 4,0 y una sola pregunta, por su identidad (N10)`);
 
-    /* 22 · El otro técnico no hereda nada: sin valoraciones NO es un cero. */
+    /* 23 · El otro técnico no hereda nada: sin valoraciones NO es un cero. */
     await abrirPerfilDe("INC-SINT-2");
     const damian = await resuelto("empty");
     assert.ok(/Damián Técnico Sintético/u.test(damian.nombre), `El perfil abierto es el de INC-SINT-2: «${damian.nombre}»`);
@@ -704,17 +768,17 @@ async function recorrer(entorno) {
     assert.equal(/4,0|0,0/u.test(damian.cabecera), false, `La cabecera de Damián arrastra una nota: «${damian.cabecera}»`);
     assert.equal(/Beatriz/u.test(damian.nombre), false, "El contenido de un técnico no aparece en el perfil de otro");
     await cerrarPerfilYDetalle();
-    paso(22, `INC-SINT-2 → u-tecnico-2: «Sin valoraciones», ninguna estrella y ningún 0,0 (N11)`);
+    paso(23, `INC-SINT-2 → u-tecnico-2: «Sin valoraciones», ninguna estrella y ningún 0,0 (N11)`);
 
-    /* 23 · Reabrir no acumula: la cuenta la lleva el servidor, no la pantalla. */
+    /* 24 · Reabrir no acumula: la cuenta la lleva el servidor, no la pantalla. */
     await abrirPerfilDe("INC-SINT-1");
     const otraVez = await resuelto("value");
     assert.equal(otraVez.cuantas, "2", `Reabrir el perfil dejó el recuento en ${otraVez.cuantas} (N12)`);
     assert.equal(otraVez.media, "4", `Reabrir el perfil movió la media a ${otraVez.media} (N12)`);
     await cerrarPerfilYDetalle();
-    paso(23, "reabrir el mismo perfil no cuenta dos veces: sigue en 2 y 4,0 (N12)");
+    paso(24, "reabrir el mismo perfil no cuenta dos veces: sigue en 2 y 4,0 (N12)");
 
-    /* 24 · Fallo del resumen: se dice, se reintenta y se recupera sin recargar. */
+    /* 25 · Fallo del resumen: se dice, se reintenta y se recupera sin recargar. */
     resumen.rota = true;
     await abrirPerfilDe("INC-SINT-1");
     const caida = await resuelto("error");
@@ -730,9 +794,9 @@ async function recorrer(entorno) {
     assert.equal(recuperado.marcador, "4,0 / 5", `El reintento recupera la nota («${recuperado.marcador}»)`);
     assert.equal(sesion.loads.length, 1, "El reintento no recargó el documento");
     await cerrarPerfilYDetalle();
-    paso(24, "resumen caído: estado honesto con reintento que recupera 2 y 4,0 sin recargar");
+    paso(25, "resumen caído: estado honesto con reintento que recupera 2 y 4,0 sin recargar");
 
-    /* 25 · Sin autorización NO se dice «sin valoraciones». (N13) */
+    /* 26 · Sin autorización NO se dice «sin valoraciones». (N13) */
     resumen.prohibida = true;
     await abrirPerfilDe("INC-SINT-1");
     const prohibido = await resuelto("restricted");
@@ -743,7 +807,7 @@ async function recorrer(entorno) {
     assert.equal(/Sin valoraciones/u.test(prohibido.titular), false, "Falta de permiso no es ausencia de valoraciones (N13)");
     resumen.prohibida = false;
     await cerrarPerfilYDetalle();
-    paso(25, "sin autorización: «No disponible en tu sesión», que no es «Sin valoraciones» (N13)");
+    paso(26, "sin autorización: «No disponible en tu sesión», que no es «Sin valoraciones» (N13)");
 
     /* Invariantes de toda la sesión. */
     assert.equal(sesion.loads.length, 1, `La sesión cargó el documento ${sesion.loads.length} veces`);
@@ -787,7 +851,7 @@ for (const entorno of ENTORNOS) {
   }
 }
 
-console.log(`SPA session contract: PASS · 20 pasos · ${ENTORNOS.length} entornos · 2 entradas en frío por entorno · 9 negativas`);
+console.log(`SPA session contract: PASS · ${informe[0].pasos.length} pasos · ${ENTORNOS.length} entornos · 2 entradas en frío por entorno · 10 negativas`);
 for (const { entorno, pasos, llamadas } of informe) {
   console.log(`  [${entorno}] ${llamadas} llamadas a la API · 1 documento · 0 fuera de origen · 0 errores · 0 escrituras`);
   for (const linea of pasos) console.log(`    ${linea}`);

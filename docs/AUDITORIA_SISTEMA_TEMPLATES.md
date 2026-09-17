@@ -1,189 +1,145 @@
-# Auditoría del sistema de templates — hallazgos verificados y pendientes
+# Sistema de templates — arquitectura final
 
-Fecha: 2026-09-17
+Última revisión: 2026-09-17
 
-Este documento recoge lo que una auditoría del sistema de templates dejó
-**medido y sin resolver**. Lo que sí se resolvió está en los commits, con su
-medida en el mensaje. Aquí sólo queda lo que no se tocó, y por qué.
-
-No es una lista de mejoras hipotéticas: cada punto trae la evidencia con la que
-se comprobó y el criterio con el que se decidió no ejecutarlo todavía.
+Este documento describe el estado **final** del sistema, no el camino. Su
+propósito es que nadie vuelva a montar en una vista algo que ya tiene
+autoridad. Lo que se midió y se resolvió está en los mensajes de commit; aquí
+está lo que hay que saber para trabajar sin volver a divergir.
 
 ---
 
-## 1 · `components/ui.css`: 93 de 151 clases no las emite nadie
+## 1 · Autoridades
 
-**Medido.** `src/css/components/ui.css` (3.033 líneas) da estilo a 151 tokens de
-clase. Buscando cada nombre completo en `src/**/*.js`, los cuatro HTML de
-entrada, el resto de las hojas y los contratos:
+Una por concepto. Si estás a punto de escribir una de estas cosas dentro de una
+vista, **no lo hagas**: pídesela a su autoridad.
 
-| | clases |
-|---|---|
-| referenciadas en JS/HTML | 42 |
-| sólo en otra hoja de estilos (nadie las pinta en el DOM) | 6 |
-| sólo en una fixture de contrato | 5 |
-| **sin ninguna referencia** | **93** |
-
-Comprobado además que **ninguna** clase `ui-*` se construye por concatenación
-(no hay `"ui-btn-" +`, ni `` `ui-${...}` ``): todas se escriben literales, así
-que la búsqueda por nombre completo es concluyente.
-
-Lo que está muerto son familias enteras que la aplicación nunca monta, porque
-cada vista se hizo la suya:
-
-- **alertas**: `ui-alert`, `ui-alert-content`, `ui-alert-icon`, `ui-alert-text`, `ui-alert-title`
-- **desplegables**: `ui-dropdown`, `ui-dropdown-divider`, `ui-dropdown-item`, `ui-dropdown-label`, `dropdown-item`, `dropdown-divider`
-- **pestañas**: `ui-tabs`, `ui-tab`
-- **paginación**: `ui-pagination`, `ui-page-btn`
-- **estado vacío**: `ui-empty`, `ui-empty-content`, `ui-empty-icon`, `ui-empty-text`, `ui-empty-title`
-- **página de error completa**: `error-saas`, `error-saas-content`, `error-saas-icon`, `error-card`, `error-icon`, `error-actions`, `ui-error`
-- **sistema de formulario**: `ui-field`, `ui-field-row`, `ui-field-stack`, `ui-label`, `ui-label-muted`, `ui-help`, `ui-required`, `ui-check`, `ui-checkbox`, `ui-radio`, `ui-radio-wrap`, `ui-select`, `ui-switch`, `ui-input-wrap`, `ui-input-icon`, `ui-input-action`
-- **variantes de botón**: `ui-btn-block`, `ui-btn-danger`, `ui-btn-full`, `ui-btn-group`, `ui-btn-icon`, `ui-btn-info`, `ui-btn-lg`, `ui-btn-sm`, `ui-btn-spinner`, `ui-btn-success`, `ui-btn-warning`
-- **barra de herramientas**: `ui-toolbar`, `ui-toolbar-actions`, `ui-toolbar-main`, `ui-toolbar-subtitle`, `ui-toolbar-title`
-- **tarjeta**: `ui-card-body`, `ui-card-footer`, `ui-card-header`, `ui-card-subtitle`, `ui-card-title`
-- **utilidades**: `ui-stack`, `ui-cluster`, `ui-split`, `ui-center`, `ui-full`, `ui-break`, `ui-nowrap`, `ui-dim`, `ui-muted`, `ui-strong`, `ui-hidden`, `ui-visually-hidden`, `ui-scroll-x`, `ui-scroll-y`, `ui-separator`, `ui-kbd`, `ui-truncate`, `ui-avatar-group`, `ui-chip-close`, `ui-table-action`, `ui-table-scroll`, `cell-actions`, `cell-muted`, `panel-block`, `table-loader`, `has-end`, `is-flat`, `is-static`, `no-hover`, `xs`
-
-Lo que sí se usa de esta hoja es un puñado: `ui-btn`, `ui-btn-secondary`,
-`ui-input`, `ui-textarea`, `ui-chip`, `ui-avatar`, `ui-spinner`, la familia
-`ui-detail-modal-*` y el bloque `toast`.
-
-**Por qué no se ha borrado aquí.** No por duda sobre el dato, sino por el modo
-de fallo. Una clase muerta puede compartir lista de selectores con una viva, y
-retirar el selector equivocado deja una regla que el navegador descarta entera.
-Eso ya pasó en este repositorio: es literalmente el motivo por el que existe
-`tools/css-block-integrity-contract.mjs`, cuyo comentario describe cómo
-`.facturas-detail-btn,` seguido de `}` hizo que ocho superficies perdieran
-`forced-color-adjust` en alto contraste sin que el build, `check:dist` ni los
-contratos de navegador lo rechazaran.
-
-**Cómo hacerlo con red.** Es una unidad de trabajo propia:
-
-1. Transformar con un parser de CSS real, no con expresiones regulares: retirar
-   de cada lista sólo los selectores muertos, y la regla completa sólo cuando
-   TODOS sus selectores lo estén.
-2. Dejar las 5 clases que sólo viven en una fixture (`clickable`, `lg`, `sm`,
-   `ui-card`, `ui-loading-overlay`): las pinta
-   `.github/scripts/ui_loading_browser_contract.mjs`.
-3. Las 6 que sólo aparecen en otra hoja (`padded-lg`, `padded-xl`,
-   `table-container`, `ui-table`, `ui-table-wrap`, `ui-truncate`) se retiran a
-   la vez que su referencia, no antes.
-4. Verificar con una huella de estilo calculado de las vistas **antes y
-   después**, no sólo con los contratos: el arnés de
-   `tools/detail-styles-ownership-contract.mjs` sirve de modelo, pero sólo cubre
-   los paneles de detalle.
-
-`tools/css-block-integrity-contract.mjs:49` exige al menos 60 hojas bajo
-`src/css` + `src/features`; hoy hay 81, así que hay margen si además se
-consolidan ficheros.
-
----
-
-## 2 · El mismo estado de dominio se pinta de tres colores según la vista
-
-**Medido.** «Cancelada» no significa lo mismo en tres sitios:
-
-| vista | clase emitida | color resultante |
+| concepto | autoridad | qué resuelve |
 |---|---|---|
-| Incidencias | `incidencias-status-chip--closed` | **verde** (éxito) |
-| Agenda | `agenda-status-chip--cancelada` | **rojo** (peligro) |
-| Facturas | `facturas-chip--cancelled` | **neutro** |
+| tono de un estado | `src/core/status-tone.js` | de un valor de dominio al tono con el que se pinta |
+| pintura del estado | `src/css/components/status-system.css` | del tono a los colores, en los dos temas |
+| indicador de foco | `src/css/components/focus-system.css` | el anillo de teclado, en la última capa |
+| clave de dominio | `src/core/slug-key.js` | normaliza un valor («Cancelada» → `cancelada`) |
+| etiquetas de estado | el fichero de opciones de cada dominio | el texto que lee el cliente |
 
-En Incidencias el color verde sale de que `STATUS_MAP`
-(`src/views/incidencias/incidencias.template.js:364`) normaliza
-`cancelled`/`canceled`/`cancelada`/`cancelado`/`archived` a `"closed"`, y
-`components/status-system.css:186` mete `--closed` en el bloque de éxito. La
-etiqueta que se imprime, en cambio, sigue diciendo «Cancelada»
-(`incidencias.options.js:174`). Es decir: **un chip verde que dice
-«Cancelada»**.
+### Cómo se reparten las tres preguntas de un estado
 
-La intención canónica está escrita en el propio fichero de autoridad,
-`components/status-system.css:283`:
+Un estado se responde por tres sitios distintos, y confundirlos fue el origen
+de seis divergencias:
 
-> `/* Cancelled is terminal but not successful. */`
+```
+A · estado semántico   el valor del backend, tal cual («cancelada»)
+B · tono de pintura    src/core/status-tone.js  ->  open|pending|success|danger|neutral
+C · clave de filtrado  el statusKey() de cada vista  ->  ciclo de vida
+```
 
-…y sólo se aplica a Facturas.
-
-**Por qué no se ha unificado aquí.** Porque el arreglo correcto no es añadir un
-selector: es que el tono del estado tenga **una sola autoridad**. Hoy hay tres
-derivaciones independientes:
-
-- `incidencias.template.js:692` → `incidencias-status-chip--${statusKey}`
-- `home.template.shared.js:58` → `home-status--${tone}` + `data-home-status`
-- `features/incidencias-detail-state/index.js:801` → `ui-detail-modal-chip--status-*`
-
-Y `statusKey()` se usa a la vez para el chip y para filtrar (`isClosed()`,
-`incidencias.template.js:392`), así que cambiar el mapa cambiaría el filtrado.
-Arreglar sólo la lista dejaría la lista neutra y el detalle verde: una
-inconsistencia nueva en lugar de una resuelta.
-
-**Cómo hacerlo.** Una función `statusTone(valorDeDominio)` en
-`src/core/presentation-text.js` --que ya es la autoridad de etiquetas-- que
-devuelva `success | danger | pending | neutral | open`, consumida por las tres
-derivaciones, con `cancelled`/`archived` en `neutral` según el comentario de
-arriba. `statusKey()` se queda como está para el ciclo de vida.
+`statusKey()` de Incidencias pliega `cancelled|archived` sobre `closed` **a
+propósito**: `isClosed()` filtra con él. Por eso el tono NO puede salir de ahí:
+con el pliegue hecho, «resuelta» y «cancelada» ya son el mismo valor.
 
 ---
 
-## 3 · 83 sitios repiten el indicador de foco
+## 2 · Cómo se añade un estado nuevo
 
-**Medido.** El indicador se pinta con `box-shadow`, y las sombras no se suman:
-se sustituyen. Por eso 83 reglas del proyecto llevan
-`outline: none; box-shadow: var(--focus-ring)`: cada componente con sombra
-propia tenía que volver a declarar el anillo para no perderlo.
+1. Añade el valor a `TONE_BY_STATE` en `src/core/status-tone.js`, dentro de la
+   familia que le corresponde. Es una lista por tono, no pares sueltos.
+2. Nada más. La hoja ya sabe pintar los cinco tonos.
 
-El defecto de fondo ya está corregido --el indicador vive ahora en
-`src/css/components/focus-system.css`, en la última capa, y su contraste cumple
-WCAG 2.4.11 (contrato: `tools/focus-visible-browser-contract.mjs`)-- así que
-esas 83 repeticiones ya no hacen falta, pero siguen ahí.
+El chip lo emite la vista así:
 
-**Por qué no se han retirado.** Retirarlas es un barrido de 83 sitios en 30
-hojas, y algunas no son repeticiones: cambian el color o el grosor a propósito
-(`views/public/public-support-progress.css:146`,
-`views/public/support-request.css:552`). Hay que leerlas una a una.
+```js
+`<span class="mi-chip mi-chip--${clave}" data-status-tone="${statusTone(valorCrudo)}">`
+```
 
-**Cómo hacerlo.** Pasar el indicador de `box-shadow` a `outline`, que sí
-compone con una sombra decorativa en vez de competir con ella. Entonces las 83
-desaparecen sin excepción y el `outline: 2px solid transparent` que hoy existe
-sólo para `forced-colors` deja de ser necesario.
+**El valor que se le pasa tiene que seguir llevando el estado.** Si tu vista lo
+normaliza con un mapa que pliega valores distintos sobre uno, pásale el crudo.
 
----
+Lo que NO hay que hacer:
 
-## 4 · Siete tokens que son en realidad hooks de tema
-
-No son defectos, pero conviene que estén nombrados para que nadie los
-«arregle» borrándolos: `--border-subtle` (8 sitios),
-`--btn-primary-border-hover`, `--focus-ring-color`, `--shadow-color`,
-`--sidebar-danger`, `--solid-bg-hover`, `--text-default` se consumen sin estar
-declarados, siempre con un fallback válido —
-`var(--hook, var(--token-real))`. Es el mismo patrón que usa
-`layout/sidebar.css` de forma deliberada: un punto de extensión con valor por
-defecto.
-
-La única excepción que merece una decisión: el fallback de `--border-subtle` es
-`transparent`, así que las 8 declaraciones
-`box-shadow: inset 0 1px 0 var(--border-subtle, transparent)` de
-`compositions/home-extreme-*.css` no pintan nada. O el token debía existir y el
-realce nunca se cableó, o el realce se descartó y sobran las 8 declaraciones.
+- no declares colores de estado en la hoja de tu vista: los pinta StatusSystem
+  desde la última capa, y tu copia no se verá nunca
+  (`tools/status-tone-contract.mjs` lo comprueba);
+- no inventes un sexto tono: son exactamente las cinco familias de tokens que
+  declara la hoja;
+- no tomes prestado el nombre de otro dominio para heredar su color. El modal
+  de Usuarios emitía `status-closed` para un usuario inactivo y salía VERDE.
 
 ---
 
-## 5 · Lo que la auditoría revisó y resultó estar bien
+## 3 · Cómo se implementa el foco
 
-Para que no se vuelva a auditar:
+**No se implementa.** El anillo lo pone `focus-system.css` en `@layer
+guardrails`, la última, sobre todo lo enfocable:
 
-- **La arquitectura de cascada.** `app.css:35` declara un único orden de capas
-  y las hojas de ruta se autodeclaran (`src/router/styles.js` exige
-  `self-layered-v1`). No hay que rehacerla.
-- **`views/public/home-critical.css` sin capa es deliberado**: su propio
-  comentario (líneas 11-12) explica que debe ganar a `@layer auth` de la vista.
-  Envolverla en una capa la rompe en silencio.
-- **`seo/public-service.css` sin capa también**: sólo la sirve el sitio estático
-  generado (`tools/sync-public-site.mjs`), nunca `app.css`.
-- **Las dos hojas de `src/features` sin capa** (`incidencias-comment-avatars`,
-  `incidencias-followup-avatars`, 55 y 49 líneas) no declaran `box-shadow` ni
-  reglas de foco, así que no compiten con nada: el riesgo es teórico.
+```css
+outline: var(--focus-ring-width) solid var(--focus-ring-color);
+outline-offset: 2px;
+```
+
+Es un `outline` y no una `box-shadow` por una razón concreta: dos `box-shadow`
+sobre el mismo elemento no se suman, se sustituyen. Cuando el anillo era una
+sombra, o lo borraba la sombra del componente o el anillo borraba la del
+componente. Con un contorno conviven.
+
+De ahí salen tres reglas:
+
+- **no escribas `box-shadow: var(--focus-ring)`** en ninguna hoja. Se verían
+  dos anillos, uno de sombra y otro de contorno
+  (`tools/focus-ring-authority-contract.mjs` lo rechaza);
+- **no escribas `outline: none`** en una regla de foco. Hoy no rompe nada
+  porque las capas anteriores pierden contra `guardrails`, pero es la mitad de
+  un modismo que ya no existe;
+- si tu elemento **no** es enfocable por teclado --una sección con
+  `tabindex="-1"`, un contenedor que pinta el anillo de lo que contiene-- la
+  autoridad no lo alcanza: declara tú el `outline` con los mismos tokens.
+
+Excepción declarada: `compositions/home-onboarding-pilot.css` usa
+`--focus-ring-strong` para ILUMINAR la tarjeta que la guía señala. No es un
+indicador de foco y por eso sigue siendo una sombra.
+
+---
+
+## 4 · Excepciones intencionadas
+
+Nombradas para que nadie las «arregle»:
+
+- **`facturas-detail-stat--accent`** es ÉNFASIS, no estado: lo lleva sólo la
+  tarjeta del Total, para que la cifra principal destaque entre sus hermanas,
+  que van sin tono. Un importe no tiene estado y ninguno de los cinco tonos
+  significa «ésta es la cifra que se busca».
+- **`views/public/home-critical.css` sin capa** es deliberado: su comentario
+  explica que debe ganar a `@layer auth` de la vista.
+- **`seo/public-service.css` sin capa**: sólo la sirve el sitio estático.
 - **Los tokens `--ui-detail-modal-*` redefinidos por dominio** son contrato
-  documentado (`docs/UI_MODAL_SYSTEM.md:128`), no deriva.
-- **`components/status-system.css`** ya es una autoridad real: traduce los
-  nombres de clase de cada vista a cinco tokens semánticos. El problema del
-  punto 2 no es la hoja, es quién decide el tono antes de llegar a ella.
+  documentado (`docs/UI_MODAL_SYSTEM.md`).
+- **Siete tokens que son hooks de tema** (`--border-subtle`,
+  `--btn-primary-border-hover`, `--focus-ring-color`, `--shadow-color`,
+  `--sidebar-danger`, `--solid-bg-hover`, `--text-default`) se consumen sin
+  estar declarados, siempre con `var(--hook, var(--token-real))`. Es un punto
+  de extensión, no un olvido.
+
+---
+
+## 5 · Presupuesto de arranque
+
+`tools/invoice-api-split-dist-contract.mjs` mide el cierre estático de la Home
+pública contra un techo. **Hoy el margen es 0.**
+
+Si tu cambio lo roza, mídelo fichero a fichero antes de tocar el número: la
+nota R08 del contrato explica cómo se resolvió el último caso sin subirlo
+--agrupando dos módulos del núcleo en un solo chunk-- y deja el método escrito.
+Subir el techo es la última opción, no la primera.
+
+---
+
+## 6 · Deuda verificada que queda
+
+- **1.026 colores literales fuera de `tokens/`**, 318 valores únicos. El 37 %
+  de las ocurrencias coincide EXACTO con un token existente, pero 219 de ellas
+  son `#ffffff`, que responde a tres tokens distintos (`--white`,
+  `--solid-text`, `--solid-icon`): una migración mecánica hex→token elegiría
+  mal. Es trabajo semántico, hoja por hoja, no un barrido.
+- **`facturas-detail-stat--neutral`** es alcanzable y la hoja no lo declara: la
+  tarjeta de Pago de una factura cancelada sale sin tinte. Ya pasaba antes.
+- **`views/correo/index.css`** concentra 302 literales, la mayor paleta local
+  que queda.

@@ -276,6 +276,20 @@ async function gotoAnchorMonth(page) {
   await page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"]`).waitFor({ state: "visible" });
 }
 
+/*
+  El diálogo de detalle se hace visible con su estado de carga: la cabecera
+  ya dice «Cita · Detalle de la cita» mientras el `GET /api/citas/:id` sigue
+  en vuelo. Leer su texto en ese instante es leer el spinner, no la cita.
+  La rejilla de lectura sólo existe cuando el servidor ha respondido, así
+  que esperarla es esperar A LA CITA, no a un tiempo arbitrario.
+*/
+async function openedDetail(page) {
+  const modal = page.locator("#agenda-detail-modal");
+  await modal.waitFor({ state: "visible" });
+  await page.locator("#agenda-detail-modal .agenda-detail-grid").waitFor({ state: "visible" });
+  return modal;
+}
+
 /* ---------------------------------------------------------
    Recorrido
 --------------------------------------------------------- */
@@ -575,9 +589,9 @@ try {
     assert.equal(await page.locator(".agenda-day-create-btn").count(), 0, "el usuario no ve «+» en ninguna casilla");
 
     await cell.locator(".agenda-day-event").first().click();
-    await page.locator("#agenda-detail-modal").waitFor({ state: "visible" });
+    const detailModal = await openedDetail(page);
 
-    const detail = await page.locator("#agenda-detail-modal").textContent();
+    const detail = await detailModal.textContent();
     assert.match(detail, /Oficina de Sant Vicen/u, "ve dónde acudir");
     assert.match(detail, /10:00/u, "y a qué hora");
     assert.match(detail, /Europe\/Madrid/u, "con su zona");
@@ -608,7 +622,7 @@ try {
     const { page, api } = await openAgenda(browser, { citas: seeded });
     const cell = page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"]`);
     await cell.locator(".agenda-day-event").first().click();
-    await page.locator("#agenda-detail-modal").waitFor({ state: "visible" });
+    await openedDetail(page);
 
     await page.locator('[data-detail-action="detail-edit"]').click();
     await page.locator('[data-agenda-detail-form="true"]').waitFor({ state: "visible" });
@@ -656,8 +670,7 @@ try {
     }];
 
     const { page, api } = await openAgenda(browser, { citas: seeded, query: "?citaId=CITA-LINK-0001" });
-    await page.locator("#agenda-detail-modal").waitFor({ state: "visible" });
-    assert.match(await page.locator("#agenda-detail-modal").textContent(), /Oficina de Sant Vicen/u);
+    assert.match(await (await openedDetail(page)).textContent(), /Oficina de Sant Vicen/u);
     assert.ok(api.state.calls.detail >= 1, "el detalle se pidió al servidor por su identificador");
 
     ok("9 · un enlace con ?citaId= abre esa cita en la ruta canónica");

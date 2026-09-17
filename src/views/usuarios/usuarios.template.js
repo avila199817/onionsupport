@@ -36,9 +36,10 @@ import { statusTone } from "../../core/status-tone.js";
 
 
 const USUARIOS_TEMPLATE_VERSION =
-  "usuarios.template.v28.session-order-silent-refresh";
+  "usuarios.template.v29.pending-activation-resend";
 export const USUARIOS_ACTIONS = Object.freeze({
   DETAIL: "detail",
+  RESEND_ACTIVATION: "resend-activation",
   CREATE: "create",
   REFRESH: "refresh",
   RETRY: "retry",
@@ -247,9 +248,26 @@ function renderAvatar(item = {}) {
   const presentation = avatarPresentation(item);
   return `<span class="usuarios-avatar${src ? " has-image" : " is-fallback"}" aria-hidden="true" data-avatar-system="true" data-avatar-host="true" data-avatar-name="${attr(presentation.name)}" data-avatar-email="${attr(presentation.email)}" data-avatar-user-id="${attr(presentation.userId)}" data-avatar-username="${attr(presentation.username)}" data-avatar-tone="${attr(String(presentation.tone))}" data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}" data-has-avatar="${src ? "true" : "false"}">${src ? `<img class="usuarios-avatar-img" data-avatar-image="true" src="${attr(src)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}<span class="usuarios-avatar-fallback" data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span></span>`;
 }
-function renderStatusChip(item = {}) {
+function renderStatusChip(item = {}, state = {}) {
   const status = getStatus(item);
-  return `<span class="usuarios-chip usuarios-chip--${attr(status)}" data-status-tone="${attr(statusTone(status))}"><span class="usuarios-chip-dot" aria-hidden="true"></span><span>${escapeHtml(statusLabel(item))}</span></span>`;
+  const label = statusLabel(item);
+  const id = getId(item);
+  const name = getName(item);
+  const busy = Boolean(
+    status === "pending" &&
+    id &&
+    cleanText(state.resendingActivationUserId, "") === id
+  );
+
+  if (status !== "pending" || !id) {
+    return `<span class="usuarios-chip usuarios-chip--${attr(status)}" data-status-tone="${attr(statusTone(status))}"><span class="usuarios-chip-dot" aria-hidden="true"></span><span>${escapeHtml(label)}</span></span>`;
+  }
+
+  const actionLabel = busy
+    ? `Reenviando activación a ${name}`
+    : `Volver a enviar el enlace de activación a ${name}`;
+
+  return `<button type="button" class="usuarios-chip usuarios-chip--pending usuarios-chip--action${busy ? " is-busy" : ""}" data-status-tone="${attr(statusTone(status))}" data-usuarios-action="${USUARIOS_ACTIONS.RESEND_ACTIVATION}" data-action="${USUARIOS_ACTIONS.RESEND_ACTIVATION}" data-user-id="${attr(id)}" aria-label="${attr(actionLabel)}" title="${attr(actionLabel)}" aria-busy="${busy ? "true" : "false"}" ${busy ? 'disabled aria-disabled="true"' : ""}><span class="usuarios-chip-dot" aria-hidden="true"></span><span>${escapeHtml(busy ? "Enviando…" : label)}</span></button>`;
 }
 function renderRow(item = {}, state = {}) {
   const id = getId(item);
@@ -258,7 +276,7 @@ function renderRow(item = {}, state = {}) {
   const lastLoginAt = firstNonEmpty(item.lastLoginAt, null);
   return `<tr class="usuarios-table-row usuarios-table-row--${attr(getStatus(item))}${opening ? " is-loading" : ""}" data-user-row="true" data-user-id="${attr(id)}" data-session-start="${attr(lastLoginAt || "")}" ${id ? `data-usuarios-action="${USUARIOS_ACTIONS.DETAIL}" data-action="open-user" tabindex="0" role="button" aria-label="Abrir usuario ${attr(name)}"` : 'aria-disabled="true"'} aria-busy="${opening ? "true" : "false"}">
     <td class="usuarios-cell usuarios-cell--main" data-column="main"><div class="usuarios-main">${renderAvatar(item)}<div class="usuarios-main-copy"><div class="usuarios-user-line-top"><span class="usuarios-user-id">${escapeHtml(getCode(item))}</span></div><div class="usuarios-user-name">${escapeHtml(name)}</div><div class="usuarios-user-description">${escapeHtml(cleanText(firstNonEmpty(item.phone, item.telefono, item.tipo, "Usuario Onion Support"), "Usuario Onion Support"))}</div></div></div></td>
-    <td class="usuarios-cell usuarios-cell--status" data-column="status">${renderStatusChip(item)}</td>
+    <td class="usuarios-cell usuarios-cell--status" data-column="status">${renderStatusChip(item, state)}</td>
     <td class="usuarios-cell usuarios-cell--date" data-column="date"><span class="usuarios-date-inline" title="${attr(formatDateTime(item.createdAt))}">${escapeHtml(formatDateShort(item.createdAt))}</span></td>
     <td class="usuarios-cell usuarios-cell--email" data-column="email"><span class="usuarios-email-inline" title="${attr(getEmail(item))}">${escapeHtml(getEmail(item))}</span></td>
     <td class="usuarios-cell usuarios-cell--location" data-column="location"><span class="usuarios-location-inline" title="${attr(getCity(item))}">${escapeHtml(getCity(item))}</span></td>
@@ -494,6 +512,7 @@ function getUsuariosTableTemplateSnapshot(input = {}) {
       router: false,
       dom: false,
       rowDetailAction: true,
+      pendingActivationResendAction: true,
       safeAvatarUrls: true,
       silentRefreshPresentation: true,
       sessionStartOrdering: true,

@@ -41,7 +41,11 @@ const BASELINE = Object.freeze({
   "src/views/clientes": 102,
   "src/views/cuenta": 53,
   "src/views/empleados": 2,
-  "src/views/facturas": 153,
+  // 153 -> 154 (2026-09-17): getTechnicianReviewSummary. El perfil del técnico
+  // necesita LEER el resumen por técnico, y el módulo que ya habla con la API de
+  // valoraciones es su sitio: la alternativa era una segunda copia del cliente
+  // HTTP en la feature. Ampliación autorizada, medida y de una sola función.
+  "src/views/facturas": 154,
   "src/views/home": 75,
   // 168 -> 171 (2026-09-16): incidenciaStatusLabel / incidenciaPriorityLabel /
   // incidenciaCategoryLabel. La autoridad que ya declaraba los valores declara

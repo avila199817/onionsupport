@@ -52,14 +52,29 @@ jobs:
           done
           echo "JavaScript syntax OK · ${#files[@]} files"
 
+      # LA MISMA LISTA QUE EXIGE EL DESPLIEGUE, EJECUTADA ANTES DEL MERGE.
+      #
+      # `validate:source` era la puerta del `push` a main --dentro de
+      # `validate:ci`-- y NO la de las PR, así que un contrato podía pasar la
+      # revisión en verde y romper la publicación después de fusionar. Ocurrió:
+      # una capa copió una clase del shell, `modal-shell-contract` lo rechazaba
+      # y la PR no lo ejecutaba.
+      #
+      # Se invoca el COMANDO, no una copia de su lista: si alguien añade un
+      # contrato a `validate:source`, entra aquí solo. Los pasos que repetían a
+      # mano trece de sus entradas se han retirado por eso mismo.
+      #
+      # Este job no tiene secretos, no persiste credenciales, no construye, no
+      # publica y sólo pide `contents: read`. Los contratos son de fuente: se
+      # ejecutan sobre un árbol sin dependencias instaladas.
+      - name: Validate every source contract the release gate requires
+        run: npm run validate:source
+
       - name: Validate public footer policy transition
         run: python3 .github/scripts/public_footer_policy_regression.py
 
       - name: Validate Google measurement contract
         run: python3 .github/scripts/google_measurement_contract.py
-
-      - name: Validate repository contracts
-        run: python3 .github/scripts/repo_integrity.py
 
       - name: Validate workflow runtime and production provenance contracts
         env:
@@ -69,47 +84,14 @@ jobs:
       - name: Validate public path hygiene
         run: python3 -I .github/scripts/public_path_hygiene.py
 
-      - name: Validate critical SPA contracts
-        run: bash .github/ci/validate_spa_contracts.sh
-
       - name: Validate Incidencias scale contract
         run: python3 .github/scripts/incidencias_scale_contract.py
-
-      - name: Validate Incidencias Create user selection
-        run: node .github/scripts/incidencias_create_user_selection_contract.mjs
-
-      - name: Validate Incidencias Create validation parity
-        run: node .github/scripts/incidencias_create_validation_contract.mjs
-
-      - name: Validate Incidencias Create user combobox
-        run: node .github/scripts/incidencias_create_combobox_contract.mjs
-
-      - name: Validate Incidencias stats scope truth
-        run: node .github/scripts/incidencias_stats_scope_contract.mjs
-
-      - name: Validate Incidencias filter facets
-        run: node .github/scripts/incidencias_filter_facets_contract.mjs
-
-      - name: Validate Incidencias Detail attachment policy
-        run: node .github/scripts/incidencias_detail_attachment_policy_contract.mjs
-
-      - name: Validate Incidencias attachment delete confirmation
-        run: node .github/scripts/incidencias_attachment_delete_confirm_contract.mjs
-
-      - name: Validate Incidencias Detail bounded-window truth
-        run: node .github/scripts/incidencias_detail_window_ui_contract.mjs
 
       - name: Validate Clientes scale contract
         run: python3 .github/scripts/clientes_scale_contract.py
 
       - name: Validate Facturas continuous-scroll contract
         run: python3 .github/scripts/facturas_continuous_scroll_contract.py
-
-      - name: Validate Facturas technical-record guard
-        run: node .github/scripts/facturas_technical_record_guard_contract.mjs
-
-      - name: Validate public login card-first layout
-        run: node .github/scripts/public_login_layout_contract.mjs
 
       - name: Validate Usuarios scale contract
         run: python3 .github/scripts/usuarios_scale_contract.py
@@ -125,9 +107,6 @@ jobs:
 
       - name: Validate continuous-scroll markup
         run: node .github/scripts/continuous_scroll_smoke.mjs
-
-      - name: Validate repository artifact hygiene
-        run: python3 .github/scripts/artifact_hygiene.py
 
       - name: Validate single app entrypoint
         run: python3 .github/scripts/app_entrypoint_integrity.py

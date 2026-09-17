@@ -80,7 +80,19 @@ try {
   assert.deepEqual(values(dashboard), [null, null, null, null], "unknown totals stay unknown despite available rows");
   const missingHtml = renderStats(dashboard);
   assert.equal((missingHtml.match(/class="home-stat-value">—</g) || []).length, 4);
-  assert.equal((missingHtml.match(/class="home-stat-text">No disponible</g) || []).length, 4);
+  /*
+    Un dominio que CONTESTA sin recuento confirmado ya no se pinta «No
+    disponible»: eso era indistinguible de un ámbito que no aplica a la sesión,
+    y dejaba la tarjeta sin nada que pulsar. Ahora declara `unknown` y dice «Sin
+    confirmar», que es reparable por el aviso de Home.
+  */
+  /* Sólo el listado de incidencias declara hoy si contó. Clientes, usuarios y
+     las estadísticas de facturas siguen exactamente como estaban: su «No
+     disponible» es un defecto propio, reportado aparte, no corregido aquí. */
+  assert.equal((missingHtml.match(/data-home-stat-state="unknown"/g) || []).length, 1);
+  assert.equal((missingHtml.match(/class="home-stat-text">Sin confirmar</g) || []).length, 1);
+  assert.equal((missingHtml.match(/class="home-stat-text">No disponible</g) || []).length, 3);
+  assert.equal(dashboard.unknownCounts.incidencias, true, "el panel declara qué cuenta quedó sin confirmar");
   scenarios++;
 
   reset();

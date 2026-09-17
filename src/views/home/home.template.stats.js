@@ -11,6 +11,7 @@ import {
   formatNumber,
   icon,
   homeLabelKey,
+  isObject,
   safeRoute,
 } from "./home.template.foundation.js";
 import { avatar, loadingCards } from "./home.template.shared.js";
@@ -31,19 +32,51 @@ export function header(vm) {
   `;
 }
 
-function statCard({ label, value, text, iconName, route, modifier }) {
+/* CUATRO ESTADOS, NO DOS.
+ *
+ * La tarjeta distinguía sólo «hay número» y «no hay número», y pintaba una raya
+ * para todo lo demás. Una raya que no se puede distinguir de una carga --ni de
+ * un dato que de verdad no existe-- no dice nada y no se recupera.
+ *
+ * - `cargando`      lo resuelve la sección con sus esqueletos, más arriba.
+ * - `dato`          un número, el CERO incluido: `value >= 0` ya lo admite.
+ * - `actualizando`  se conserva el número anterior y se marca el refresco.
+ * - `error`         el dominio no contestó: se dice, y se ofrece reintentar
+ *                   con el control que Home ya tiene.
+ *
+ * El estado viaja también en `data-home-stat-state`, para que se pueda
+ * comprobar sin leer texto traducido. */
+/* CUATRO ESTADOS, Y CADA UNO DICE LO SUYO.
+ *
+ *   value        el recuento está confirmado, el 0 incluido
+ *   updating     hay dato y se está refrescando
+ *   unknown      el dominio contestó pero su recuento no está confirmado
+ *   error        el dominio falló
+ *   unavailable  ese ámbito no aplica a esta sesión
+ *
+ * `unknown` es el que faltaba: un total sin confirmar se pintaba como «No
+ * disponible», indistinguible de un ámbito que no aplica, y sin nada que
+ * pulsar. No se rellena con un cero ni con lo que quepa en una página. */
+function statCard({ label, value, text, iconName, route, modifier, failed = false, unknown = false, refreshing = false }) {
   const href = safeRoute(route, "/");
   const key = homeLabelKey(modifier || label || "stat");
   const available = typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  const state = available
+    ? (refreshing ? "updating" : "value")
+    : (failed ? "error" : unknown ? "unknown" : "unavailable");
   const formattedValue = available ? formatNumber(value) : "—";
-  const description = available ? text : "No disponible";
-  const ariaLabel = available ? `${label}: ${formattedValue}. ${text}` : `${label}: No disponible`;
+  const description = available
+    ? (refreshing ? `${text} · Actualizando` : text)
+    : (failed ? "No se pudo cargar" : unknown ? "Sin confirmar" : "No disponible");
+  const ariaLabel = available
+    ? `${label}: ${formattedValue}. ${description}`
+    : `${label}: ${description}`;
   const onboardingTarget = key === "incidencias"
     ? ' data-home-onboarding-target="step-1"'
     : "";
 
   return `
-    <article class="home-stat-card" data-home-stat="${attr(key)}"${onboardingTarget}>
+    <article class="home-stat-card" data-home-stat="${attr(key)}" data-home-stat-state="${attr(state)}"${onboardingTarget}>
       <button
         type="button"
         class="home-stat-card-button"
@@ -77,6 +110,10 @@ export function stats(vm) {
     ? `Facturado: ${formatMoney(vm.counts.totalInvoiced, vm.counts.currency)}`
     : "Facturación no disponible";
 
+  const failed = isObject(vm.counts.failed) ? vm.counts.failed : {};
+  const unknown = isObject(vm.counts.unknown) ? vm.counts.unknown : {};
+  const refreshing = vm.refreshing === true;
+
   const cards = [
     {
       label: "Incidencias",
@@ -85,6 +122,9 @@ export function stats(vm) {
       iconName: "incidencias",
       route: vm.routes.incidencias,
       modifier: "incidencias",
+      failed: failed.incidencias === true,
+      unknown: unknown.incidencias === true,
+      refreshing,
     },
     {
       label: "Facturas",
@@ -93,6 +133,9 @@ export function stats(vm) {
       iconName: "facturas",
       route: vm.routes.facturas,
       modifier: "facturas",
+      failed: failed.facturas === true,
+      unknown: unknown.facturas === true,
+      refreshing,
     },
   ];
 
@@ -105,6 +148,9 @@ export function stats(vm) {
         iconName: "clientes",
         route: vm.routes.clientes,
         modifier: "clientes",
+        failed: failed.clientes === true,
+        unknown: unknown.clientes === true,
+        refreshing,
       },
       {
         label: "Usuarios",
@@ -113,6 +159,9 @@ export function stats(vm) {
         iconName: "usuarios",
         route: vm.routes.usuarios,
         modifier: "usuarios",
+        failed: failed.usuarios === true,
+        unknown: unknown.usuarios === true,
+        refreshing,
       }
     );
   }

@@ -6,7 +6,7 @@
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { DEFAULT_ROUTES, cleanText, initialsFrom, isObject, homeLabelKey, safeArray, safeImageSrc } from "./home.template.foundation.js";
 import { clamp, finiteNumber } from "../../core/numbers.js";
-import { firstNonEmpty } from "../../core/objects.js";
+import { firstNonEmpty, safeObject } from "../../core/objects.js";
 
 export function buildVm(input = {}) {
   const data = isObject(input) ? input : {};
@@ -44,6 +44,26 @@ export function buildVm(input = {}) {
     }
     return null;
   }
+
+  /* SIN VALOR NO SIGNIFICA LO MISMO QUE NO SE PUDO LEER.
+   *
+   * Cuando un dominio no contesta, el panel se compone igual con los demás y
+   * deja esa cuenta sin valor, pero apunta el aviso con su dominio. Aquí --y
+   * sólo aquí-- se cruza una cosa con la otra, para que la tarjeta pueda decir
+   * «no se pudo cargar» y ofrecer reintentar, en vez de una raya muda que no
+   * se distingue de un dato que de verdad no existe.
+   *
+   * Los avisos de un dominio pueden llegar con su sufijo (`facturas_stats`),
+   * así que se compara por el dominio y sus ramas, no por igualdad exacta. */
+  const failedDomains = safeArray(dashboard.warnings)
+    .map((warning) => cleanText(isObject(warning) ? warning.domain : "", ""))
+    .filter(Boolean);
+
+  const domainFailed = (name) => failedDomains.some(
+    (domain) => domain === name || domain.startsWith(`${name}_`)
+  );
+
+  const sinConfirmar = safeObject(dashboard.unknownCounts);
 
   const totalInvoiced = finiteNumber(
     firstNonEmpty(
@@ -170,6 +190,20 @@ export function buildVm(input = {}) {
       totalInvoiced,
       currency,
       invoiceStatsAvailable,
+      failed: {
+        incidencias: domainFailed("incidencias"),
+        facturas: domainFailed("facturas"),
+        clientes: admin && domainFailed("clientes"),
+        usuarios: admin && domainFailed("usuarios"),
+      },
+      /* Sin confirmar NO es lo mismo que caído: el dominio contestó y su lista
+         sirve; lo que no está confirmado es el recuento. Lo declara el panel. */
+      unknown: {
+        incidencias: sinConfirmar.incidencias === true,
+        facturas: sinConfirmar.facturas === true,
+        clientes: admin && sinConfirmar.clientes === true,
+        usuarios: admin && sinConfirmar.usuarios === true,
+      },
     },
     billing: {
       available: invoiceStatsAvailable,

@@ -21,6 +21,7 @@ import {
   HOME_TEMPLATE_VERSION,
   attr,
   cleanText,
+  isObject,
 } from "./home.template.foundation.js";
 import { buildVm } from "./home.template.viewmodel.js";
 import {
@@ -158,6 +159,20 @@ function welcomePilot(vm = {}) {
   `;
 }
 
+/* LA RECUPERACIÓN ES LA QUE HOME YA TIENE.
+ *
+ * `errorBanner` trae su propio «Reintentar», y el controlador lo trata como un
+ * refresco. Ese aviso sólo aparecía cuando fallaba el panel ENTERO: si un solo
+ * dominio no contestaba, su tarjeta se quedaba en una raya y no había nada que
+ * pulsar. Un resumen al que le falta una cuenta por un fallo tiene que poder
+ * repararse sin recargar. */
+function partialCountsMessage(vm = {}) {
+  const failed = isObject(vm?.counts?.failed) ? vm.counts.failed : {};
+  return Object.values(failed).some(Boolean)
+    ? "No se pudieron cargar todos los datos del resumen."
+    : "";
+}
+
 export function renderHomeErrorState(message = "No se pudo cargar el inicio.") {
   const safeMessage = cleanText(message, "No se pudo cargar el inicio.");
 
@@ -195,7 +210,7 @@ export function renderHomeTemplate(input = {}) {
       ${onboardingActive ? `data-home-onboarding-active="${attr(HOME_ONBOARDING_PILOT_VERSION)}"` : ""}
       aria-busy="${vm.loading || vm.refreshing ? "true" : "false"}"
     >
-      ${errorBanner(vm.error)}
+      ${errorBanner(vm.error || partialCountsMessage(vm))}
       ${staleBanner(vm.stale)}
       ${header(vm)}
       ${welcomePilot(vm)}

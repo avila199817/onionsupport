@@ -2,7 +2,7 @@
    Onion Support · Recorrido integrado de sesión SPA
    Archivo: /tools/spa-session-contract.mjs
 
-   VEINTE PASOS, UNA SOLA SESIÓN, NINGUNA RECARGA.
+   VEINTICINCO PASOS, UNA SOLA SESIÓN, NINGUNA RECARGA.
 
    No comprueba piezas sueltas: abre la aplicación construida y recorre lo que
    hace una persona, en continuidad, porque en continuidad es donde se rompió.
@@ -20,6 +20,11 @@
      N5 · ningún código del backend se lee como etiqueta           [defecto]
      N6 · el icono de una acción no desaparece                     [defecto]
      N7 · no se pierden la posición de lectura ni el borrador      [guarda]
+     N10 · una valoración no se atribuye al técnico equivocado      [defecto]
+     N11 · «sin valoraciones» no se pinta como un cero              [defecto]
+     N12 · reabrir un perfil no cuenta dos veces                    [guarda]
+     N13 · sin autorización no se dice «sin valoraciones»           [guarda]
+     N14 · del resumen sólo llega a pantalla el agregado            [guarda]
 
    N3 es una GUARDA, no la reproducción de un defecto observado: no encontré
    ningún camino en el que la aplicación reutilice hoy una lectura abortada.
@@ -32,6 +37,17 @@
    reutilizar un único AbortController (cada apertura estrena controlador),
    compartir la tarea en vuelo del implementation y dejar de limpiar el vuelo
    rechazado por separado (la lectura de la UI va siempre forzada).
+
+   Mutaciones comprobadas para las negativas nuevas, cada una sobre el build
+   real y cada una haciendo caer SU paso:
+     N10 · preguntar por la identidad de quien mira en vez de la del técnico
+           (`technicianRatingIdentity` devolviendo el usuario conectado)
+           → el paso 21 no llega a «value»: el resumen pedido es de otro.
+     N11 · pintar la escala con un cero cuando no hay valoraciones
+           → el paso 22 falla: «Sin dato el marcador es una raya, no 0,0 / 5».
+     N13 · devolver «empty» ante un 401/403 en vez de «restricted»
+           → el paso 25 no llega a «restricted»: la falta de permiso se estaría
+             contando como ausencia de opiniones.
 
    Datos sintéticos. Ninguna persona real, ninguna escritura de dominio.
 ========================================================= */
@@ -51,12 +67,24 @@ const CUERPO = ".ui-detail-modal-body";
 const BORRADOR = "#incidencias-modal-comment-input";
 const VISOR = "[data-incidencias-media-viewer='true']";
 const ALTA = "#incidencias-create-modal-panel";
-const TECNICO = "[data-technician-profile-trigger='true'], [data-modal-technician='true']";
+/* SIEMPRE DENTRO DEL DETALLE ABIERTO.
+ *
+ * Las insignias de la lista llevan el mismo marcador, así que un selector sin
+ * ámbito devuelve la PRIMERA del documento --una fila cualquiera-- y se abriría
+ * el perfil de otro técnico sin que la prueba se entere. */
+const TECNICO = "#incidencias-detail-modal-panel [data-technician-profile-trigger='true'], #incidencias-detail-modal-panel [data-modal-technician='true']";
 const PERFIL_TECNICO = "#incidencias-technician-profile-panel";
 const VALORACIONES = "[data-fpc-retry-action='true']";
 const USUARIO = "[data-user-row='true']";
 const BUSCAR = "[data-usuarios-search-input='true']";
 const DETALLE_USUARIO = "#usuarios-detail-modal-title";
+const VALORACION = "[data-technician-rating='true']";
+const REINTENTAR_VALORACION = "[data-technician-profile-action='retry-rating']";
+const RESUMEN_CABECERA = "#inc-technician-summary";
+/* Un campo privado que el servidor NO debería mandar. Se manda A PROPÓSITO para
+   comprobar que el perfil sólo pinta el agregado: si apareciera en pantalla, el
+   cliente estaría pintando lo que le llegue en vez de lo que le corresponde. */
+const SECRETO = "COMENTARIO-PRIVADO-QUE-NO-DEBE-VERSE";
 
 const ENTORNOS = [
   { nombre: "escritorio", viewport: { width: 1440, height: 900 } },
@@ -100,6 +128,11 @@ async function recorrer(entorno) {
   const world = mundo();
   const retrasos = new Map();
   let confirmada = FOTO_A;
+  /* Interruptores del resumen por técnico: se manejan desde el recorrido, no
+     desde un reloj. «rota» devuelve un fallo del servidor; «prohibida», la falta
+     de autorización, que NO es lo mismo que no tener valoraciones. */
+  const resumen = { rota: false, prohibida: false, peticiones: [] };
+  const RESUMEN_TECNICO = /^\/api\/facturas\/tecnicos\/([^/]+)\/valoraciones$/u;
 
   const { origin, close: cerrarServidor } = await serveBuiltApp({ spaFallback: true });
   const browser = await launchBrowser();
@@ -109,6 +142,33 @@ async function recorrer(entorno) {
     api: async ({ method, path, respond, world: w }) => {
       const retraso = retrasos.get(path);
       if (retraso) { retrasos.delete(path); await espera(retraso); }
+
+      const porTecnico = path.match(RESUMEN_TECNICO);
+      if (porTecnico) {
+        const technicianId = decodeURIComponent(porTecnico[1]);
+        resumen.peticiones.push(technicianId);
+        if (resumen.prohibida) {
+          await respond({ ok: false, error: { code: "FORBIDDEN", message: "sin autorización" } }, 403);
+          return true;
+        }
+        if (resumen.rota) {
+          await respond({ ok: false, error: { code: "SERVER_ERROR", message: "resumen caído" } }, 500);
+          return true;
+        }
+        const notas = (w.valoraciones || [])
+          .filter((entrada) => entrada.technicianId === technicianId)
+          .map((entrada) => entrada.overall)
+          .filter((nota) => Number.isInteger(nota) && nota >= 1 && nota <= 5);
+        await respond({
+          ok: true, technicianId, scope: "all", max: 5,
+          count: notas.length,
+          average: notas.length ? notas.reduce((total, nota) => total + nota, 0) / notas.length : null,
+          /* Ruido privado deliberado: el perfil no debe pintarlo. (N14) */
+          comment: SECRETO, clienteEmail: SECRETO,
+        });
+        return true;
+      }
+
       if (path !== "/api/users/avatar") return false;
       confirmada = method === "DELETE" ? "" : FOTO_B;
       const usuario = { ...w.conectado, avatarUrl: confirmada, avatar: confirmada, photoUrl: confirmada, hasAvatar: Boolean(confirmada) };
@@ -561,6 +621,129 @@ async function recorrer(entorno) {
       await cerrar(panel);
       paso(numero, `${identidad} desde ${fuente}: ${desdeHome.length} nodos idénticos a su apertura desde ${ruta} (N9)`);
     }
+
+    /* =================================================================
+       21-25 · VALORACIONES DEL TÉCNICO, EN LA MISMA SESIÓN CALIENTE
+
+       Todo lo que sigue ocurre sin recargar y con el mundo ya recorrido: dos
+       clientes, dos técnicos y un administrador conectado que NO es ninguno de
+       ellos. Beatriz (u-tecnico-1) atiende INC-SINT-1 y tiene dos respuestas
+       (5 y 3). Damián (u-tecnico-2) atiende INC-SINT-2 y no tiene ninguna.
+    ================================================================= */
+    const verResumen = () => page.evaluate(({ tarjeta, cabecera }) => {
+      const nodo = document.querySelector(tarjeta);
+      if (!nodo) return null;
+      return {
+        estado: nodo.dataset.technicianRatingState || null,
+        media: nodo.dataset.ratingAverage || "",
+        cuantas: nodo.dataset.ratingCount || "",
+        /* Nota y escala son dos nodos: el hueco lo pone el diseño, no el texto. */
+        marcador: [
+          nodo.querySelector(".inc-technician-rating-score strong")?.textContent?.trim() || "",
+          nodo.querySelector(".inc-technician-rating-score span")?.textContent?.trim() || "",
+        ].filter(Boolean).join(" "),
+        titular: nodo.querySelector(".inc-technician-rating-main > strong")?.textContent?.trim() || "",
+        estrellas: nodo.querySelectorAll(".inc-technician-star[data-star-filled='true']").length,
+        reintentar: nodo.querySelectorAll("[data-technician-profile-action='retry-rating']").length,
+        cabecera: document.querySelector(cabecera)?.textContent?.replace(/\s+/gu, " ").trim() || "",
+        nombre: document.querySelector("#inc-technician-title")?.textContent?.trim() || "",
+        secreto: document.documentElement.innerHTML.includes("COMENTARIO-PRIVADO-QUE-NO-DEBE-VERSE"),
+      };
+    }, { tarjeta: VALORACION, cabecera: RESUMEN_CABECERA });
+
+    const abrirPerfilDe = async (incidencia) => {
+      await clickInPage(page, `a[href='${RUTA}/incidencias']`);
+      await page.waitForSelector(FILA, { timeout: 20000 });
+      await abrirFila(incidencia);
+      await clickInPage(page, TECNICO);
+      await page.waitForSelector(PERFIL_TECNICO, { timeout: 15000 });
+      await page.waitForSelector(VALORACION, { timeout: 15000 });
+    };
+    const cerrarPerfilYDetalle = async () => {
+      await cerrar(PERFIL_TECNICO);
+      await page.keyboard.press("Escape");
+      await page.waitForSelector(DETALLE, { state: "detached", timeout: 15000 });
+    };
+    const resuelto = async (esperado) => {
+      await untilTrue(page, ({ sel, fin }) => {
+        const estado = document.querySelector(sel)?.dataset.technicianRatingState;
+        return Boolean(estado) && estado !== "loading" && (!fin || estado === fin);
+      }, { arg: { sel: VALORACION, fin: esperado || "" }, timeout: 15000, message: `el resumen no llegó a «${esperado || "resuelto"}»` });
+      return verResumen();
+    };
+
+    /* 21 · El técnico del servicio, con su media hecha en el servidor. */
+    const antes = resumen.peticiones.length;
+    await abrirPerfilDe("INC-SINT-1");
+    const beatriz = await resuelto("value");
+    assert.ok(/Beatriz Técnica Sintética/u.test(beatriz.nombre), `El perfil abierto es el de INC-SINT-1: «${beatriz.nombre}»`);
+    assert.equal(beatriz.estado, "value", `Con dos respuestas el estado es «value», no «${beatriz.estado}»`);
+    assert.equal(beatriz.cuantas, "2", `Dos respuestas cuentan 2, no ${beatriz.cuantas}`);
+    assert.equal(beatriz.media, "4", `La media de 5 y 3 es 4, no ${beatriz.media}`);
+    assert.equal(beatriz.marcador, "4,0 / 5", `El marcador dice «${beatriz.marcador}»`);
+    assert.equal(beatriz.titular, "2 valoraciones", `El recuento dice «${beatriz.titular}»`);
+    assert.equal(beatriz.estrellas, 4, `4,0 pinta cuatro estrellas, no ${beatriz.estrellas}`);
+    /* La cabecera lee la MISMA frase: no recompone la nota por su cuenta. */
+    assert.ok(beatriz.cabecera.includes("4,0 / 5 · 2 valoraciones"), `La cabecera dice «${beatriz.cabecera}»`);
+    assert.equal(beatriz.secreto, false, "Del resumen sólo se pinta el agregado (N14)");
+    /* Se preguntó por el técnico del servicio, NO por quien mira ni por el
+       cliente: una petición, y con su identidad. (N10) */
+    const preguntas = resumen.peticiones.slice(antes);
+    assert.deepEqual(preguntas, ["u-tecnico-1"], `Se preguntó por ${JSON.stringify(preguntas)}`);
+    await cerrarPerfilYDetalle();
+    paso(21, `INC-SINT-1 → u-tecnico-1: 2 valoraciones, media 4,0 y una sola pregunta, por su identidad (N10)`);
+
+    /* 22 · El otro técnico no hereda nada: sin valoraciones NO es un cero. */
+    await abrirPerfilDe("INC-SINT-2");
+    const damian = await resuelto("empty");
+    assert.ok(/Damián Técnico Sintético/u.test(damian.nombre), `El perfil abierto es el de INC-SINT-2: «${damian.nombre}»`);
+    assert.equal(damian.estado, "empty", `Sin respuestas el estado es «empty», no «${damian.estado}»`);
+    assert.equal(damian.titular, "Sin valoraciones", `Dice «${damian.titular}» en vez de «Sin valoraciones»`);
+    assert.equal(damian.marcador, "—", `Sin dato el marcador es una raya, no «${damian.marcador}» (N11)`);
+    assert.equal(damian.estrellas, 0, `Sin valoraciones no se enciende ninguna estrella (${damian.estrellas})`);
+    assert.equal(/4,0|0,0/u.test(damian.cabecera), false, `La cabecera de Damián arrastra una nota: «${damian.cabecera}»`);
+    assert.equal(/Beatriz/u.test(damian.nombre), false, "El contenido de un técnico no aparece en el perfil de otro");
+    await cerrarPerfilYDetalle();
+    paso(22, `INC-SINT-2 → u-tecnico-2: «Sin valoraciones», ninguna estrella y ningún 0,0 (N11)`);
+
+    /* 23 · Reabrir no acumula: la cuenta la lleva el servidor, no la pantalla. */
+    await abrirPerfilDe("INC-SINT-1");
+    const otraVez = await resuelto("value");
+    assert.equal(otraVez.cuantas, "2", `Reabrir el perfil dejó el recuento en ${otraVez.cuantas} (N12)`);
+    assert.equal(otraVez.media, "4", `Reabrir el perfil movió la media a ${otraVez.media} (N12)`);
+    await cerrarPerfilYDetalle();
+    paso(23, "reabrir el mismo perfil no cuenta dos veces: sigue en 2 y 4,0 (N12)");
+
+    /* 24 · Fallo del resumen: se dice, se reintenta y se recupera sin recargar. */
+    resumen.rota = true;
+    await abrirPerfilDe("INC-SINT-1");
+    const caida = await resuelto("error");
+    assert.equal(caida.estado, "error", `Con el resumen caído el estado es «error», no «${caida.estado}»`);
+    assert.equal(caida.titular, "No se pudo cargar", `Dice «${caida.titular}»`);
+    assert.equal(caida.marcador, "—", "Un fallo no se disfraza de nota");
+    assert.equal(caida.reintentar, 1, `Un fallo ofrece reintentar (${caida.reintentar} controles)`);
+    assert.equal(/Sin valoraciones/u.test(caida.titular), false, "Un fallo no se dice como un vacío");
+    resumen.rota = false;
+    await clickInPage(page, REINTENTAR_VALORACION);
+    const recuperado = await resuelto("value");
+    assert.equal(recuperado.cuantas, "2", `El reintento recupera el dato (${recuperado.cuantas})`);
+    assert.equal(recuperado.marcador, "4,0 / 5", `El reintento recupera la nota («${recuperado.marcador}»)`);
+    assert.equal(sesion.loads.length, 1, "El reintento no recargó el documento");
+    await cerrarPerfilYDetalle();
+    paso(24, "resumen caído: estado honesto con reintento que recupera 2 y 4,0 sin recargar");
+
+    /* 25 · Sin autorización NO se dice «sin valoraciones». (N13) */
+    resumen.prohibida = true;
+    await abrirPerfilDe("INC-SINT-1");
+    const prohibido = await resuelto("restricted");
+    assert.equal(prohibido.estado, "restricted", `Sin autorización el estado es «restricted», no «${prohibido.estado}»`);
+    assert.equal(prohibido.titular, "No disponible en tu sesión", `Dice «${prohibido.titular}»`);
+    assert.equal(prohibido.marcador, "—", "Sin autorización no se inventa una nota");
+    assert.equal(prohibido.estrellas, 0, "Sin autorización no se encienden estrellas");
+    assert.equal(/Sin valoraciones/u.test(prohibido.titular), false, "Falta de permiso no es ausencia de valoraciones (N13)");
+    resumen.prohibida = false;
+    await cerrarPerfilYDetalle();
+    paso(25, "sin autorización: «No disponible en tu sesión», que no es «Sin valoraciones» (N13)");
 
     /* Invariantes de toda la sesión. */
     assert.equal(sesion.loads.length, 1, `La sesión cargó el documento ${sesion.loads.length} veces`);

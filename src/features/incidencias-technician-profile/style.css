@@ -64,8 +64,11 @@
   }
 
   /* =======================================================
-     FIVE-STAR READ MODEL
-     Display-only en esta versión; no hay interacción ni submit.
+     VALORACIÓN · LECTURA DE CINCO ESTRELLAS
+     Display-only: no hay interacción ni submit. Lo único pulsable es el
+     reintento, y sólo existe cuando el resumen ha fallado.
+     El estado lo declara data-technician-rating-state; el CSS no decide
+     cuál es, sólo cómo se ve.
   ======================================================= */
 
   [data-technician-profile-root="true"] .inc-technician-rating-card {
@@ -157,6 +160,21 @@
 
   [data-technician-profile-root="true"] .inc-technician-star[data-star-filled="true"] svg {
     fill: currentColor;
+  }
+
+  /* Sin dato confirmado la nota no se destaca como si lo fuera. */
+  [data-technician-profile-root="true"] .inc-technician-rating-card:not([data-technician-rating-state="value"]) .inc-technician-rating-score strong {
+    color: var(--text-muted);
+    font-size: clamp(26px, 3vw, 34px);
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-rating-card[data-technician-rating-state="error"] {
+    border-color: var(--ui-status-danger-border, var(--ui-detail-modal-card-border));
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-rating-retry {
+    justify-self: start;
+    margin-block-start: 4px;
   }
 
   /* =======================================================

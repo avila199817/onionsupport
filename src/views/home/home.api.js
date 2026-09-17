@@ -171,6 +171,19 @@ function isCacheFresh(options = {}) {
   if (!defaultDashboardScope(options)) return false;
   if (!cacheMatches()) return false;
 
+  /* UN PANEL PARCIAL SIRVE PARA ENSEÑAR, NO PARA DEJAR DE PREGUNTAR.
+   *
+   * Cuando un dominio no contesta, `fetchDashboard` sigue componiendo el panel
+   * con los demás y lo marca `partial`, y su cuenta se queda sin valor. Ese
+   * panel se guardaba y se servía como FRESCO, así que volver a Home no
+   * preguntaba otra vez y la tarjeta se quedaba en una raya --medido: una sola
+   * llamada a la lista de incidencias en toda la sesión--.
+   *
+   * El dato guardado se conserva y se sigue hidratando la vista con él; lo que
+   * cambia es que la siguiente entrada vuelve a preguntar UNA vez, que es lo
+   * que hace cualquier montaje. No hay sondeo ni reintento infinito. */
+  if (cacheState.dashboard?.partial === true) return false;
+
   const ttlMs = parseAmount(
     options.ttlMs ?? options.cacheTtlMs ?? null,
     HOME_CACHE_TTL_MS,

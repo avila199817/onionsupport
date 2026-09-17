@@ -47,6 +47,18 @@ const JS_ROOT = resolve(DIST, "assets/js");
 //   techo 218600 -> 218750, margen resultante 56 bytes.
 // app y auth conservan los suyos. Esta cota se sube a mano, con su medida,
 // cada vez: nada aqui la mueve solo.
+// R07 (2026-09-17): the technician profile now reads the per-technician review
+// summary from the same module that already talks to the reviews API, so that
+// module is shared by two lazy features and the bundler gives it its own chunk.
+// The ONLY growth is the enhancements preload manifest naming it: +48 raw bytes
+// (enhancements 10081 -> 10129, union 218563 -> 218611 on a1b458e5), no new
+// startup code and nothing new preloaded for the public Home -- that entry is
+// reachable from the `facturas` and `incidencias` scopes, never from `public`.
+// El techo NO se mueve: R06 ya lo dejó en 218750 para Agenda, y ese margen
+// absorbe estos 48 bytes. Los dos crecimientos son independientes y NO se
+// suman al techo: se suman DENTRO de él. Con Agenda (#690) fusionada, la
+// unión medida quedará en torno a 218742 y el margen en unas decenas de
+// bytes: el siguiente que la roce vuelve a medir y a subirla a mano.
 const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218750 });
 
 function staticImports(code, identifier) {

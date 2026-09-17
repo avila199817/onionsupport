@@ -1,6 +1,6 @@
 import { escapeHtml } from "../../core/escape-html.js";
-import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
-import { createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../entity-overlay/modal-host.js";
+import { createModalLifecycle, holdModalPanel, liveModalOpener, releaseModalPanel, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
+import { MODAL_SHELL_SELECTORS, createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support · Incidencias Technician Profile
 
@@ -12,7 +12,10 @@ import { createModalHost, renderModalCloseButton, renderModalContent, renderModa
      backend expone el agregado público; nunca se pintan tickets de terceros.
    - Si el backend aún no expone el agregado público, se muestra únicamente el
      total que la sesión actual puede conocer, claramente marcado como ámbito.
-   - Valoración preparada para 5 estrellas: empieza en 0,0 / 5 y 0 opiniones.
+   - La valoración NO se calcula aquí. La resume el backend sobre la atribución
+     que ya está persistida en el vínculo, y este modal la presenta con estados
+     explícitos: consultando, dato, sin valoraciones, restringido, error. Un cero
+     no sustituye a un vacío y un vacío no sustituye a un fallo.
    - Sin formulario de valoración en esta versión.
    - Avatar delegado al AvatarSystem global; foto del ticket/usuario.
 ========================================================= */
@@ -30,18 +33,29 @@ import {
 } from "../avatar-system/index.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { safeObject, firstNonEmpty } from "../../core/objects.js";
-import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { ERROR_MESSAGE_POLICIES, errorMessage, errorStatus } from "../../core/errors.js";
 import { finiteNumber } from "../../core/numbers.js";
 import { formatDecimal } from "../../core/format.js";
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
-  "incidencias-technician-profile.v9-public-metrics-rating-ready";
+  "incidencias-technician-profile.v10-technician-rating-from-authority";
 
+/* La escala que dibuja el modal mientras no hay respuesta. En cuanto la hay,
+   manda la que declara el resumen del backend: la escala no se duplica. */
 export const TECHNICIAN_RATING_MAX = 5;
-export const TECHNICIAN_RATING_INITIAL = Object.freeze({
-  average: 0,
-  count: 0,
-  max: TECHNICIAN_RATING_MAX,
+
+/* LOS CINCO ESTADOS SON DISTINTOS ENTRE SÍ.
+ *
+ * Consultando no es «sin valoraciones»; «sin valoraciones» no es un cero; una
+ * sesión sin permiso para el agregado no es un técnico sin opiniones; y un fallo
+ * de carga no es ninguna de las anteriores. */
+export const TECHNICIAN_RATING_STATES = Object.freeze({
+  loading: "loading",
+  value: "value",
+  empty: "empty",
+  restricted: "restricted",
+  unresolved: "unresolved",
+  error: "error",
 });
 
 const VIEW = "#view-container, [data-router-view='true']";
@@ -58,6 +72,8 @@ const ROW = "[data-ticket-row='true']";
 const HOST_ID = "incidencias-technician-profile-host";
 const ROOT_ID = "incidencias-technician-profile-root";
 const PANEL_ID = "incidencias-technician-profile-panel";
+const RETRY_RATING = "[data-technician-profile-action='retry-rating']";
+const METRICS_SECTION = "[data-technician-public-metrics='true']";
 const TRUSTED_BLOB_HOST = "onionassets.blob.core.windows.net";
 const PUBLIC_METRIC_LIMIT = 1;
 
@@ -87,9 +103,15 @@ let frame = 0;
 let requestSeq = 0;
 let returnFocus = null;
 let profileOrigin = null;
+let heldPanel = null;
 const profileHost = createModalHost({ id: HOST_ID, attributes: { "data-technician-profile-host": "true" } });
 let incidenceApiPromise = null;
 let usersApiPromise = null;
+let reviewsApiPromise = null;
+/* Lo que necesita un reintento del resumen: de qué apertura es y sobre qué
+   técnico. Se descarta al cerrar, para que un reintento tardío no escriba en un
+   perfil que ya no es el de la pantalla. */
+let ratingContext = null;
 const modalLifecycle = createModalLifecycle({
   getPanel: () => profileOrigin?.isConnected ? modalPanel() : null,
   onDetached: () => closeProfile({ restoreFocus: false }),
@@ -172,8 +194,8 @@ function numberLabel(value = 0) {
   return formatDecimal(Number(value) || 0);
 }
 
-function ratingLabel(value = 0) {
-  const safe = Math.max(0, Math.min(TECHNICIAN_RATING_MAX, Number(value) || 0));
+function ratingLabel(value = 0, max = TECHNICIAN_RATING_MAX) {
+  const safe = Math.max(0, Math.min(max, Number(value) || 0));
   try {
     return new Intl.NumberFormat("es-ES", {
       minimumFractionDigits: 1,
@@ -506,9 +528,9 @@ export function normalizePublicTechnicianMetrics(response = null) {
     resolvedTotalKnown: explicitResolved !== null || responseTotal !== null,
     scope: publicScope ? "public-total" : "session-total",
     publicTotal: publicScope,
-    ratingAverage: TECHNICIAN_RATING_INITIAL.average,
-    ratingCount: TECHNICIAN_RATING_INITIAL.count,
-    ratingMax: TECHNICIAN_RATING_INITIAL.max,
+    /* Este agregado cuenta incidencias resueltas y NADA MÁS. La valoración tiene
+       su propia autoridad: si asomara por aquí habría dos fuentes para un mismo
+       número, que es justo el defecto que se está cerrando. */
   });
 }
 
@@ -588,6 +610,136 @@ export async function loadPublicTechnicianMetrics(api, tech = {}) {
   }
 }
 
+/* =========================================================
+   VALORACIONES · UNA AUTORIDAD, RESUELTA EN EL SERVIDOR
+
+   QUIÉN. Se pregunta por la MISMA identidad que el backend congeló en el vínculo
+   cuando creó la invitación: el `assignedToUserId` del ticket, que es el
+   `lookupUserId` con el que este modal ya pide el usuario. No se pregunta por
+   nombre, ni por correo, ni por «el técnico que se ve en pantalla», ni por quien
+   mira. Sin identidad no se inventa ninguna: el modal lo dice.
+
+   QUÉ. La media y el recuento llegan hechos. Aquí no se suma nada, no se miran
+   las facturas que Facturas tenga cargadas, ni las incidencias de Home, ni el
+   historial del navegador. Si la respuesta habla de otro técnico, no se pinta.
+========================================================= */
+const reviewsApi = () =>
+  reviewsApiPromise ||= import("../../views/facturas/facturas.reviews.api.js");
+
+function technicianRatingIdentity(tech = {}) {
+  return cleanText(firstNonEmpty(tech.lookupUserId, tech.userId), "");
+}
+
+async function loadTechnicianRating(technicianId = "") {
+  const asked = cleanText(technicianId, "");
+  if (!asked) return { state: TECHNICIAN_RATING_STATES.unresolved };
+
+  try {
+    const summary = await (await reviewsApi()).getTechnicianReviewSummary(asked);
+
+    /* La respuesta dice a quién describe. Si no es este técnico, el perfil de A
+       no puede terminar enseñando el resumen de B: es un fallo, no un dato. */
+    if (cleanText(summary?.technicianId, "") !== asked) {
+      return {
+        state: TECHNICIAN_RATING_STATES.error,
+        message: "El resumen recibido no corresponde a este técnico.",
+      };
+    }
+
+    if (summary.count === 0) {
+      return { state: TECHNICIAN_RATING_STATES.empty, max: summary.max };
+    }
+    return {
+      state: TECHNICIAN_RATING_STATES.value,
+      count: summary.count,
+      average: summary.average,
+      max: summary.max,
+    };
+  } catch (error) {
+    /* Una sesión sin autorización para el agregado NO es un técnico sin
+       valoraciones. Decirlo como un vacío sería mentir en la dirección cómoda. */
+    const status = errorStatus(error, 0);
+    if (status === 401 || status === 403) {
+      return { state: TECHNICIAN_RATING_STATES.restricted };
+    }
+    return {
+      state: TECHNICIAN_RATING_STATES.error,
+      message: errorMessage(
+        error,
+        "No se pudo consultar el resumen de valoraciones.",
+        ERROR_MESSAGE_POLICIES.messageFirst
+      ).slice(0, 160),
+    };
+  }
+}
+
+/* UNA SOLA LECTURA PARA LAS CUATRO SUPERFICIES.
+ *
+ * La cabecera, la tarjeta «Valoración», el recuento de «Opiniones» y el bloque
+ * de estrellas leen ESTE objeto. La nota se formatea una vez y aquí; ninguna de
+ * las cuatro la vuelve a componer por su cuenta. */
+function technicianRatingView(rating = {}) {
+  const raw = safeObject(rating);
+  const state = cleanText(raw.state, TECHNICIAN_RATING_STATES.error);
+  const max = nonNegativeInteger(raw.max, 0) || TECHNICIAN_RATING_MAX;
+  const hasValue = state === TECHNICIAN_RATING_STATES.value;
+  const count = hasValue ? (nonNegativeInteger(raw.count, 0) || 0) : 0;
+  const average = hasValue ? finiteNumber(raw.average, 0) : null;
+
+  const plural = count === 1 ? "valoración" : "valoraciones";
+  /* LA NOTA SE FORMATEA UNA VEZ Y AQUÍ. La tarjeta, la cabecera y el marcador
+     grande leen este par; ninguno vuelve a llamar al formateador. */
+  const scoreValue = hasValue ? ratingLabel(average, max) : "—";
+  const score = hasValue ? `${scoreValue} / ${max}` : "—";
+  const texts = {
+    [TECHNICIAN_RATING_STATES.loading]: {
+      headline: "Consultando valoraciones…",
+      hint: "Consultando el resumen del técnico",
+      summary: "valoraciones: consultando",
+    },
+    [TECHNICIAN_RATING_STATES.value]: {
+      headline: `${numberLabel(count)} ${plural}`,
+      hint: "Media de las valoraciones recibidas por este técnico",
+      summary: `${score} · ${numberLabel(count)} ${plural}`,
+    },
+    [TECHNICIAN_RATING_STATES.empty]: {
+      headline: "Sin valoraciones",
+      hint: "Todavía no ha recibido ninguna valoración",
+      summary: "sin valoraciones",
+    },
+    [TECHNICIAN_RATING_STATES.restricted]: {
+      headline: "No disponible en tu sesión",
+      hint: "El resumen de valoraciones está restringido a las autorizaciones actuales",
+      summary: "valoraciones no disponibles",
+    },
+    [TECHNICIAN_RATING_STATES.unresolved]: {
+      headline: "Técnico sin identificar",
+      hint: "No se ha podido identificar al técnico para consultar su resumen",
+      summary: "valoraciones sin consultar",
+    },
+    [TECHNICIAN_RATING_STATES.error]: {
+      headline: "No se pudo cargar",
+      hint: cleanText(raw.message, "No se pudo consultar el resumen de valoraciones."),
+      summary: "valoraciones no disponibles",
+    },
+  };
+  const text = texts[state] || texts[TECHNICIAN_RATING_STATES.error];
+
+  return Object.freeze({
+    state: texts[state] ? state : TECHNICIAN_RATING_STATES.error,
+    max,
+    count,
+    average,
+    /* Hasta que el dato esté confirmado no se escribe ninguna nota. */
+    scoreValue,
+    score,
+    opinions: hasValue ? numberLabel(count) : "—",
+    headline: text.headline,
+    hint: text.hint,
+    summary: text.summary,
+  });
+}
+
 function sectionHeader(title = "", subtitle = "") {
   return `<div class="ui-detail-modal-section-head"><h3>${escapeHtml(title)}</h3>${subtitle ? `<span>${escapeHtml(subtitle)}</span>` : ""}</div>`;
 }
@@ -624,9 +776,9 @@ function starIcon(filled = false, index = 0) {
   return `<span class="inc-technician-star" data-star-index="${index + 1}" data-star-filled="${filled ? "true" : "false"}" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m12 2.75 2.78 5.63 6.22.91-4.5 4.38 1.06 6.19L12 16.94 6.44 19.86 7.5 13.67 3 9.29l6.22-.91L12 2.75Z"/></svg></span>`;
 }
 
-function ratingStars(average = 0) {
-  const safe = Math.max(0, Math.min(TECHNICIAN_RATING_MAX, Number(average) || 0));
-  return Array.from({ length: TECHNICIAN_RATING_MAX }, (_, index) =>
+function ratingStars(average = 0, max = TECHNICIAN_RATING_MAX) {
+  const safe = Math.max(0, Math.min(max, Number(average) || 0));
+  return Array.from({ length: max }, (_, index) =>
     starIcon(index + 1 <= Math.floor(safe), index)
   ).join("");
 }
@@ -657,15 +809,22 @@ function statusChip(tech = {}) {
   return `<span class="ui-detail-modal-chip ${modifier}">${active ? "Activo" : "Inactivo"}</span>`;
 }
 
-function renderRating(metrics = {}) {
-  const average = Number(metrics.ratingAverage) || 0;
-  const count = nonNegativeInteger(metrics.ratingCount, 0) || 0;
-  const label = `${ratingLabel(average)} de ${TECHNICIAN_RATING_MAX}, ${numberLabel(count)} valoraciones`;
+function renderRating(view = {}) {
+  const value = view.state === TECHNICIAN_RATING_STATES.value;
+  const busy = view.state === TECHNICIAN_RATING_STATES.loading;
+  const label = value
+    ? `Valoración media ${view.score}, ${view.headline}`
+    : `Valoración: ${view.headline}`;
 
-  return `<div class="inc-technician-rating-card" data-technician-rating="true" data-rating-average="${average}" data-rating-count="${count}" data-rating-max="${TECHNICIAN_RATING_MAX}" aria-label="${attr(`Valoración media ${label}`)}"><div class="inc-technician-rating-score"><strong>${escapeHtml(ratingLabel(average))}</strong><span>/ ${TECHNICIAN_RATING_MAX}</span></div><div class="inc-technician-rating-main"><div class="inc-technician-stars" aria-hidden="true">${ratingStars(average)}</div><strong>${count ? `${numberLabel(count)} valoración${count === 1 ? "" : "es"}` : "Sin valoraciones todavía"}</strong><span>La valoración se activará en una fase posterior al cierre de incidencias. Este modal ya está preparado para mostrarla.</span></div></div>`;
+  /* Un fallo se puede reintentar sin recargar la sesión ni reabrir el perfil. */
+  const retry = view.state === TECHNICIAN_RATING_STATES.error
+    ? `<button type="button" class="ui-btn ui-btn-secondary inc-technician-rating-retry" data-technician-profile-action="retry-rating">Reintentar</button>`
+    : "";
+
+  return `<div class="inc-technician-rating-card" data-technician-rating="true" data-technician-rating-state="${attr(view.state)}" data-rating-average="${value ? view.average : ""}" data-rating-count="${value ? view.count : ""}" data-rating-max="${view.max}" role="${busy || view.state === TECHNICIAN_RATING_STATES.error ? "status" : "group"}" aria-busy="${busy ? "true" : "false"}" aria-label="${attr(label)}"><div class="inc-technician-rating-score"><strong>${escapeHtml(view.scoreValue)}</strong><span>${value ? `/ ${view.max}` : ""}</span></div><div class="inc-technician-rating-main"><div class="inc-technician-stars" aria-hidden="true">${ratingStars(value ? view.average : 0, view.max)}</div><strong>${escapeHtml(view.headline)}</strong><span>${escapeHtml(view.hint)}</span>${retry}</div></div>`;
 }
 
-function renderMetrics(tech = {}, metrics = {}) {
+function renderMetrics(tech = {}, metrics = {}, view = {}) {
   const profile = publicTechnicianProfileFor(tech);
   const resolvedKnown = metrics.resolvedTotalKnown === true;
   const resolved = resolvedKnown ? numberLabel(metrics.resolvedTotal) : "—";
@@ -676,7 +835,7 @@ function renderMetrics(tech = {}, metrics = {}) {
       ? "Cómputo disponible en el ámbito de tu sesión"
       : "El backend aún no ha publicado un cómputo agregado";
 
-  return `<section class="ui-detail-modal-description-section inc-technician-performance" data-technician-public-metrics="true" data-resolved-scope="${attr(metrics.scope || "unknown")}">${sectionHeader("Rendimiento y valoración", "Información pública y segura")}<div class="inc-technician-overview-grid">${metaCard("Incidencias resueltas", resolved, resolvedHint, "inc-technician-resolved-metric")}${metaCard("Valoración", `${ratingLabel(metrics.ratingAverage)} / ${TECHNICIAN_RATING_MAX}`, "Sistema preparado para 5 estrellas")}${metaCard("Opiniones", numberLabel(metrics.ratingCount || 0), "Se habilitarán con el flujo de cierre")}${profile ? metaCard("Experiencia", `${profile.experienceValue} ${profile.experienceLabel}`, "Trayectoria profesional publicada") : metaCard("Estado", statusLabel(tech.status), "Técnico asignado")}</div>${renderRating(metrics)}</section>`;
+  return `<section class="ui-detail-modal-description-section inc-technician-performance" data-technician-public-metrics="true" data-resolved-scope="${attr(metrics.scope || "unknown")}">${sectionHeader("Rendimiento y valoración", "Información pública y segura")}<div class="inc-technician-overview-grid">${metaCard("Incidencias resueltas", resolved, resolvedHint, "inc-technician-resolved-metric")}${metaCard("Valoración", view.score, view.hint)}${metaCard("Opiniones", view.opinions, view.headline)}${profile ? metaCard("Experiencia", `${profile.experienceValue} ${profile.experienceLabel}`, "Trayectoria profesional publicada") : metaCard("Estado", statusLabel(tech.status), "Técnico asignado")}</div>${renderRating(view)}</section>`;
 }
 
 function renderLoading(seed = {}) {
@@ -684,7 +843,7 @@ function renderLoading(seed = {}) {
   return renderShell({
     tech,
     summary: "Cargando perfil del técnico…",
-    body: `<section class="ui-detail-modal-description-section" aria-busy="true">${sectionHeader("Preparando perfil", "Sólo métricas agregadas")}<div class="inc-technician-overview-grid">${metaCard("Incidencias resueltas", "…")}${metaCard("Valoración", "0,0 / 5")}${metaCard("Opiniones", "0")}${metaCard("Perfil", "Cargando…")}</div></section>`,
+    body: `<section class="ui-detail-modal-description-section" aria-busy="true">${sectionHeader("Preparando perfil", "Sólo métricas agregadas")}<div class="inc-technician-overview-grid">${metaCard("Incidencias resueltas", "…")}${metaCard("Valoración", "—", "Consultando el resumen del técnico")}${metaCard("Opiniones", "—", "Consultando valoraciones…")}${metaCard("Perfil", "Cargando…")}</div></section>`,
   });
 }
 
@@ -697,7 +856,16 @@ function renderError(seed = {}, message = "") {
   });
 }
 
-function renderProfile(tech = {}, metrics = {}) {
+/* La frase de la cabecera se compone UNA vez: la usan tanto el pintado completo
+   como la actualización en sitio del resumen. */
+function profileSummary(metrics = {}, view = {}) {
+  const resolvedSummary = metrics.resolvedTotalKnown
+    ? `${numberLabel(metrics.resolvedTotal)} resuelta${metrics.resolvedTotal === 1 ? "" : "s"}`
+    : "resoluciones sin publicar";
+  return `${resolvedSummary} · ${view.summary}`;
+}
+
+function renderProfile(tech = {}, metrics = {}, view = {}) {
   const profile = publicTechnicianProfileFor(tech);
   const email = normalizeEmail(tech.email);
   const phone = cleanText(tech.phone, "");
@@ -710,7 +878,7 @@ function renderProfile(tech = {}, metrics = {}) {
   ), "Técnico");
 
   const body = `
-    ${renderMetrics(tech, metrics)}
+    ${renderMetrics(tech, metrics, view)}
 
     <section class="ui-detail-modal-contact-section inc-technician-profile-contact">
       ${sectionHeader("Perfil y contacto", "Datos útiles para el cliente")}
@@ -726,12 +894,7 @@ function renderProfile(tech = {}, metrics = {}) {
       </div>
     </section>`;
 
-  const resolvedSummary = metrics.resolvedTotalKnown
-    ? `${numberLabel(metrics.resolvedTotal)} resuelta${metrics.resolvedTotal === 1 ? "" : "s"}`
-    : "resoluciones sin publicar";
-  const summary = `${resolvedSummary} · ${ratingLabel(metrics.ratingAverage)} / ${TECHNICIAN_RATING_MAX}`;
-
-  return renderShell({ tech, body, summary });
+  return renderShell({ tech, body, summary: profileSummary(metrics, view) });
 }
 
 function renderShell({ tech = {}, body = "", summary = "" } = {}) {
@@ -782,6 +945,19 @@ function modalPanel() {
   return document.getElementById(PANEL_ID);
 }
 
+/* EL PANEL QUE ESTA CAPA CUBRE, SI CUBRE ALGUNO.
+ *
+ * Abierto desde el detalle de una incidencia, el perfil se pinta ENCIMA de su
+ * panel. Abierto desde la lista no cubre ninguna capa: no hay empate que
+ * deshacer y no se retiene nada. */
+function coveredPanel() {
+  /* Quién es «el panel» lo dice el shell, no esta capa: se pregunta por su
+     selector publicado, no por una copia de su clase. */
+  return profileOrigin?.matches?.(DETAIL_ROOT)
+    ? profileOrigin.querySelector?.(MODAL_SHELL_SELECTORS.panel)
+    : null;
+}
+
 function paint(html = "", { focus = false } = {}) {
   if (!profileOrigin?.isConnected) return false;
   const host = profileHost.ensure();
@@ -789,20 +965,90 @@ function paint(html = "", { focus = false } = {}) {
   renderModalContent(host, html, {
     focusAttributes: ["id", "data-technician-profile-action", "href"],
   });
+
+  /* ESTA CAPA TAMBIÉN ENTRA EN LA PILA.
+   *
+   * Medido en el navegador: el host del perfil se crea una vez y no se retira;
+   * el del detalle se destruye y se vuelve a añadir al final de `body` con cada
+   * controlador nuevo. Ambas raíces declaran el mismo `--z-modal`, así que en
+   * cuanto el detalle queda DESPUÉS el perfil se pinta debajo y su velo se
+   * queda con los clics: el foco entraba, el teclado funcionaba y el ratón no.
+   * Tras cambiar de vista y volver, el perfil pasaba de body[8] a body[6] y el
+   * detalle de body[7] a body[9].
+   *
+   * No se inventa aquí ningún z-index ni ningún gestor: se usa la MISMA
+   * autoridad de pila que ya usan el visor de adjuntos y la confirmación de
+   * cobro. Ella marca lo cubierto y la hoja compartida lo dibuja. */
+  heldPanel = coveredPanel() || heldPanel;
+  holdModalPanel(heldPanel, { activeLayer: host });
+
   lockBody();
   queueMicrotask(() => synchronizeAvatars(host));
   if (focus) queueMicrotask(() => restoreModalFocus(modalPanel()));
   return true;
 }
 
+/* ACTUALIZACIÓN EN SITIO, SIN REPINTAR EL PANEL.
+ *
+ * Repintar el modal entero por una sección se llevaría por delante el foco de
+ * quien esté navegando. Se sustituyen las DOS superficies que dependen del
+ * resumen --la sección de rendimiento y la frase de la cabecera-- y el foco se
+ * queda dentro del diálogo. */
+function applyRating(tech = {}, metrics = {}, view = {}) {
+  const root = document.getElementById(ROOT_ID);
+  const section = root?.querySelector?.(METRICS_SECTION);
+  if (!root || !section) return false;
+
+  const teniaFoco = Boolean(
+    document.activeElement && section.contains(document.activeElement)
+  );
+  section.outerHTML = renderMetrics(tech, metrics, view);
+
+  const summary = root.querySelector("#inc-technician-summary");
+  if (summary) summary.textContent = profileSummary(metrics, view);
+
+  if (teniaFoco) restoreModalFocus(root.querySelector(RETRY_RATING) || modalPanel());
+  return true;
+}
+
+async function retryRating() {
+  const context = ratingContext;
+  if (!context || context.sequence !== requestSeq) return false;
+
+  applyRating(context.tech, context.metrics, technicianRatingView({
+    state: TECHNICIAN_RATING_STATES.loading,
+  }));
+  const rating = await loadTechnicianRating(context.technicianId);
+
+  /* Si entretanto se cerró o se abrió otro perfil, esta respuesta ya no es de
+     esta pantalla y no se escribe en ella. */
+  if (ratingContext !== context || context.sequence !== requestSeq) return false;
+  applyRating(context.tech, context.metrics, technicianRatingView(rating));
+  return true;
+}
+
 function closeProfile({ restoreFocus = true } = {}) {
   requestSeq += 1;
+  ratingContext = null;
   profileHost.clear();
+  /* Se suelta lo que ESTA capa retuvo, y sólo eso. */
+  const released = heldPanel;
+  releaseModalPanel(released);
+  heldPanel = null;
   unlockBody();
   const target = returnFocus;
   returnFocus = null;
   profileOrigin = null;
-  if (restoreFocus) restoreModalFocus(target);
+  if (restoreFocus) {
+    /* El detalle de debajo pudo repintarse mientras el perfil lo cubría: el
+       disparador que se pulsó sería entonces un nodo suelto. La autoridad de
+       pila busca su equivalente vivo dentro del panel que se acaba de soltar. */
+    const vivo = liveModalOpener(target, {
+      within: released,
+      identity: ["data-ticket-id", "data-technician-profile-trigger", "id"],
+    }) || target;
+    restoreModalFocus(vivo);
+  }
   return true;
 }
 
@@ -1025,10 +1271,25 @@ async function loadProfile(trigger = null) {
     if (sequence !== requestSeq) return false;
 
     const tech = mergeTechnician(snapshot, user || {});
+
+    /* El resumen se pide EN PARALELO con el agregado de incidencias: uno lento no
+       retrasa el perfil, y el perfil no afirma ninguna nota mientras la
+       pregunta. */
+    const technicianId = technicianRatingIdentity(tech);
+    const ratingRequest = loadTechnicianRating(technicianId);
     const metrics = await loadPublicTechnicianMetrics(api, tech);
 
     if (sequence !== requestSeq) return false;
-    paint(renderProfile(tech, metrics));
+    ratingContext = { sequence, tech, metrics, technicianId };
+    paint(renderProfile(tech, metrics, technicianRatingView({
+      state: technicianId
+        ? TECHNICIAN_RATING_STATES.loading
+        : TECHNICIAN_RATING_STATES.unresolved,
+    })));
+
+    const rating = await ratingRequest;
+    if (sequence !== requestSeq || ratingContext?.sequence !== sequence) return true;
+    applyRating(tech, metrics, technicianRatingView(rating));
     return true;
   } catch (error) {
     if (sequence !== requestSeq) return false;
@@ -1054,6 +1315,13 @@ function onClick(event) {
     event.preventDefault();
     event.stopPropagation();
     closeProfile();
+    return;
+  }
+
+  if (target?.closest?.(RETRY_RATING)) {
+    event.preventDefault();
+    event.stopPropagation();
+    void retryRating();
     return;
   }
 
@@ -1144,8 +1412,9 @@ export function getIncidenciasTechnicianProfileSnapshot() {
     resolvedTicketCardsRendered: false,
     activityTicketCardsRendered: false,
     ratingMax: TECHNICIAN_RATING_MAX,
-    ratingInitialAverage: TECHNICIAN_RATING_INITIAL.average,
-    ratingInitialCount: TECHNICIAN_RATING_INITIAL.count,
+    ratingAuthority: "api.facturas.tecnicos.valoraciones",
+    ratingStates: Object.values(TECHNICIAN_RATING_STATES),
+    ratingComputedInBrowser: false,
     ratingSubmissionEnabled: false,
     detailModalIntegrated: Boolean(observedModalHost),
     modalOpen: Boolean(browser() && document.getElementById(ROOT_ID)),

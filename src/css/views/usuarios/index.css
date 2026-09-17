@@ -121,6 +121,45 @@
   color: var(--warning-strong, var(--warning));
 }
 
+.usuarios-chip--action {
+  appearance: none;
+  margin: 0;
+  font: inherit;
+  line-height: 1.25;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.usuarios-chip--action:hover:not(:disabled) {
+  background: var(--warning-soft, var(--warning-bg));
+  color: var(--text-strong);
+  transform: translateY(-1px);
+}
+
+.usuarios-chip--action:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 2px;
+}
+
+.usuarios-chip--action:disabled,
+.usuarios-chip--action[aria-disabled="true"] {
+  cursor: wait;
+  opacity: .82;
+}
+
+.usuarios-chip--action.is-busy .usuarios-chip-dot {
+  animation: usuarios-pending-pulse 900ms ease-in-out infinite alternate;
+}
+
+@keyframes usuarios-pending-pulse {
+  from { transform: scale(.82); opacity: .55; }
+  to { transform: scale(1.18); opacity: 1; }
+}
+
 .usuarios-chip--blocked,
 .usuarios-chip--inactive,
 .usuarios-status-chip--blocked,
@@ -261,6 +300,177 @@
 .usuarios-feed-error {
   flex-wrap: wrap;
   color: var(--warning);
+}
+
+/* =========================================================
+   ACTIVATION RESEND CONFIRMATION
+========================================================= */
+
+.usuarios-resend-confirm-heading {
+  min-inline-size: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.usuarios-resend-confirm-eyebrow {
+  color: var(--warning-strong, var(--warning));
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
+.usuarios-resend-confirm-heading h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--font-xl);
+  font-weight: var(--weight-black);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.usuarios-resend-confirm-body {
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: start;
+}
+
+.usuarios-resend-confirm-icon {
+  inline-size: 44px;
+  block-size: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-warning);
+  border-radius: var(--radius-sm);
+  background: var(--warning-bg);
+  color: var(--warning-strong, var(--warning));
+  font-size: 24px;
+  font-weight: var(--weight-black);
+  line-height: 1;
+}
+
+.usuarios-resend-confirm-copy {
+  min-inline-size: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.usuarios-resend-confirm-copy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.usuarios-resend-confirm-copy strong {
+  color: var(--text-strong);
+}
+
+.usuarios-resend-confirm-meta {
+  min-inline-size: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.usuarios-resend-confirm-meta > span {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-pill);
+  background: var(--badge-bg);
+  color: var(--badge-text);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.usuarios-resend-confirm-btn {
+  appearance: none;
+  min-block-size: var(--btn-height-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding-inline: 13px;
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: var(--btn-radius);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.usuarios-resend-confirm-btn--cancel:hover:not(:disabled) {
+  background: var(--btn-secondary-bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+
+.usuarios-resend-confirm-btn--confirm {
+  border-color: var(--border-warning);
+  background: var(--warning-bg);
+  color: var(--warning-strong, var(--warning));
+}
+
+.usuarios-resend-confirm-btn--confirm:hover:not(:disabled) {
+  background: var(--warning-soft, var(--warning-bg));
+  color: var(--text-strong);
+  transform: translateY(-1px);
+}
+
+.usuarios-resend-confirm-btn:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+  .usuarios-resend-confirm-body {
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: var(--space-sm);
+  }
+
+  .usuarios-resend-confirm-icon {
+    inline-size: 40px;
+    block-size: 40px;
+    font-size: 21px;
+  }
+
+  .usuarios-resend-confirm-btn {
+    flex: 1 1 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .usuarios-chip--action,
+  .usuarios-resend-confirm-btn {
+    transition: none;
+  }
+
+  .usuarios-chip--action.is-busy .usuarios-chip-dot {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .usuarios-chip--action,
+  .usuarios-resend-confirm-icon,
+  .usuarios-resend-confirm-btn,
+  .usuarios-resend-confirm-meta > span {
+    border-color: CanvasText;
+    forced-color-adjust: auto;
+  }
 }
 
 @media print {

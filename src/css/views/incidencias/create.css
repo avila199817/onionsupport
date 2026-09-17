@@ -226,7 +226,6 @@
 .inc-create-textarea:focus {
   background: var(--input-bg-focus);
   border-color: var(--input-border-focus);
-  box-shadow: var(--focus-ring);
 }
 
 .inc-create-input:disabled,
@@ -487,11 +486,6 @@
 .inc-create-user-result:focus-visible {
   border-color: var(--border-default);
   background: var(--solid-hover);
-  outline: none;
-}
-
-.inc-create-user-result:focus-visible {
-  box-shadow: var(--focus-ring);
 }
 
 /* =========================================================
@@ -533,7 +527,8 @@
 .inc-create-dropzone.is-active {
   border-color: var(--input-border-focus);
   background: var(--input-bg-hover);
-  box-shadow: var(--focus-ring);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 2px;
 }
 
 .inc-create-dropzone.is-error {
@@ -821,13 +816,6 @@
 .inc-create-submit:active:not(:disabled) {
   background: var(--btn-primary-bg-active);
   transform: translateY(0);
-}
-
-.inc-create-submit:focus-visible,
-.inc-create-selected-user-clear:focus-visible,
-.inc-create-file-remove:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
 }
 
 .inc-create-submit:disabled,

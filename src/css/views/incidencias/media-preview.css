@@ -149,10 +149,8 @@
 }
 
 .incidencias-media-gallery-nav:focus-visible {
-  outline: none;
   box-shadow:
-    0 10px 28px color-mix(in srgb, #000 24%, transparent),
-    var(--focus-ring);
+    0 10px 28px color-mix(in srgb, #000 24%, transparent);
 }
 
 .incidencias-media-gallery-nav:disabled {

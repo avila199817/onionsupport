@@ -69,13 +69,6 @@
   font: inherit;
 }
 
-.home-btn:focus-visible,
-.home-link-button:focus-visible,
-.home-stat-card-button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 .home-btn,
 .home-link-button {
   appearance: none;

@@ -33,9 +33,31 @@
          tema oscuro, base                1.79:1
          tema oscuro, más contraste       3.06:1   (el único que pasaba)
 
-   Esta hoja no reinventa el mecanismo --sigue siendo el mismo `box-shadow`,
-   para no chocar con los 83 sitios que ya lo declaran-- sino que lo pone donde
-   gana. Los valores del anillo se corrigen en la capa de tokens.
+   EL MECANISMO, CORREGIDO
+
+   Ponerlo en la última capa arregló el síntoma 2 y dejó el 1 al revés: al
+   ganar siempre, el anillo BORRA la sombra decorativa del componente. Medido
+   en navegador sobre `.ui-btn-primary`, con la transición ya asentada:
+
+     en reposo   dos sombras propias
+     enfocado    una sola: el anillo
+
+   Es decir, las doce reglas que declaraban `box-shadow: <su sombra>,
+   var(--focus-ring)` para conservar las dos no conservaban ninguna, y el
+   `--focus-ring-strong` de `.ui-btn-primary` nunca llegaba a pintarse.
+
+   La causa es la propiedad, no la capa: dos `box-shadow` sobre el mismo
+   elemento no se suman, se sustituyen. Así que el anillo pasa a `outline`, que
+   es OTRA propiedad y convive con la sombra. Entonces:
+
+     - el componente conserva su sombra Y recibe el anillo;
+     - las 67 redeclaraciones del proyecto sobran, todas;
+     - el `outline: 2px solid transparent` que existía sólo para que
+       `forced-colors` tuviera algo que pintar deja de hacer falta, porque ya
+       hay un outline de verdad.
+
+   `outline` sigue el `border-radius` del elemento en todos los navegadores que
+   este proyecto soporta, así que el anillo se ve igual que antes.
 
    NO define geometría de layout ni lógica de dominio.
    NO contiene @layer: app.css asigna layer(guardrails).
@@ -61,18 +83,16 @@
   [role="option"],
   [tabindex]:not([tabindex="-1"])
 ):focus-visible {
-  outline: 2px solid transparent;
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: 2px;
-
-  box-shadow: var(--focus-ring);
 }
 
 /* =========================================================
    ALTO CONTRASTE DEL SISTEMA
 
-   En forced-colors el navegador ignora `box-shadow`, así que el indicador
-   tiene que ser un `outline` real. El `solid transparent` de arriba existe
-   precisamente para que el sistema pueda pintarlo aquí.
+   En forced-colors el navegador impone sus propios colores. El indicador ya es
+   un `outline` de verdad, así que aquí sólo se cambia el color por el del
+   sistema y se engorda un punto.
 ========================================================= */
 
 @media (forced-colors: active) {

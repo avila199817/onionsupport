@@ -371,14 +371,6 @@
   opacity: .5;
 }
 
-.cuenta-btn:focus-visible,
-.cuenta-field input:focus-visible,
-.cuenta-field select:focus-visible,
-.cuenta-segment:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 /* =========================================================
    PHOTO
 ========================================================= */
@@ -493,7 +485,6 @@
 .cuenta-field select:focus {
   background: var(--input-bg-focus);
   border-color: var(--input-border-focus);
-  box-shadow: var(--focus-ring);
 }
 
 .cuenta-hint,

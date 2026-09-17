@@ -1834,11 +1834,6 @@
 .agenda-picker-result:focus-visible {
   border-color: var(--border-default);
   background: var(--solid-hover);
-  outline: none;
-}
-
-.agenda-picker-result:focus-visible {
-  box-shadow: var(--focus-ring);
 }
 
 .agenda-picker-result:disabled {

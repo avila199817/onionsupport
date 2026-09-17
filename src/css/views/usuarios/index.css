@@ -21,8 +21,6 @@
 
 .usuarios-history-subtitle:focus-visible {
   border-radius: var(--radius-xs);
-  outline: none;
-  box-shadow: var(--focus-ring);
 }
 
 .usuarios-table { min-inline-size: var(--usr-table-min); }

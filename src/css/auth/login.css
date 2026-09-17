@@ -1133,14 +1133,6 @@ body.auth-screen.auth-no-scroll {
   opacity: 1;
 }
 
-.auth-input:focus,
-.login-input:focus,
-.password-reset-input:focus,
-.input-text:focus,
-[data-password-input]:focus {
-  outline: none;
-}
-
 .auth-input:disabled,
 .login-input:disabled,
 .password-reset-input:disabled,

@@ -114,9 +114,7 @@
   }
 
   .ui-datalist-row:is([role="button"], [data-detail-target="true"]):focus-visible {
-    outline: 0;
     border-color: var(--input-border-focus, var(--border-strong));
-    box-shadow: var(--focus-ring);
   }
 
   /* =======================================================

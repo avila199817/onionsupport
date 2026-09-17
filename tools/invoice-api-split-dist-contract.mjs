@@ -29,18 +29,37 @@ const JS_ROOT = resolve(DIST, "assets/js");
 // what the SPA loads, so it belongs in this closure; the ceiling moves to
 // 218600, leaving 57 bytes. Nothing is preloaded: the growth is the rule, not
 // the payload. app and auth keep their ceilings.
-// R06 (2026-09-17): the technician profile now reads the per-technician review
+// R06 (2026-09-17): Agenda pasa a consumir el sistema modal compartido
+// (entity-overlay: shell, host, lifecycle y confirmaciones) y el combobox
+// accesible de seleccion de usuario. Al compartirlos, Vite deja de meterlos
+// en el chunk de Incidencias y los extrae a dos chunks propios, cuyos dos
+// nombres entran en la tabla de precarga que vive dentro de `routes`, que si
+// esta en el cierre bootstrap/Home.
+//   baseline  d5db0bdbecf89563f0e5109ebd4b66b277e82110 (main) -> 218563
+//   candidato 78f2dd003f2ae2abed8ec1ce4c7c09c29bca1ab9 (#690) -> 218694
+//   crecimiento +131 raw bytes, TODOS dentro de `routes` (20774 -> 20905):
+//     57  "assets/js/incidencias.create-user-combobox-<hash>.js",
+//     43  "assets/js/modal-confirmation-<hash>.js",
+//     31  los indices que la ruta /agenda anade a su lista de dependencias.
+//   Los otros quince chunks del cierre son byte a byte identicos a main, y
+//   el chunk de Incidencias ENCOGE 3.511 bytes (222994 -> 219483). No hay
+//   payload nuevo: hay dos modulos que pasan a compartirse.
+//   techo 218600 -> 218750, margen resultante 56 bytes.
+// app y auth conservan los suyos. Esta cota se sube a mano, con su medida,
+// cada vez: nada aqui la mueve solo.
+// R07 (2026-09-17): the technician profile now reads the per-technician review
 // summary from the same module that already talks to the reviews API, so that
 // module is shared by two lazy features and the bundler gives it its own chunk.
 // The ONLY growth is the enhancements preload manifest naming it: +48 raw bytes
 // (enhancements 10081 -> 10129, union 218563 -> 218611 on a1b458e5), no new
 // startup code and nothing new preloaded for the public Home -- that entry is
 // reachable from the `facturas` and `incidencias` scopes, never from `public`.
-// The ceiling moves to 218700, leaving 89 bytes. app and auth keep theirs.
-// COORDINACIÓN: la entrega de Agenda (PR #691) sube este mismo techo por su
-// cuenta; quien fusione en segundo lugar debe conciliar un único valor medido,
-// no sumar los dos.
-const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218700 });
+// El techo NO se mueve: R06 ya lo dejó en 218750 para Agenda, y ese margen
+// absorbe estos 48 bytes. Los dos crecimientos son independientes y NO se
+// suman al techo: se suman DENTRO de él. Con Agenda (#690) fusionada, la
+// unión medida quedará en torno a 218742 y el margen en unas decenas de
+// bytes: el siguiente que la roce vuelve a medir y a subirla a mano.
+const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218750 });
 
 function staticImports(code, identifier) {
   // PARSE ONLY. Never link, evaluate or supply a dynamic-import callback.

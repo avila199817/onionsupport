@@ -147,3 +147,95 @@ Incidencias**, para que ningún paso dependa de un orden afortunado.
 
 Datos sintéticos. Ninguna persona real. **Ninguna escritura sobre usuarios, fotografías,
 incidencias o facturas reales.**
+
+## V5 · Contabilidad exacta
+
+«164 contratos» no explica nada. Esto es lo que se ejecutó, dónde y con qué.
+
+### Entorno declarado
+
+| Dato | Valor medido |
+| --- | --- |
+| Máquina | contenedor de ejecución remota, Linux 6.18.44 |
+| Node | v22.22.2 (CI fija v22.23.2 y npm 10.9.8) |
+| Navegador | `/opt/pw-browsers/chromium` → `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` · **Chromium 141.0.7390.37** |
+| Variable necesaria | `CHROME_BIN=/opt/pw-browsers/chromium`. Sin ella, `avatar_runtime_dom_contract` corta la cadena en el primer paso («set CHROME_BIN for the avatar DOM contract»). |
+| `playwright-core` | 1.63.0; su navegador propio sería `chromium_headless_shell-1243`, que **no está instalado** (sólo `-1194`) |
+| Anchuras | recorrido 1440×900 y 390×844; `spa-modal-regression` 1280×900 |
+
+### Suites
+
+| Script | Ejecutables | Resultado |
+| --- | --- | --- |
+| `validate:source` | 39 pasos (tres agrupan varios contratos cada uno) | 39/39 correctos |
+| `test:trusted-build` | 4 | 4/4 |
+| `build` | 1 | correcto |
+| `check:dist` | 21 | 21/21 |
+| `test:browser:dist` | 25 de primer nivel; `private-domain-contracts --browser` expande a 15 subcontratos | 24 correctos · **1 fallo** |
+
+`npm run validate` termina con código 0.
+
+### Escenarios, contados por las propias herramientas
+
+Recorrido integrado 16 pasos × 2 entornos + 2 entradas en frío × 2 entornos ·
+matriz de propietarios 51 · modal de propietario privado 21 · ciclo de vida modal 22 ·
+alta de facturas 13 · confirmación de facturas 11 · pagadas 12 · consentimiento 13 ·
+conteos de Home 28 · altas/cancelaciones privadas 9 · correo 8 · avatar vigente 8 ·
+anfitrión compartido 6 · features por montaje 5 · carga visual 8 combinaciones × 53 primitivas.
+
+### Aserciones
+
+El tooling no lleva un contador global y **no me lo invento**. En los contratos de esta
+fase: 57 llamadas a `assert` y 12 esperas de estado observable en el recorrido, 25 y 8
+en el contrato de fotografía vigente, y 31 en el de etiquetas.
+
+### Negativas
+
+**Verificadas en esta fase, rompiéndolas a propósito:** cuatro.
+
+| Negativa | Mutación | Resultado medido |
+| --- | --- | --- |
+| N3 · aborto y reapertura | lectura no forzada + vuelo compartido sin limpiar al rechazarse | «el detalle INC-SINT-5 no se pintó» |
+| N7 · lectura y borrador | `canPatchDetail = false` | «La lectura cambió de 432 a 0» |
+| N4 · fotografía vigente | retirar la actualización del consumidor | la foto antigua permanece en lista y detalle |
+| confirmación obsoleta | retirar la comparación con la sesión | `private-profile-browser-contract` falla en Cuenta, barra lateral y Home |
+
+**Declaradas de fases anteriores, no reverificadas hoy:** N1, N2, N5 y N6.
+
+### Fallos, omisiones y pruebas no ejecutadas
+
+- **Fallos: 1.** `SPA document-pdf` (ver abajo).
+- **Omisiones: 0.** No se ha desactivado, saltado ni relajado ninguna prueba.
+- **No ejecutadas: 0.** La cadena `&&` se detiene en el fallo, así que los 14 ejecutables posteriores se ejecutaron uno a uno: los 14 correctos.
+
+### Atribución de los dos fallos de navegador
+
+Método, para los dos: línea base inmutable **anterior** a la unidad — `9492edee`, el
+padre del primer commit de esta fase — en un árbol de trabajo aparte, construida y
+ejecutada en esta misma máquina, con el mismo `CHROME_BIN` y el mismo Node.
+
+**1 · `factura-create-browser-contract` · RESUELTO, no absorbido.**
+No era «el fallo conocido»: el contrato mantenía su propia lista de rutas de navegador
+y no leía `CHROME_BIN`, así que caía en el navegador que Playwright espera tener
+descargado y moría antes del primer escenario. Falla igual en `9492edee`, y el archivo
+no se toca desde #613 (2026-09-15): la limitación no la introduce esta fase. Corregido
+usando el localizador común. Pasa de 0 a **13 escenarios ejecutados y correctos**.
+
+**2 · `SPA document-pdf` · NO RESUELTO, limitación del entorno, declarada.**
+El escenario espera el visor de PDF nativo del navegador:
+`chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/`. Esa extensión viaja con Google
+Chrome, no con la compilación de Chromium de Playwright: `chromium-1194/chrome-linux/resources/`
+contiene sólo `accessibility` e `inspector_overlay`, sin componente `pdf`. Sin la
+extensión, el marco nunca navega y `waitForEvent("framenavigated")` agota sus 10 s.
+
+Evidencia de que no lo introduce el cambio:
+
+| Comprobación | Resultado |
+| --- | --- |
+| Falla en la línea base inmutable `9492edee`, misma máquina y configuración | sí, con el mismo mensaje |
+| CI ejecuta realmente el escenario | sí: `trusted-pr-integrity.yml` corre `npm run test:browser:dist`, y `spa-modal-regression` está en la cadena sin condicionales ni saltos |
+| CI lo pasa | sí: run 35158536665, paso «Build and self-check candidate artifact», 22:37:37→22:42:34 UTC, conclusión `success`, sobre el SHA `a052ed4f` |
+| Por qué allí sí | el runner `ubuntu-24.04` tiene `/usr/bin/google-chrome`, que sí trae el visor de PDF |
+
+**No se desactiva la prueba.** Queda como limitación del entorno local, con su causa
+identificada, no como «fallo conocido» sin explicación.

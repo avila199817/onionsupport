@@ -1076,10 +1076,50 @@ function usableAvatarUrl(value = "") {
   return raw;
 }
 
+/*
+  La fotografía que declara la sesión vigente para ESA misma identidad, si la
+  persona conectada es ella. Es la autoridad viva del dato; el registro de
+  confirmaciones sólo es su proyección para los nodos que se pintan después.
+*/
+function runtimePhotoForIdentity(identity = {}) {
+  const user = currentRuntimeUser();
+  if (!isObject(user) || !Object.keys(user).length) return null;
+
+  const mine = new Set(identityAliasKeys(user).map(({ alias }) => alias));
+  if (!mine.size) return null;
+  if (!identityAliasKeys(identity).some(({ alias }) => mine.has(alias))) return null;
+
+  const url = usableAvatarUrl(
+    user.avatarUrl ?? user.avatar ?? user.photoUrl ?? user.picture ?? ""
+  );
+  const hasAvatar = user.hasAvatar === false ? false : Boolean(url);
+
+  return { url: hasAvatar ? url : "", hasAvatar };
+}
+
+/*
+  Una confirmación no puede sobrevivir a la sesión que la produjo: si el estado
+  vigente de esa persona dice otra cosa --por ejemplo, porque su sesión se ha
+  renovado con otra fotografía--, manda la sesión y el registro se pone al día.
+  Una respuesta antigua no reemplaza a una versión nueva.
+*/
 function confirmedPhotoForIdentity(identity = {}) {
-  for (const { alias } of identityAliasKeys(identity)) {
+  const aliases = identityAliasKeys(identity);
+
+  for (const { alias } of aliases) {
     const record = confirmedPhotos.get(alias);
-    if (record) return record;
+    if (!record) continue;
+
+    const live = runtimePhotoForIdentity(identity);
+    if (!live || (live.url === record.url && live.hasAvatar === record.hasAvatar)) {
+      return record;
+    }
+
+    const updated = Object.freeze({ url: live.url, hasAvatar: live.hasAvatar });
+    for (const { alias: own } of aliases) {
+      if (confirmedPhotos.has(own)) confirmedPhotos.set(own, updated);
+    }
+    return updated;
   }
 
   return null;

@@ -18,6 +18,7 @@ import {
 } from "../../features/entity-overlay/modal-host.js";
 
 import { escapeHtml } from "../../core/escape-html.js";
+import { statusTone } from "../../core/status-tone.js";
 import { cleanText } from "../../core/presentation-text.js";
 
 import {
@@ -72,7 +73,7 @@ export function citaStateLabel(estado = "") {
 */
 export function renderCitaStateBadge(estado = "") {
   const value = cleanText(estado, "");
-  return `<span class="agenda-status-chip agenda-status-chip--${attr(value)}" data-status="${attr(value)}">${escapeHtml(citaStateLabel(value))}</span>`;
+  return `<span class="agenda-status-chip agenda-status-chip--${attr(value)}" data-status="${attr(value)}" data-status-tone="${attr(statusTone(value))}">${escapeHtml(citaStateLabel(value))}</span>`;
 }
 
 function row(label, value, options = {}) {

@@ -19,6 +19,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { statusTone } from "../../core/status-tone.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { errorCode } from "../../core/errors.js";
@@ -268,7 +269,7 @@ function renderInspector(state) {
                 <strong>${escapeHtml(state.admin ? (cita.destinatarioNombre || cita.asunto) : cita.asunto)}</strong>
                 <small>${escapeHtml(cita.lugar)}</small>
               </span>
-              <span class="agenda-status-chip agenda-status-chip--${escapeHtml(cita.estado)}">${escapeHtml(cita.estado === "cancelada" ? "Cancelada" : "Programada")}</span>
+              <span class="agenda-status-chip agenda-status-chip--${escapeHtml(cita.estado)}" data-status-tone="${escapeHtml(statusTone(cita.estado))}">${escapeHtml(cita.estado === "cancelada" ? "Cancelada" : "Programada")}</span>
             </button>
           </li>`).join("")}
       </ul>`

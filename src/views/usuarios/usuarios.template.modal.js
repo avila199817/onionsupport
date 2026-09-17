@@ -36,6 +36,7 @@ import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 import { DATE_PRESETS, dateFormatter } from "../../core/format.js";
+import { statusTone } from "../../core/status-tone.js";
 
 /* =========================================================
    META / ACTIONS
@@ -759,24 +760,19 @@ function statusLabel(status = "") {
   ] || "Activo";
 }
 
+/* El modificador nombra el ESTADO, no un color prestado.
+
+   Antes tomaba prestado el nombre de otro dominio para heredar su tono:
+   `inactive` se emitía como `status-closed`, que la hoja pinta de VERDE porque
+   una incidencia cerrada sí es un éxito. Resultado medido: el listado pintaba
+   «Inactivo» en rojo y este mismo modal lo pintaba en verde. `blocked` se
+   emitía como `status-urgent`, que ningún bloque recogía, y salía neutro.
+
+   Ahora el tono viaja aparte, en `data-status-tone`, y el modificador puede
+   decir la verdad. La geometría del chip la da igualmente el bloque base de la
+   hoja, que casa por `[class*="--status_"]`. */
 function statusCssModifier(status = "") {
-  return {
-    active:
-      "status-resolved",
-
-    pending:
-      "status-pending",
-
-    blocked:
-      "status-urgent",
-
-    inactive:
-      "status-closed",
-  }[
-    getStatus({
-      status,
-    })
-  ] || "status-resolved";
+  return `status-${getStatus({ status })}`;
 }
 
 function getAvatar(detail = {}) {
@@ -952,9 +948,12 @@ function icon(name = "") {
    UI PARTIALS
 ========================================================= */
 
+/* `tone` sólo lo pasa el chip de ESTADO; roles, tipos y ciudades no son
+   estados de dominio. */
 function renderChip(
   label = "",
-  modifier = "category"
+  modifier = "category",
+  tone = ""
 ) {
   const safeModifier =
     slugKey(modifier) ||
@@ -962,7 +961,8 @@ function renderChip(
 
   return `
     <span
-      class="usuarios-modal-chip ui-detail-modal-chip ui-detail-modal-chip--${attr(safeModifier)}"
+      class="usuarios-modal-chip ui-detail-modal-chip ui-detail-modal-chip--${attr(safeModifier)}"${tone ? `
+      data-status-tone="${attr(tone)}"` : ""}
     >
       ${escapeHtml(label)}
     </span>
@@ -1859,6 +1859,9 @@ export function renderUsuariosDetailModal(input = {}) {
                     ),
                     statusCssModifier(
                       status
+                    ),
+                    statusTone(
+                      getStatus({ status })
                     )
                   )}
 

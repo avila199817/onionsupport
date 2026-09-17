@@ -39,6 +39,14 @@ Una autoridad por responsabilidad permite corregir un comportamiento en un solo 
 
 Los hosts de avatar proyectan los campos usados por `resolveAvatarPresentation` en `data-avatar-name`, `data-avatar-email`, `data-avatar-user-id` y `data-avatar-username`. El fingerprint y el tono no sustituyen esos aliases: el runtime necesita la identidad original para reconciliar cambios sin perder el email situado en otra celda ni inferir datos de una entidad contigua. Una proyección explícita delimita la identidad completa, incluidos aliases vacíos; sólo los hosts sin metadatos conservan el descubrimiento legacy. Las listas de gestión y los selectores/detalle de Facturas usan esta proyección. Home conserva también userId/username en sus relaciones cuando faltan emails; los demás detalles mantienen sus aliases explícitos. Los IDs de factura y cliente no se utilizan como IDs de usuario. La versión `avatar-identity.v5-user-id-first` prioriza userId, después email y username. Con el mismo userId, cambiar o borrar email/username no altera fingerprint ni tono. La transición cambia una vez el tono de algunos usuarios y conserva la paleta de 20 colores y el hash existentes.
 
+### Sólo habla quien puede responder
+
+`errorMessage` **extrae** el texto que un error lleva dentro; decidir si se le enseña a alguien es de la vista. Un error del backend llega siempre con estado HTTP o con código —los pone `core/http.js`—; una falta de programación no trae ninguno de los dos. Usuarios declara esa política en `humanErrorText`: con estado o código, el error habla con su propio texto; sin ninguno de los dos, manda el texto por defecto que declara cada llamada. Se decide por los hechos que la autoridad ya calcula, **no por el nombre de la clase del error**, para que `CuentaApiError`, `WhatsAppApiError` o `AuthLogoutError` no se queden mudos por parecerse a una falta del motor.
+
+La regla no vive en el núcleo a propósito: `core/errors.js` está en el cierre de arranque de la Home pública, cuyo presupuesto medido deja **33 bytes** (218567 sobre un techo de 218600), y la misma regla escrita allí costaba 91. Una política de presentación de vistas privadas no la paga cada visitante de la web pública. Contrato: `tools/error-extraction-contract.mjs`.
+
+El caso que lo motivó: `usuarios.cursor.js` llamaba a `directoryKey` sin definirlo —el barrido de claves por semántica retiró la copia local, que era `slugKey` letra por letra, clasificándola como muerta cuando tenía dos llamadas vivas— y la vista Usuarios presentaba «directoryKey is not defined» al usuario mientras se quedaba sin datos.
+
 ## Contrato de identidad visual
 
 La [simplificación incremental](releases/2026-09-12-private-reduction.md) elimina el postprocesador HTML del alta de Incidencias: su renderer emite directamente todos los aliases, incluidos los vacíos, y delega la normalización en la autoridad existente. No hay otro registro de identidad.

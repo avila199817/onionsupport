@@ -18,6 +18,7 @@
    propios; guardar citas en el navegador; inventar estados.
 ========================================================= */
 
+import { AppCore } from "../../core/index.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { errorCode } from "../../core/errors.js";
@@ -367,6 +368,42 @@ function renderWorkspace(state) {
    CONTROLADOR
 ========================================================= */
 
+/* =========================================================
+   QUIÉN MIRA · LO DICE LA SESIÓN, NO QUIEN MONTA LA VISTA
+========================================================= */
+
+/*
+  El Router monta TODAS las vistas con el mismo contexto: AppCore, Auth,
+  Router, la ruta, el `publicPath`, los parámetros, el origen y su
+  AbortSignal. Ahí no viaja --ni ha viajado nunca-- `role`, `isAdmin` ni
+  `userId`. Derivar de ese contexto quien mira dejaba a CUALQUIER
+  administrador con `admin: false`: el pie del detalle se componía vacío y
+  con él se iban las filas «Usuario» y «Comunicación», mientras el «+»
+  seguía apareciendo porque su permiso lo da el backend en la propia
+  respuesta del listado (`puedeCrear`). Dos autoridades para lo mismo, y la
+  de la vista siempre en falso.
+
+  Se pregunta a la misma autoridad que usan las demás vistas privadas, y se
+  pregunta EN CADA PINTADO: la sesión puede terminar de hidratarse después
+  de que el Router haya montado la vista.
+*/
+function sessionRole() {
+  try {
+    return cleanText(AppCore.getCurrentRole?.(), "");
+  } catch {
+    return "";
+  }
+}
+
+function sessionUserId() {
+  try {
+    const user = AppCore.getCurrentUser?.();
+    return cleanText(user?.userId || user?.id, "");
+  } catch {
+    return "";
+  }
+}
+
 function createController(host, context = {}) {
   const today = localToday();
 
@@ -380,7 +417,7 @@ function createController(host, context = {}) {
     loading: false,
     error: "",
     truncated: false,
-    admin: context?.isAdmin === true || context?.role === "admin",
+    get admin() { return sessionRole() === "admin"; },
     canCreate: false,
   };
 
@@ -1438,7 +1475,7 @@ function createController(host, context = {}) {
      ARRANQUE
   ------------------------------------------------------- */
 
-  setAgendaIdentity(cleanText(context?.userId || context?.user?.userId, ""));
+  setAgendaIdentity(sessionUserId());
   render();
 
   host.addEventListener("click", onViewClick);

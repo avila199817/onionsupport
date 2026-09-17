@@ -66,8 +66,24 @@ ${CSS.map((href) => `<link rel="stylesheet" href="/${href}">`).join("")}
 <div id="view" class="panel-content" data-view="agenda"></div>
 <script type="module">
   import { AgendaView } from "/src/views/agenda/index.js";
-  window.__mount = (context) => {
-    window.__controller = AgendaView(document.getElementById("view"), context || {});
+  import { AppCore } from "/src/core/index.js";
+  /* EL ROL SE ESTABLECE EN LA SESIÓN, NO EN EL MONTAJE.
+     El Router monta las vistas con un contexto que no lleva rol; montar aquí
+     con { role: "admin" } era inventar una entrada que la aplicación no
+     produce, y por eso este recorrido daba verde mientras en producción el pie
+     del detalle se componía vacío. Se hace lo que hace la aplicación: la
+     sesión primero, y el montaje con el contexto VACÍO del Router. */
+  window.__mount = (rol) => {
+    AppCore.applySession({
+      accessToken: "token-sintetico-de-agenda",
+      user: {
+        id: "usr-sesion", userId: "usr-sesion",
+        name: "Sesión Sintética", fullName: "Sesión Sintética",
+        email: "sesion@example.test",
+        role: rol === "admin" ? "admin" : "user",
+      },
+    });
+    window.__controller = AgendaView(document.getElementById("view"), {});
     return Boolean(window.__controller);
   };
   window.__unmount = () => { window.__controller?.destroy?.(); window.__controller = null; return true; };
@@ -296,7 +312,7 @@ async function openAgenda(browser, { admin = true, citas = [], width = 1280, que
   await page.route(`${API_ORIGIN}/**`, api.handle);
   await page.goto(`${origin}/agenda${query}`, { waitUntil: "load" });
   await page.waitForFunction(() => window.__ready === true);
-  await page.evaluate(() => window.__mount({ role: "admin" }));
+  await page.evaluate(() => window.__mount("admin"));
   /* Con un enlace directo el detalle se abre encima del calendario; navegar
      de mes ahí no tiene sentido y además el diálogo lo tapa. */
   if (!query) await gotoAnchorMonth(page);
@@ -534,7 +550,7 @@ try {
        navegador. */
     await page.reload({ waitUntil: "load" });
     await page.waitForFunction(() => window.__ready === true);
-    await page.evaluate(() => window.__mount({ role: "admin" }));
+    await page.evaluate(() => window.__mount("admin"));
     await gotoAnchorMonth(page);
     await cell.locator(".agenda-day-event").first().waitFor({ state: "visible" });
 
@@ -622,7 +638,7 @@ try {
     await page.route(`${API_ORIGIN}/**`, api.handle);
     await page.goto(`${origin}/agenda`, { waitUntil: "load" });
     await page.waitForFunction(() => window.__ready === true);
-    await page.evaluate(() => window.__mount({ role: "user" }));
+    await page.evaluate(() => window.__mount("user"));
     await gotoAnchorMonth(page);
 
     const cell = page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"]`);
@@ -746,7 +762,7 @@ try {
     /* Desmontar la vista y volver: sin listeners duplicados ni hosts vivos. */
     await page.evaluate(() => window.__unmount());
     await page.evaluate(() => { document.getElementById("view").innerHTML = ""; });
-    await page.evaluate(() => window.__mount({ role: "admin" }));
+    await page.evaluate(() => window.__mount("admin"));
     await page.waitForFunction(() => window.__controller?.getSnapshot?.().canCreate === true);
     await gotoAnchorMonth(page);
 

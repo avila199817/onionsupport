@@ -803,14 +803,10 @@ function ensurePendingChip(root, policy = {}) {
       ].join(" ");
       chip.dataset.ticketReviewState = "pending";
 
-      const icon = document.createElement("span");
-      icon.setAttribute("aria-hidden", "true");
-      icon.textContent = "◷";
-
       const label = document.createElement("span");
       label.textContent = PENDING_TITLE;
 
-      chip.append(icon, label);
+      chip.appendChild(label);
       chips.appendChild(chip);
     });
   }

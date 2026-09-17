@@ -72,9 +72,7 @@ import {
 } from "./agenda.template.create.js";
 
 import {
-  AGENDA_DELETE_CONFIRM_ACTION,
   AGENDA_DETAIL_ACTIONS,
-  renderAgendaDeleteConfirm,
   renderAgendaDetailModal,
 } from "./agenda.template.detail.js";
 
@@ -1133,7 +1131,29 @@ function createController(host, context = {}) {
     const aceptado = await openModalConfirmation({
       host: { id: DELETE_CONFIRM_HOST_ID, attributes: { "data-agenda-delete-confirm-root": "true" } },
       render: (root) => {
-        root.innerHTML = renderAgendaDeleteConfirm({ motivo: detailState.form.motivo });
+        /* Se compone aquí, como la confirmación de salida del alta: la
+           autoridad del shell es compartida y no hace falta una export nueva
+           sólo para dos botones. */
+        root.innerHTML = renderModalShell({
+          rootAttributes: { "data-agenda-delete-confirm": "true" },
+          panelAttributes: { "data-agenda-delete-confirm-dialog": "true" },
+          role: "alertdialog",
+          labelledBy: "agenda-delete-confirm-title",
+          describedBy: "agenda-delete-confirm-description",
+          size: "confirm",
+          height: "auto",
+          header: `<div class="inc-create-header-copy"><h3 id="agenda-delete-confirm-title">Eliminar cita</h3></div>`,
+          bodyClass: "inc-create-body",
+          body: `
+            <p id="agenda-delete-confirm-description">Esta cita se marcará como cancelada. No se eliminará físicamente del historial, y el usuario recibirá un aviso de cancelación.</p>
+            <label class="inc-create-field">
+              <span class="inc-create-label">Motivo (opcional)</span>
+              <textarea class="inc-create-textarea" data-field="motivo" name="motivo" rows="2" maxlength="300">${escapeHtml(detailState.form.motivo || "")}</textarea>
+            </label>`,
+          footer: `
+            <button type="button" class="agenda-create-cancel" data-detail-action="${AGENDA_DETAIL_ACTIONS.DELETE_DISMISS}">Volver</button>
+            <button type="button" class="agenda-detail-danger" data-detail-action="${AGENDA_DETAIL_ACTIONS.DELETE_CONFIRM}">Eliminar cita</button>`,
+        });
         /* El motivo vive en el diálogo, que se destruye al resolverse: se
            sincroniza mientras se escribe, sin listeners que sobrevivan. */
         const motivo = root.querySelector('[data-field="motivo"]');
@@ -1142,8 +1162,8 @@ function createController(host, context = {}) {
         });
         return {
           panel: root.querySelector('[data-agenda-delete-confirm-dialog="true"]'),
-          cancel: root.querySelector(`[data-${AGENDA_DELETE_CONFIRM_ACTION}="cancel"]`),
-          confirm: root.querySelector(`[data-${AGENDA_DELETE_CONFIRM_ACTION}="confirm"]`),
+          cancel: root.querySelector(`[data-detail-action="${AGENDA_DETAIL_ACTIONS.DELETE_DISMISS}"]`),
+          confirm: root.querySelector(`[data-detail-action="${AGENDA_DETAIL_ACTIONS.DELETE_CONFIRM}"]`),
         };
       },
       opener: host.ownerDocument.activeElement,

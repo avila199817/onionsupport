@@ -43,10 +43,10 @@ export const AGENDA_DETAIL_ACTIONS = Object.freeze({
      operación real es la cancelación contractual. La confirmación la pone
      `openModalConfirmation`, no una caja propia dentro del cuerpo. */
   DELETE_CITA: "detail-eliminar",
+  DELETE_CONFIRM: "detail-eliminar-confirmar",
+  DELETE_DISMISS: "detail-eliminar-volver",
   RETRY: "detail-retry",
 });
-
-export const AGENDA_DELETE_CONFIRM_ACTION = "agenda-delete-action";
 
 const STATE_LABEL = Object.freeze({
   programada: "Programada",
@@ -316,38 +316,6 @@ export function renderAgendaDetailModal(input = {}) {
     bodyClass: "agenda-detail-body inc-create-body",
     body,
     footer,
-  });
-}
-
-/* =========================================================
-   CONFIRMACIÓN DE «ELIMINAR CITA»
-
-   El botón se llama «Eliminar cita» porque es la acción de producto, pero la
-   operación real es la cancelación contractual: el backend no expone DELETE y
-   el documento se conserva. El texto lo dice, en vez de dejar creer que se
-   borra algo.
-========================================================= */
-
-export function renderAgendaDeleteConfirm({ motivo = "", saving = false } = {}) {
-  return renderModalShell({
-    rootAttributes: { "data-agenda-delete-confirm": "true" },
-    panelAttributes: { "data-agenda-delete-confirm-dialog": "true" },
-    role: "alertdialog",
-    labelledBy: "agenda-delete-confirm-title",
-    describedBy: "agenda-delete-confirm-description",
-    size: "confirm",
-    height: "auto",
-    header: `<div class="inc-create-header-copy"><h3 id="agenda-delete-confirm-title">Eliminar cita</h3></div>`,
-    bodyClass: "inc-create-body",
-    body: `
-      <p id="agenda-delete-confirm-description">Esta cita se marcará como cancelada. No se eliminará físicamente del historial, y el usuario recibirá un aviso de cancelación.</p>
-      <label class="inc-create-field">
-        <span class="inc-create-label">Motivo (opcional)</span>
-        <textarea class="inc-create-textarea" data-field="motivo" name="motivo" rows="2" maxlength="300" ${disabledAttrs(saving)}>${escapeHtml(motivo)}</textarea>
-      </label>`,
-    footer: `
-      <button type="button" class="agenda-create-cancel" data-${AGENDA_DELETE_CONFIRM_ACTION}="cancel">Volver</button>
-      <button type="button" class="agenda-detail-danger" data-${AGENDA_DELETE_CONFIRM_ACTION}="confirm">Eliminar cita</button>`,
   });
 }
 

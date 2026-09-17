@@ -685,7 +685,7 @@ try {
     await page.locator('[data-detail-action="detail-eliminar"]').click();
     await page.locator('[data-agenda-delete-confirm-dialog="true"]').waitFor({ state: "visible" });
     await page.locator('[data-agenda-delete-confirm] [data-field="motivo"]').fill("El cliente no puede");
-    await page.locator('[data-agenda-delete-action="confirm"]').click();
+    await page.locator('[data-detail-action="detail-eliminar-confirmar"]').click();
 
     await page.waitForFunction(() => document.querySelector(".agenda-day-event.is-cancelada"));
 
@@ -1187,7 +1187,7 @@ try {
     assert.match(copia, /cancelada/u, "el texto dice que se marcará como cancelada");
     assert.match(copia, /no se eliminará/iu, "y que no se elimina físicamente");
 
-    await page.locator('[data-agenda-delete-action="cancel"]').click();
+    await page.locator('[data-detail-action="detail-eliminar-volver"]').click();
     await dialogo.waitFor({ state: "detached" });
     assert.equal(api.state.calls.cancel, 0, "rechazar la confirmación no escribe nada");
     assert.equal(api.state.citas[0].estado, "programada");
@@ -1217,7 +1217,7 @@ try {
 
     await conflicto.page.locator('[data-detail-action="detail-eliminar"]').click();
     await conflicto.page.locator('[data-agenda-delete-confirm-dialog="true"]').waitFor({ state: "visible" });
-    await conflicto.page.locator('[data-agenda-delete-action="confirm"]').click();
+    await conflicto.page.locator('[data-detail-action="detail-eliminar-confirmar"]').click();
     await conflicto.page.waitForFunction(() => document.querySelector(".agenda-day-event.is-cancelada"));
 
     assert.equal(conflicto.api.state.calls.cancel, 2, "un conflicto de versión permite UNA reconciliación");
@@ -1231,7 +1231,7 @@ try {
 
     await yaCancelada.page.locator('[data-detail-action="detail-eliminar"]').click();
     await yaCancelada.page.locator('[data-agenda-delete-confirm-dialog="true"]').waitFor({ state: "visible" });
-    await yaCancelada.page.locator('[data-agenda-delete-action="confirm"]').click();
+    await yaCancelada.page.locator('[data-detail-action="detail-eliminar-confirmar"]').click();
     await yaCancelada.page.waitForFunction(() =>
       !document.querySelector('[data-detail-action="detail-eliminar"]'));
 

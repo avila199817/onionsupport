@@ -526,11 +526,14 @@ pass("1 · versiones y zona canónica declaradas");
   assert.match(detalle, /DELETE_CITA:\s*"detail-eliminar"/u,
     "la acción destructiva del detalle está declarada");
   assert.match(detalle, /Eliminar cita/u, "y se presenta con el nombre de producto");
-  assert.match(detalle, /no se eliminará físicamente/iu,
+  const controlador = leer("src/views/agenda/index.js");
+  assert.match(controlador, /no se eliminará físicamente/iu,
     "la confirmación dice que el documento se conserva");
-  assert.match(leer("src/views/agenda/index.js"),
+  assert.match(controlador, /openModalConfirmation\(/u,
+    "y la pide a la autoridad compartida, no a una caja propia");
+  assert.match(controlador,
     /AGENDA_DETAIL_ACTIONS\.DELETE_CITA\) return void requestDeleteCita\(\)/u,
-    "y el manejador la enruta a la cancelación contractual");
+    "el manejador enruta la acción destructiva a la cancelación contractual");
 
   /* b) Nada de Cosmos desde el navegador. */
   for (const patron of [/@azure\/cosmos/u, /documents\.azure\.com/u, /CosmosClient/u]) {

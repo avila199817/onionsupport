@@ -238,10 +238,17 @@ export function resolveToolchainSource({ trustedRoot, candidateRoot } = {}) {
   const basePackageJson = readRegularFile(trustedRoot, "package.json");
   if (!basePackageJson) throw new Error("A01: la base no tiene package.json.");
   const baseVersion = declaredVersion(basePackageJson, declaration.package);
+  if (baseVersion === declaration.to) {
+    return Object.freeze({
+      source: "base",
+      declaration,
+      reason: "declaración consumida: la base ya adoptó el destino; modo estricto",
+    });
+  }
   if (baseVersion !== declaration.from) {
     throw new Error(
-      `A01: declaración caduca o equivocada. La base declara ${declaration.package}@${baseVersion} ` +
-      `y la transición parte de ${declaration.from}. Retira la declaración (T3) o corrígela.`
+      `A01: declaración equivocada. La base declara ${declaration.package}@${baseVersion}, ` +
+      `pero la transición sólo admite ${declaration.from} -> ${declaration.to}.`
     );
   }
 

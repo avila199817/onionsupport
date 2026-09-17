@@ -274,12 +274,20 @@ await bloque("toda declaración malformada se rechaza, ninguna degrada a modo pe
 });
 
 /* ───────────────────── 12 · caducidad por contenido ───────────────────── */
-await bloque("una declaración olvidada deja de autorizar en cuanto la base adopta el destino", () => {
-  /* T2 ya se fusionó: la base declara 8.3.0. La declaración sigue ahí porque
-     nadie ha hecho T3 todavía. No puede volver a autorizar nada. */
+await bloque("una declaración consumida deja de autorizar y vuelve a modo estricto", () => {
+  /* La activación ya se fusionó: la base declara 8.3.0. La declaración puede
+     seguir ahí hasta T4, pero ya no autoriza nada y tampoco puede congelar el
+     repositorio: cualquier PR normal vuelve a usar el toolchain de la base. */
   const base = escribirArbol(nuevaRaiz(), { manifest: manifiesto(TO), lockfile: lock(TO), declaracion: declarar() });
   const cand = escribirArbol(nuevaRaiz(), { manifest: manifiesto(TO), lockfile: lock(TO) });
-  rechaza(() => resolver(base, cand), "declaración caduca", "caducidad por contenido");
+  const resultado = resolver(base, cand);
+  assert.equal(resultado.source, "base");
+  assert.match(resultado.reason, /modo estricto/u);
+
+  /* Una base en una tercera versión no es una transición consumida: la
+     declaración ya no describe la realidad y se rechaza cerradamente. */
+  const ajena = escribirArbol(nuevaRaiz(), { manifest: manifiesto("8.4.0"), lockfile: lock("8.4.0"), declaracion: declarar() });
+  rechaza(() => resolver(ajena, cand), "declaración equivocada", "base fuera de from/to");
 });
 
 /* ───────────────────── 13 · una declaración no autoriza otro paquete ───────────────────── */

@@ -116,35 +116,6 @@
   font-family: var(--font-family-mono, ui-monospace, monospace);
 }
 
-.facturas-detail-chip--accent,
-.facturas-detail-chip--info {
-  border-color: var(--border-info);
-  background: var(--info-bg);
-  color: var(--info-strong, var(--info));
-}
-
-.facturas-detail-chip--success {
-  border-color: var(--border-success);
-  background: var(--success-bg);
-  color: var(--success-strong, var(--success));
-}
-
-.facturas-detail-chip--warning {
-  border-color: var(--border-warning);
-  background: var(--warning-bg);
-  color: var(--warning-strong, var(--warning));
-}
-
-.facturas-detail-chip--danger,
-.facturas-detail-chip--error {
-  border-color: var(--border-error);
-  background: var(--error-bg);
-  color: var(--error-strong, var(--error));
-}
-
-.facturas-detail-chip--neutral,
-.facturas-detail-chip--muted { color: var(--text-muted); }
-
 /* =========================================================
    HEADER ACTIONS
 ========================================================= */

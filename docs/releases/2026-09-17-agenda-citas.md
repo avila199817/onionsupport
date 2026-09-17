@@ -12,6 +12,8 @@ El recorrido completo, con persistencia real en Cosmos y permisos reales:
 
 El backend (entidad, partición, idempotencia, concurrencia, permisos, plantillas y outbox) vive en [`oniontech/docs/production/2026-09-17-agenda-citas-v1.md`](https://github.com/avila199817/oniontech/blob/main/docs/production/2026-09-17-agenda-citas-v1.md). Aquí se documenta el frontend.
 
+**Estado del backend: fusionado y desplegado.** `oniontech#566` entró en su `main` como `bd546fb`; la revisión servida en producción es `oniontech-aca-zr--0000057`, construida desde `34740ad` (que lo contiene) y verificada por su propio despliegue en `api.onionsupport.com`. El contenedor Cosmos `citas` existe en la cuenta `onionsupport-db-es`, con partición `/userId` y TTL `-1`; el runtime habla con él por identidad administrada (`COSMOS_AUTH_MODE=managed-identity`, ligado y verificado en el despliegue).
+
 ## La casilla deja de ser un botón
 
 No se puede meter un `<button>` dentro de otro `<button>`, y la casilla lo era. Ahora es un contenedor `role="gridcell"` con **tres hermanos**, nunca anidados:
@@ -86,7 +88,9 @@ Ningún contrato envía correo ni toca datos de cliente.
 
 ## Presupuestos medidos
 
-El cierre bootstrap/Home pasa de **218563** (main `d5db0bdb`) a **218694** raw bytes: **+131**. Los otros quince chunks del cierre son **byte a byte idénticos** a `main`; los 131 bytes son enteros de `routes` (20774 → 20905) y se explican uno a uno: 57 del nombre del chunk del combobox, 43 del de la confirmación modal y 31 de los índices que `/agenda` añade a su lista de dependencias. No es payload nuevo: es que dos módulos **pasan a compartirse**, y compartirlos obliga a nombrarlos en la tabla de precarga. El techo pasa a 218750, dejando 56 bytes. Incidencias **encoge** 3.511 bytes (222994 → 219483), porque el combobox sale de su chunk.
+El cierre bootstrap/Home pasa de **218563** (main `d5db0bdb`) a **218694** raw bytes: **+131**. Los otros quince chunks del cierre son **byte a byte idénticos** a `main`; los 131 bytes son enteros de `routes` (20774 → 20905) y se explican uno a uno: 57 del nombre del chunk del combobox, 43 del de la confirmación modal y 31 de los índices que `/agenda` añade a su lista de dependencias. No es payload nuevo: es que dos módulos **pasan a compartirse**, y compartirlos obliga a nombrarlos en la tabla de precarga. El techo pasa a 218750. Incidencias **encoge** 3.511 bytes (222994 → 219483), porque el combobox sale de su chunk.
+
+**Medición sobre el main vigente.** Al fusionar `main` (que entre medias trajo #692, #693 y #694) el cierre queda en **218742 bytes**: pasa, con **8 bytes de margen**. Ese margen es real y es estrecho a propósito de nadie: R06 lo subió por Agenda y R07 midió dentro de él los 48 bytes del perfil del técnico. **Quien toque a continuación el cierre de arranque tiene que volver a medir y subir el techo a mano**, como dice el propio contrato.
 
 El baseline de superficie exportada de Agenda pasa de 1 a 52, a conciencia: Agenda deja de ser una vista sin datos y pasa a ser un dominio con frontera HTTP, autoridad de fecha y dos plantillas de diálogo. Cada exportación tiene consumidor.
 
@@ -97,5 +101,5 @@ El baseline de superficie exportada de Agenda pasa de 1 a 52, a conciencia: Agen
   Se resolvió en [#691](https://github.com/avila199817/onionsupport/pull/691), sólo tooling, fusionado antes que esta entrega. El techo sube a 218750 con su medida, y un módulo nuevo puede estrenar una autoridad **declarándolo en su propio origen**, donde el contrato lo comprueba contra lo que llama de verdad. Agenda declara: `agenda.api.js` su orden (`@error-message-order payloadFirst`) y `agenda.dates.js` lo que usa (`@format-currency-policies none`). Por eso no aparecen en los mapas: una sola fuente por módulo.
 
 - El texto plano de **todos** los correos de Onion Support sale en una sola línea: `normalizeRendererOutput` aplica `safeText` a esa alternativa. Las citas heredan ese comportamiento; la información está completa, incluido el enlace. Corregirlo es un cambio de una línea en la autoridad compartida que altera Incidencias y Facturas, y queda fuera de esta entrega.
-- El contrato de navegador aísla la red con un doble; **no acredita** un recorrido autenticado contra el backend de producción.
+- El contrato de navegador aísla la red con un doble; **no acredita** un recorrido autenticado contra el backend de producción. Esa acreditación se hace aparte, contra la API servida.
 - La Agenda del rol usuario reutiliza la misma vista. No hay vista de semana ni de día: la V1 es mensual.

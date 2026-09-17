@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { findBrowserExecutable } from "./spa-session-harness.mjs";
 
 // Real controller, templates, client model, DOM reconciliation and lifecycle.
 // Only session/API boundaries are replaced. Never reads or writes production.
@@ -91,9 +92,11 @@ const server = createServer(async (req,res) => {
 });
 await new Promise(r=>server.listen(0,"127.0.0.1",r));
 const origin=`http://127.0.0.1:${server.address().port}`;
-let executablePath=process.env.CHROMIUM_PATH || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
-if(!executablePath) for(const p of ["/usr/bin/chromium","/usr/bin/chromium-browser","/usr/bin/google-chrome"]){try{await access(p);executablePath=p;break}catch{}}
-const browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{}),args:["--no-sandbox"]});
+/* Un solo localizador de navegador para todos los contratos: mantener aquí una
+   segunda lista hacía que este contrato no pudiera ejecutarse en entornos donde
+   el resto sí, y cayera en el navegador que Playwright espera tener descargado. */
+let executablePath=process.env.CHROMIUM_PATH || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || await findBrowserExecutable();
+const browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{}),args:["--no-sandbox","--disable-dev-shm-usage"]});
 const errors=[];
 let passed=0;
 const clientInput='[data-field="clienteSearch"]';

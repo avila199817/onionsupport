@@ -3,6 +3,7 @@
 import { AppCore } from "../../core/index.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { notifyDomainChanged } from "../../core/domain-events.js";
+import { applyConfirmedAvatar } from "../avatar-system/index.js";
 
 const photoFields = ["avatarUrl", "avatar", "photoUrl", "picture"];
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key) && value[key] !== undefined;
@@ -61,6 +62,17 @@ export function applyConfirmedUserProfile(source, scope, { read = false, owner =
   }
   try { AppCore.getModule("sidebar")?.sync?.(); } catch { /* Existing chrome owns its DOM. */ }
   const confirmed = AppCore.runtimeState.read().user;
+  /* Una fotografía confirmada es identidad vigente, no un dato de ningún
+   * documento: llega a los nodos vivos de esta persona sin releer nada. Un
+   * fallo de presentación nunca deshace una escritura ya confirmada. */
+  if (current.avatarUrl !== confirmed.avatarUrl || current.hasAvatar !== confirmed.hasAvatar) {
+    try {
+      applyConfirmedAvatar(confirmed, {
+        url: confirmed.avatarUrl,
+        hasAvatar: confirmed.hasAvatar !== false && Boolean(confirmed.avatarUrl),
+      });
+    } catch { /* La identidad visual no bloquea el perfil. */ }
+  }
   if (read && ["name", "email", "avatarUrl"].some((key) => current[key] !== confirmed[key])) {
     notifyDomainChanged("usuarios");
   }

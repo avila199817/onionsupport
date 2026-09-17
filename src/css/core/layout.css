@@ -1758,6 +1758,15 @@ body[data-tablehead-active="false"]
   }
 }
 
+/*
+  Ancho del raíl del sidebar en móvil. Se declara UNA vez: lo leen
+  core/layout.css (lo que reserva el contenido) y layout/sidebar.css (lo que
+  mide el raíl). Antes no existía y cada consumidor traía su propio fallback.
+*/
+:root {
+  --sidebar-mobile-collapsed-width: 60px;
+}
+
 @media (max-width: 900px) {
   body {
     --layout-sidebar-motion-duration:
@@ -1766,10 +1775,7 @@ body[data-tablehead-active="false"]
       );
 
     --layout-mobile-rail-width:
-      var(
-        --sidebar-mobile-collapsed-width,
-        60px
-      );
+      var(--sidebar-mobile-collapsed-width);
   }
 
   /*
@@ -1990,11 +1996,17 @@ body[data-tablehead-active="false"]
 
 @media (max-width: 380px) {
   body {
+    /*
+      El raíl se estrecha en los móviles más pequeños. Antes este escalón se
+      expresaba como un fallback de 56px de un token que no existía, mientras
+      layout/sidebar.css seguía dibujando el raíl a 60px con su propio
+      fallback: el contenido se metía 4px por debajo del raíl. Ahora el token
+      se redeclara aquí y lo leen los dos.
+    */
+    --sidebar-mobile-collapsed-width: 56px;
+
     --layout-mobile-rail-width:
-      var(
-        --sidebar-mobile-collapsed-width,
-        56px
-      );
+      var(--sidebar-mobile-collapsed-width);
   }
 }
 

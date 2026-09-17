@@ -1095,7 +1095,10 @@
   position: sticky;
   inset-block-start: 0;
   z-index: 2;
-  min-block-size: var(--data-table-head-height);
+  /* El token existe como --tablehead-height (tokens/variables.css:166).
+     --data-table-head-height no se declara en ninguna parte, así que esta
+     declaración era inválida y la cabecera pegajosa no tenía altura mínima. */
+  min-block-size: var(--tablehead-height);
   padding: var(--table-cell-padding-y) var(--table-cell-padding-x);
   border-block-end: 1px solid var(--table-border);
   background: var(--table-head-bg);

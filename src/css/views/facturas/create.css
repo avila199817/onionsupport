@@ -367,7 +367,15 @@
    AVATAR / SELECTED ITEMS
 ========================================================= */
 
+/* Los dos extremos del degradado. Este bloque es un clon del de Incidencias
+   (views/incidencias/create.css:374) y se copió sin sus declaraciones: sin
+   ellas, `color-mix()` y `linear-gradient()` recibían un var() inexistente y
+   las dos declaraciones eran inválidas, de modo que el avatar se quedaba sin
+   borde de color y sin fondo. Mismos extremos que el original. */
 .fac-create-avatar {
+  --fac-avatar-a: var(--accent);
+  --fac-avatar-b: var(--info);
+
   position: relative;
   inline-size: 44px;
   block-size: 44px;

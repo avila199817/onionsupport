@@ -247,7 +247,10 @@
   place-items: center;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  background: var(--solid-subtle);
+  /* --solid-subtle no existe: la declaración era inválida y el icono se
+     quedaba sin fondo. `.usuarios-empty-icon`, idéntico en caja, borde y
+     radio, usa --solid-bg-2. */
+  background: var(--solid-bg-2);
   color: var(--text-muted);
 }
 

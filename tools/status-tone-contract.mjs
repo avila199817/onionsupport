@@ -91,7 +91,7 @@ ok(statusTone("azafran_del_futuro") === "neutral", "un estado desconocido no pue
 ========================================================= */
 
 const chipTone = (html, chipClass) => {
-  const chip = new RegExp(`<span class="${chipClass}[^"]*"[^>]*>`).exec(html);
+  const chip = new RegExp(`<(?:span|button) class="${chipClass}[^"]*"[^>]*>`).exec(html);
   assert.ok(chip, `no se encontró ningún chip "${chipClass}" en el HTML renderizado`);
   const tone = /data-status-tone="([^"]*)"/.exec(chip[0]);
   assert.ok(tone, `el chip no declara ${STATUS_TONE_ATTRIBUTE}: ${chip[0]}`);

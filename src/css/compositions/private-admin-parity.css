@@ -315,18 +315,6 @@
   .usuarios-btn,
   .usuarios-feed-retry,
   .server-btn
-):focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-:is(
-  .incidencias-btn,
-  .facturas-btn,
-  .clientes-btn,
-  .usuarios-btn,
-  .usuarios-feed-retry,
-  .server-btn
 ):disabled,
 :is(
   .incidencias-btn,
@@ -546,9 +534,7 @@
   .clientes-stat-card,
   .usuarios-stat-card
 ):focus-visible {
-  outline: none;
   border-color: var(--private-stat-accent);
-  box-shadow: var(--focus-ring);
 }
 
 :is(
@@ -853,19 +839,6 @@
   color: var(--text-strong);
 }
 
-:is(
-  .incidencias-filter-pill,
-  .incidencias-sort-pill,
-  .facturas-filter-pill,
-  .facturas-sort-pill,
-  .clientes-filter-pill,
-  .clientes-sort-pill,
-  .usuarios-filter-pill
-):focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 /* =========================================================
    SEARCH
 ========================================================= */
@@ -912,7 +885,8 @@
 ):focus-within {
   border-color: var(--input-border-focus);
   background: var(--input-bg-focus);
-  box-shadow: var(--focus-ring);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 2px;
 }
 
 :is(
@@ -1008,16 +982,6 @@
   color: var(--text-strong);
 }
 
-:is(
-  .incidencias-search-clear,
-  .facturas-search-clear,
-  .clientes-search-clear,
-  .usuarios-search-clear
-):focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 /* =========================================================
    TARGET LISTINGS — INCIDENCIAS EFFECTIVE VALUES 1:1
    La fundación única conserva las métricas efectivas del listado padre.
@@ -1095,7 +1059,10 @@
   position: sticky;
   inset-block-start: 0;
   z-index: 2;
-  min-block-size: var(--data-table-head-height);
+  /* El token existe como --tablehead-height (tokens/variables.css:166).
+     --data-table-head-height no se declara en ninguna parte, así que esta
+     declaración era inválida y la cabecera pegajosa no tenía altura mínima. */
+  min-block-size: var(--tablehead-height);
   padding: var(--table-cell-padding-y) var(--table-cell-padding-x);
   border-block-end: 1px solid var(--table-border);
   background: var(--table-head-bg);

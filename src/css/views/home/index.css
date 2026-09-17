@@ -69,13 +69,6 @@
   font: inherit;
 }
 
-.home-btn:focus-visible,
-.home-link-button:focus-visible,
-.home-stat-card-button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 .home-btn,
 .home-link-button {
   appearance: none;
@@ -516,35 +509,9 @@
 .home-status {
   padding: 3px 7px;
   border: 1px solid var(--badge-border);
-  background: var(--badge-bg);
-  color: var(--badge-text);
   font-size: 9.5px;
   font-weight: var(--weight-semibold);
   line-height: 1.15;
-}
-
-.home-status--info {
-  border-color: var(--border-info);
-  background: var(--info-bg);
-  color: var(--info-strong, var(--info));
-}
-
-.home-status--warning {
-  border-color: var(--border-warning);
-  background: var(--warning-bg);
-  color: var(--warning-strong, var(--warning));
-}
-
-.home-status--success {
-  border-color: var(--border-success);
-  background: var(--success-bg);
-  color: var(--success-strong, var(--success));
-}
-
-.home-status--error {
-  border-color: var(--border-error);
-  background: var(--error-bg);
-  color: var(--error-strong, var(--error));
 }
 
 /* =========================================================

@@ -17,6 +17,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { statusTone } from "../../core/status-tone.js";
 import { incidenciaCategoryLabel, incidenciaPriorityLabel, incidenciaStatusLabel } from "./incidencias.options.js";
 import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, currencyFormatter, dateFormatter, formatDecimal } from "../../core/format.js";
 import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
@@ -686,10 +687,16 @@ function renderAvatar(it = {}) {
   `;
 }
 
+/* El chip lee el estado CRUDO, no `statusKey()`: esa función pliega
+   «cancelada» sobre «cerrada» para poder filtrar con `isClosed()`, y con el
+   pliegue hecho el tono ya no puede distinguir «resuelta» de «cancelada». La
+   clave de filtrado sigue siendo la del ciclo de vida; el tono lo decide la
+   autoridad. */
 function renderStatusChip(it = {}) {
-  const k = statusKey(getStatusRaw(it));
+  const raw = getStatusRaw(it);
+  const k = statusKey(raw);
   return `
-    <span class="incidencias-status-chip incidencias-status-chip--${at(k)} is-${at(k)}" data-status-chip="${at(k)}">
+    <span class="incidencias-status-chip incidencias-status-chip--${at(k)} is-${at(k)}" data-status-chip="${at(k)}" data-status-tone="${at(statusTone(raw))}">
       <span class="incidencias-status-dot" aria-hidden="true"></span>
       <span>${escapeHtml(statusLabel(getStatusRaw(it)))}</span>
     </span>

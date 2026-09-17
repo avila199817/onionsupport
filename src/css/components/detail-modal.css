@@ -187,7 +187,8 @@ position: relative;
 }
 
 .ui-detail-modal-panel:focus-visible {
-box-shadow: var(--ui-detail-modal-shadow), var(--focus-ring);
+outline: var(--focus-ring-width) solid var(--focus-ring-color);
+outline-offset: 2px;
 }
 
 .ui-detail-modal-root[data-modal-height="auto"] .ui-detail-modal-panel {
@@ -322,35 +323,6 @@ appearance: none;
   white-space: nowrap;
 }
 
-.ui-detail-modal-chip--status-open,
-.ui-detail-modal-chip--status-progress,
-.ui-detail-modal-chip--status-in-progress {
-border-color: var(--border-info);
-  background: var(--info-bg);
-  color: var(--info-strong, var(--info));
-}
-
-.ui-detail-modal-chip--status-pending {
-border-color: var(--border-warning);
-  background: var(--warning-bg);
-  color: var(--warning-strong, var(--warning));
-}
-
-.ui-detail-modal-chip--status-closed,
-.ui-detail-modal-chip--status-resolved {
-border-color: var(--border-success);
-  background: var(--success-bg);
-  color: var(--success-strong, var(--success));
-}
-
-.ui-detail-modal-chip--priority-high,
-.ui-detail-modal-chip--priority-urgent,
-.ui-detail-modal-chip--priority-critical {
-border-color: var(--border-error);
-  background: var(--error-bg);
-  color: var(--error-strong, var(--error));
-}
-
 .ui-detail-modal-close-btn,
 .ui-detail-modal-view-btn {
 appearance: none;
@@ -403,13 +375,6 @@ border-color: var(--error-strong, var(--error));
   background: var(--error-soft);
   color: var(--error-strong, var(--error));
   transform: scale(.97);
-}
-
-.ui-detail-modal-close-btn:focus-visible,
-.ui-detail-modal-view-btn:focus-visible,
-.ui-detail-modal-submit-btn:focus-visible {
-outline: none;
-  box-shadow: var(--focus-ring);
 }
 
 .ui-detail-modal-close-btn:disabled,

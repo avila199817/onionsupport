@@ -200,7 +200,6 @@
 .fac-create-textarea:focus {
   background: var(--input-bg-focus);
   border-color: var(--input-border-focus);
-  box-shadow: var(--focus-ring);
 }
 
 .fac-create-input:disabled,
@@ -295,11 +294,6 @@
   transform: translateY(-1px);
 }
 
-.fac-create-search-result:focus-visible {
-  outline: 0;
-  box-shadow: var(--focus-ring);
-}
-
 .fac-create-result-copy,
 .fac-create-selected-copy {
   min-inline-size: 0;
@@ -367,7 +361,15 @@
    AVATAR / SELECTED ITEMS
 ========================================================= */
 
+/* Los dos extremos del degradado. Este bloque es un clon del de Incidencias
+   (views/incidencias/create.css:374) y se copió sin sus declaraciones: sin
+   ellas, `color-mix()` y `linear-gradient()` recibían un var() inexistente y
+   las dos declaraciones eran inválidas, de modo que el avatar se quedaba sin
+   borde de color y sin fondo. Mismos extremos que el original. */
 .fac-create-avatar {
+  --fac-avatar-a: var(--accent);
+  --fac-avatar-b: var(--info);
+
   position: relative;
   inline-size: 44px;
   block-size: 44px;
@@ -604,13 +606,6 @@
   transform: translateY(-1px);
 }
 
-.fac-create-link-btn:focus-visible,
-.fac-create-chip-btn:focus-visible,
-.fac-create-icon-btn:focus-visible {
-  outline: 0;
-  box-shadow: var(--focus-ring);
-}
-
 .fac-create-link-btn:disabled,
 .fac-create-chip-btn:disabled,
 .fac-create-icon-btn:disabled {
@@ -701,7 +696,8 @@
 }
 
 .fac-create-toggle:has(input:focus-visible) {
-  box-shadow: var(--focus-ring);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 2px;
 }
 
 /* =========================================================

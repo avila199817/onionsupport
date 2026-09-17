@@ -550,7 +550,6 @@
   border-color: rgb(104 228 255 / .58);
   background: rgb(33 155 222 / .17);
   box-shadow: 0 0 0 3px rgb(23 161 255 / .09), 0 0 16px rgb(68 215 255 / .10);
-  outline: none;
 }
 
 .public-home .public-support-info-tooltip {

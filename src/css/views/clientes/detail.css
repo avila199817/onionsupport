@@ -156,30 +156,6 @@
   color: var(--text-strong);
 }
 
-.clientes-modal-id-chip:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.clientes-modal-chip--status-active {
-  border-color: var(--border-success);
-  background: var(--success-bg);
-  color: var(--success-strong, var(--success));
-}
-
-.clientes-modal-chip--status-pending {
-  border-color: var(--border-warning);
-  background: var(--warning-bg);
-  color: var(--warning-strong, var(--warning));
-}
-
-.clientes-modal-chip--status-blocked,
-.clientes-modal-chip--status-inactive {
-  border-color: var(--border-error);
-  background: var(--error-bg);
-  color: var(--error-strong, var(--error));
-}
-
 .clientes-modal-chip--category,
 .clientes-modal-chip--neutral {
   border-color: var(--badge-border);
@@ -406,9 +382,7 @@
 }
 
 .clientes-modal-link:focus-visible {
-  outline: none;
   border-radius: 5px;
-  box-shadow: var(--focus-ring);
 }
 
 .clientes-modal-link svg {
@@ -453,13 +427,6 @@
   border-color: var(--border-strong);
   color: var(--text-strong);
   transform: translateY(-1px);
-}
-
-.clientes-modal-copy-btn:focus-visible,
-.clientes-modal-footer-link:focus-visible,
-.clientes-modal-submit-btn:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
 }
 
 .clientes-modal-copy-btn svg,

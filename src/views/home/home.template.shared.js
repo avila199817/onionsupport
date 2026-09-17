@@ -17,10 +17,10 @@ import {
   safeDisplayId,
   safeImageSrc,
   safeRoute,
-  statusKey,
   visibleStatus,
 } from "./home.template.foundation.js";
 import { TIMESTAMP_POLICIES, toDate } from "../../core/dates.js";
+import { statusTone } from "../../core/status-tone.js";
 
 export function avatar(user = {}) {
   const image = safeImageSrc(user.avatarUrl);
@@ -51,11 +51,26 @@ export function avatar(user = {}) {
   `;
 }
 
+/* Home resumía varios dominios y traía su PROPIA lectura del estado: entre
+   otras cosas pintaba «Cancelada» en rojo mientras Facturas la pintaba neutra
+   y la lista de Incidencias verde. El tono lo decide ahora la autoridad; esta
+   tabla sólo traduce el nombre del tono al modificador que la hoja de Home ya
+   usaba, y no toma ninguna decisión semántica. `neutral` no tiene modificador:
+   es lo que pinta `.home-status` a secas. */
+const HOME_TONE_CLASS = Object.freeze({
+  open: "info",
+  pending: "warning",
+  success: "success",
+  danger: "error",
+  neutral: "",
+});
+
 export function statusBadge(value = "", fallback = "Sin estado") {
   const label = visibleStatus(value) || fallback;
-  const tone = statusKey(value);
+  const tone = statusTone(value);
+  const modifier = HOME_TONE_CLASS[tone];
 
-  return `<span class="home-status home-status--${attr(tone)}" data-home-status="${attr(homeLabelKey(value))}">${escapeHtml(label)}</span>`;
+  return `<span class="home-status${modifier ? ` home-status--${attr(modifier)}` : ""}" data-home-status="${attr(homeLabelKey(value))}" data-status-tone="${attr(tone)}">${escapeHtml(label)}</span>`;
 }
 
 export function entityIdBadge(kind = "ID", value = "") {

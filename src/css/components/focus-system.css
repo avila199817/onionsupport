@@ -1,0 +1,114 @@
+/* =========================================================
+   ONION SUPPORT — FOCUS SYSTEM
+   Archivo: /src/css/components/focus-system.css
+
+   UNA SOLA GRAMÁTICA DE FOCO PARA TODO EL SPA
+
+   Hermano de StatusSystem y AvatarSystem: vive en la última capa
+   (layer(guardrails), app.css) porque su trabajo es ganar.
+
+   EL PROBLEMA QUE RESUELVE
+
+   El indicador de foco estaba declarado en core/core.css, es decir en
+   @layer core, la TERCERA de diez. Y se pinta con `box-shadow`:
+
+       outline: 2px solid transparent;
+       box-shadow: var(--focus-ring);
+
+   Dos consecuencias medidas:
+
+   1 · Cualquier regla posterior que declare `box-shadow` sobre el mismo
+       elemento BORRA el indicador, porque no se suman: se sustituyen. Y una
+       sombra decorativa en un botón o una tarjeta es de lo más común en las
+       capas components, views y compositions. De ahí que 83 sitios del
+       proyecto lleven `outline: none; box-shadow: var(--focus-ring)`: cada
+       componente con sombra propia tenía que volver a declarar el anillo para
+       recuperarlo. Ese es el síntoma, no la solución.
+
+   2 · El anillo era invisible. Contraste calculado contra la superficie real
+       (WCAG 2.4.11 pide 3:1 para un indicador de foco):
+
+         tema claro, base                 1.19:1
+         tema claro, más contraste        1.64:1
+         tema oscuro, base                1.79:1
+         tema oscuro, más contraste       3.06:1   (el único que pasaba)
+
+   EL MECANISMO, CORREGIDO
+
+   Ponerlo en la última capa arregló el síntoma 2 y dejó el 1 al revés: al
+   ganar siempre, el anillo BORRA la sombra decorativa del componente. Medido
+   en navegador sobre `.ui-btn-primary`, con la transición ya asentada:
+
+     en reposo   dos sombras propias
+     enfocado    una sola: el anillo
+
+   Es decir, las doce reglas que declaraban `box-shadow: <su sombra>,
+   var(--focus-ring)` para conservar las dos no conservaban ninguna, y el
+   `--focus-ring-strong` de `.ui-btn-primary` nunca llegaba a pintarse.
+
+   La causa es la propiedad, no la capa: dos `box-shadow` sobre el mismo
+   elemento no se suman, se sustituyen. Así que el anillo pasa a `outline`, que
+   es OTRA propiedad y convive con la sombra. Entonces:
+
+     - el componente conserva su sombra Y recibe el anillo;
+     - las 67 redeclaraciones del proyecto sobran, todas;
+     - el `outline: 2px solid transparent` que existía sólo para que
+       `forced-colors` tuviera algo que pintar deja de hacer falta, porque ya
+       hay un outline de verdad.
+
+   `outline` sigue el `border-radius` del elemento en todos los navegadores que
+   este proyecto soporta, así que el anillo se ve igual que antes.
+
+   NO define geometría de layout ni lógica de dominio.
+   NO contiene @layer: app.css asigna layer(guardrails).
+========================================================= */
+
+/* =========================================================
+   FOCO VISIBLE · TECLADO
+
+   `:where()` mantiene la especificidad en cero: un componente que quiera su
+   propio indicador sigue pudiendo declararlo, y al estar en la última capa
+   esta regla sólo se impone donde nadie dijo nada.
+========================================================= */
+
+:where(
+  button,
+  a[href],
+  input,
+  select,
+  textarea,
+  summary,
+  [role="button"],
+  [role="menuitem"],
+  [role="option"],
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
+/* =========================================================
+   ALTO CONTRASTE DEL SISTEMA
+
+   En forced-colors el navegador impone sus propios colores. El indicador ya es
+   un `outline` de verdad, así que aquí sólo se cambia el color por el del
+   sistema y se engorda un punto.
+========================================================= */
+
+@media (forced-colors: active) {
+  :where(
+    button,
+    a[href],
+    input,
+    select,
+    textarea,
+    summary,
+    [role="button"],
+    [role="menuitem"],
+    [role="option"],
+    [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+  }
+}

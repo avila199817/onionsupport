@@ -521,7 +521,6 @@
     inset 2px 0 0 rgb(52 212 255 / .62),
     inset 0 1px 0 rgb(255 255 255 / .055);
   transform: translateY(-1px);
-  outline: none;
 }
 
 .public-home .public-home-account-menu-item:focus-visible {
@@ -731,7 +730,6 @@
 .public-home .public-support-field--phone-prefix .public-support-phone-control > input:focus,
 .public-home .public-support-field--phone-prefix .public-support-phone-control > input:focus-visible {
   border: 0;
-  outline: 0;
   background: transparent;
   box-shadow: none;
   transform: none;

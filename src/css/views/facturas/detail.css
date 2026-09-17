@@ -116,35 +116,6 @@
   font-family: var(--font-family-mono, ui-monospace, monospace);
 }
 
-.facturas-detail-chip--accent,
-.facturas-detail-chip--info {
-  border-color: var(--border-info);
-  background: var(--info-bg);
-  color: var(--info-strong, var(--info));
-}
-
-.facturas-detail-chip--success {
-  border-color: var(--border-success);
-  background: var(--success-bg);
-  color: var(--success-strong, var(--success));
-}
-
-.facturas-detail-chip--warning {
-  border-color: var(--border-warning);
-  background: var(--warning-bg);
-  color: var(--warning-strong, var(--warning));
-}
-
-.facturas-detail-chip--danger,
-.facturas-detail-chip--error {
-  border-color: var(--border-error);
-  background: var(--error-bg);
-  color: var(--error-strong, var(--error));
-}
-
-.facturas-detail-chip--neutral,
-.facturas-detail-chip--muted { color: var(--text-muted); }
-
 /* =========================================================
    HEADER ACTIONS
 ========================================================= */
@@ -196,7 +167,7 @@
 }
 
 .facturas-detail-btn:active:not(:disabled) { transform: translateY(0); background: var(--btn-secondary-bg-active); }
-.facturas-detail-btn:focus-visible { outline: 0; box-shadow: var(--btn-secondary-shadow, none), var(--focus-ring); }
+.facturas-detail-btn:focus-visible { box-shadow: var(--btn-secondary-shadow, none); }
 .facturas-detail-btn:disabled,
 .facturas-detail-btn[aria-disabled="true"] { cursor: not-allowed; opacity: .48; transform: none; }
 
@@ -293,7 +264,7 @@
 
 .facturas-detail-incidencia-btn > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .facturas-detail-incidencia-btn:hover { color: var(--text-strong); text-decoration: underline; text-underline-offset: 3px; }
-.facturas-detail-incidencia-btn:focus-visible { outline: 0; border-radius: var(--radius-xs); box-shadow: var(--focus-ring); }
+.facturas-detail-incidencia-btn:focus-visible { border-radius: var(--radius-xs); }
 
 /* =========================================================
    BODY / SECTIONS
@@ -419,6 +390,12 @@
   overflow-wrap: anywhere;
 }
 
+/* `--accent` NO es un estado: es ÉNFASIS. Lo lleva sólo la tarjeta del Total,
+   para que la cifra principal destaque entre sus hermanas --que no llevan tono
+   ninguno--. No lo puede dar `statusTone()`: un importe no tiene estado, y
+   ninguno de los cinco tonos del sistema significa «esta es la cifra
+   importante». Se queda donde está a propósito.
+   `--info` sí es un estado: lo produce la autoridad para «emitida». */
 .facturas-detail-stat--accent,
 .facturas-detail-stat--info {
   border-color: var(--border-info);
@@ -431,10 +408,8 @@
 .facturas-detail-stat--success .facturas-detail-stat-value { color: var(--success-strong, var(--success)); }
 .facturas-detail-stat--warning { border-color: var(--border-warning); background: var(--warning-bg); }
 .facturas-detail-stat--warning .facturas-detail-stat-value { color: var(--warning-strong, var(--warning)); }
-.facturas-detail-stat--danger,
-.facturas-detail-stat--error { border-color: var(--border-error); background: var(--error-bg); }
-.facturas-detail-stat--danger .facturas-detail-stat-value,
-.facturas-detail-stat--error .facturas-detail-stat-value { color: var(--error-strong, var(--error)); }
+.facturas-detail-stat--danger { border-color: var(--border-error); background: var(--error-bg); }
+.facturas-detail-stat--danger .facturas-detail-stat-value { color: var(--error-strong, var(--error)); }
 
 .facturas-detail-tax-grid {
   min-inline-size: 0;

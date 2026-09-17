@@ -30,11 +30,6 @@ border-color: var(--border-strong);
   color: var(--text-strong);
 }
 
-.incidencias-modal-id-chip:focus-visible {
-outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 .incidencias-modal-history-jump-btn,
 .incidencias-modal-preview-btn,
 .incidencias-modal-history-back-btn,
@@ -86,18 +81,6 @@ background: var(--btn-secondary-bg-hover);
 .incidencias-modal-history-back-btn:active:not(:disabled),
 .incidencias-modal-download-btn:active:not(:disabled) {
 transform: scale(.98);
-}
-
-.incidencias-modal-history-jump-btn:focus-visible,
-.incidencias-modal-close-ticket-btn:focus-visible,
-.incidencias-modal-preview-btn:focus-visible,
-.incidencias-modal-history-back-btn:focus-visible,
-.incidencias-modal-download-btn:focus-visible,
-.incidencias-modal-delete-btn:focus-visible,
-.incidencias-modal-pending-file button:focus-visible,
-.incidencias-modal-confirm-btn:focus-visible {
-outline: none;
-  box-shadow: var(--focus-ring);
 }
 
 .incidencias-modal-history-jump-btn:disabled,
@@ -335,7 +318,6 @@ background: var(--input-bg-hover);
 .incidencias-modal-admin-select:focus-visible {
 background: var(--input-bg-focus);
   border-color: var(--input-border-focus);
-  box-shadow: var(--focus-ring);
 }
 
 .incidencias-modal-admin-select:disabled {
@@ -456,11 +438,6 @@ position: relative;
 border-color: var(--incidencias-modal-card-hover-border);
   background: var(--incidencias-modal-card-hover-bg);
   transform: translateY(-1px);
-  outline: none;
-}
-
-.incidencias-modal-contact-link:focus-visible {
-box-shadow: var(--focus-ring);
 }
 
 .incidencias-modal-contact-label {
@@ -580,12 +557,6 @@ appearance: none;
 border-color: var(--incidencias-modal-thumb-hover-border);
   background: var(--solid-hover);
   transform: translateY(-1px);
-  outline: none;
-}
-
-.incidencias-modal-file-square:focus-visible,
-.incidencias-modal-image-thumb-wrap:focus-visible {
-box-shadow: var(--focus-ring);
 }
 
 .incidencias-modal-file-square > span {
@@ -678,7 +649,8 @@ min-inline-size: 0;
 }
 
 .incidencias-modal-preview:focus-visible {
-box-shadow: var(--focus-ring);
+outline: var(--focus-ring-width) solid var(--focus-ring-color);
+outline-offset: 2px;
 }
 
 .incidencias-modal-preview-head {
@@ -884,7 +856,6 @@ background: var(--input-bg-hover);
 .incidencias-modal-comment-textarea:focus {
 background: var(--input-bg-focus);
   border-color: var(--input-border-focus);
-  box-shadow: var(--focus-ring);
 }
 
 .incidencias-modal-comment-textarea:disabled {
@@ -939,7 +910,8 @@ position: relative;
 .incidencias-modal-dropzone:focus-within {
 border-color: var(--input-border-focus);
   background: var(--input-bg-hover);
-  box-shadow: var(--focus-ring);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 2px;
 }
 
 .incidencias-modal-dropzone > input {
@@ -1077,7 +1049,8 @@ inline-size: min(520px, 100%);
 }
 
 .incidencias-modal-confirm-dialog:focus-visible {
-box-shadow: var(--shadow-xl), var(--focus-ring);
+outline: var(--focus-ring-width) solid var(--focus-ring-color);
+outline-offset: 2px;
 }
 
 .incidencias-modal-confirm-icon {
@@ -1201,7 +1174,8 @@ display: grid;
 }
 
 .incidencias-modal-history-view:focus-visible {
-box-shadow: var(--focus-ring);
+outline: var(--focus-ring-width) solid var(--focus-ring-color);
+outline-offset: 2px;
 }
 
 .incidencias-modal-history-view-head {

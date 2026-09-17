@@ -111,7 +111,7 @@ function findNode(id = "") {
 
 function createNode(item) {
   const node = document.createElement("article");
-  node.className = `toast toast--${item.type}`;
+  node.className = `toast ${item.type}`;
   node.dataset.toastId = item.id;
   node.dataset.toastType = item.type;
   node.setAttribute("role", item.type === "error" ? "alert" : "status");
@@ -119,6 +119,14 @@ function createNode(item) {
 
   const body = document.createElement("div");
   body.className = "toast-body";
+
+  /* Hueco del icono. La hoja sólo lo pinta para `loading`, donde su ::before es
+     el spinner; para los demás tipos el color lo da el borde lateral, así que
+     no se añade un cuadro vacío. */
+  const icon = document.createElement("span");
+  icon.className = "toast-icon";
+  icon.dataset.toastIcon = "true";
+  icon.setAttribute("aria-hidden", "true");
 
   const content = document.createElement("div");
   content.className = "toast-content";
@@ -139,7 +147,7 @@ function createNode(item) {
   close.setAttribute("aria-label", "Cerrar notificación");
 
   content.append(title, message);
-  body.append(content, close);
+  body.append(icon, content, close);
   node.appendChild(body);
 
   patchNode(node, item);
@@ -152,14 +160,21 @@ function patchNode(node, item) {
 
   const type = normalizeType(item.type);
 
-  node.className = `toast toast--${type}`;
+  /* `toast <tipo>`: la convención de la hoja y del contrato de carga. El
+     runtime emitía `toast--<tipo>`, que no correspondía a ningún selector. */
+  node.className = `toast ${type}`;
   node.dataset.toastId = item.id;
   node.dataset.toastType = type;
   node.setAttribute("role", type === "error" ? "alert" : "status");
   node.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
 
+  const icon = node.querySelector("[data-toast-icon]");
   const title = node.querySelector("[data-toast-title]");
   const message = node.querySelector("[data-toast-message]");
+
+  if (icon) {
+    icon.hidden = type !== "loading";
+  }
 
   if (title) {
     title.textContent = redactSecrets(cleanText(item.title || "", ""));

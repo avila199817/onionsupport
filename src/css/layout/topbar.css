@@ -101,9 +101,13 @@
       52vw
     );
 
+  /* Dos escalones reales, no una divergencia: el tope se declara por tramo en
+     lugar de viajar como fallback de un token que no existe. */
+  --topbar-search-focus-max-width: 680px;
+
   --topbar-search-width-focus-local:
     min(
-      var(--topbar-search-focus-max-width, 680px),
+      var(--topbar-search-focus-max-width),
       58vw
     );
 
@@ -1095,10 +1099,7 @@
   inset-block-start:
     calc(
       var(--topbar-visible-height-local) +
-      var(
-        --topbar-search-results-gap,
-        8px
-      )
+      var(--topbar-search-results-gap)
     );
 
   inset-inline-end:
@@ -1820,9 +1821,11 @@
         48vw
       );
 
+    --topbar-search-focus-max-width: 620px;
+
     --topbar-search-width-focus-local:
       min(
-        var(--topbar-search-focus-max-width, 620px),
+        var(--topbar-search-focus-max-width),
         55vw
       );
   }

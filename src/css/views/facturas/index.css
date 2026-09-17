@@ -130,30 +130,7 @@
   block-size: 6px;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: currentColor;
 }
-
-.facturas-chip--paid {
-  border-color: var(--border-success);
-  background: var(--success-bg);
-  color: var(--success-strong, var(--success));
-}
-
-.facturas-chip--pending,
-.facturas-chip--partial,
-.facturas-chip--draft {
-  border-color: var(--border-warning);
-  background: var(--warning-bg);
-  color: var(--warning-strong, var(--warning));
-}
-
-.facturas-chip--overdue {
-  border-color: var(--border-error);
-  background: var(--error-bg);
-  color: var(--error-strong, var(--error));
-}
-
-.facturas-chip--cancelled { color: var(--text-dim); }
 
 .facturas-date-inline {
   color: var(--text-muted);
@@ -280,12 +257,6 @@
   transform: translateY(0);
 }
 
-.facturas-action-btn:focus-visible,
-.facturas-incidencia-link:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
 .facturas-action-btn--primary {
   border-color: var(--btn-primary-border);
   background: var(--btn-primary-bg);
@@ -338,9 +309,7 @@
 .facturas-infinite:focus-visible,
 .facturas-error:focus-visible,
 .facturas-empty:focus-visible {
-  outline: none;
   border-radius: var(--radius-sm);
-  box-shadow: var(--focus-ring);
 }
 
 .facturas-alert {
@@ -463,9 +432,7 @@
   color: var(--text-muted);
   font-size: var(--font-sm);
   text-align: center;
-  outline: none;
   border-radius: var(--radius-sm);
-  box-shadow: var(--focus-ring);
 }
 
 .facturas-inline-loading,

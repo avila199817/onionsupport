@@ -44,6 +44,7 @@ import { labelKey } from "../../core/slug-key.js";
 import { TIMESTAMP_POLICIES, toDate } from "../../core/dates.js";
 import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, dateFormatter, formatCurrency } from "../../core/format.js";
 import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
+import { statusTone } from "../../core/status-tone.js";
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
   "facturas.template.modal.productivo.v4.admin-payment";
@@ -1484,112 +1485,29 @@ function isFacturaPaid(
   );
 }
 
-function getEstadoPagoTone(
+/* Dos lecturas privadas del mismo estado vivían en este fichero y no se
+   ponían de acuerdo entre ellas: para «cancelada», `getEstadoPagoTone`
+   devolvía `muted` --una clase que sólo pintaba esta vista-- y `getEstadoTone`
+   devolvía `danger`. Los dos chips salen uno al lado del otro en la misma
+   cabecera del modal. Ahora los dos preguntan a la misma autoridad.
+
+   `FACTURAS_TONE_CLASS` no decide nada: traduce el nombre del tono al
+   modificador que la hoja de Facturas ya usaba, para no dejar huérfanos los
+   selectores que existen. El color lo pone `data-status-tone`. */
+const FACTURAS_TONE_CLASS = Object.freeze({
+  open: "info",
+  pending: "warning",
+  success: "success",
+  danger: "danger",
+  neutral: "neutral",
+});
+
+function toneClass(
   value = ""
 ) {
-  const key =
-    labelKey(value);
-
-  if (
-    [
-      "paid",
-      "pagada",
-      "pagado",
-      "cobrada",
-      "abonada",
-    ].includes(key)
-  ) {
-    return "success";
-  }
-
-  if (
-    [
-      "pending",
-      "pendiente",
-      "partial",
-      "parcial",
-      "unpaid",
-    ].includes(key)
-  ) {
-    return "warning";
-  }
-
-  if (
-    [
-      "overdue",
-      "vencida",
-      "vencido",
-    ].includes(key)
-  ) {
-    return "danger";
-  }
-
-  if (
-    [
-      "cancelled",
-      "canceled",
-      "cancelada",
-      "cancelado",
-    ].includes(key)
-  ) {
-    return "muted";
-  }
-
-  return "neutral";
-}
-
-function getEstadoTone(
-  value = ""
-) {
-  const key =
-    labelKey(value);
-
-  if (
-    [
-      "enviada",
-      "enviado",
-      "sent",
-      "abonada",
-      "paid",
-    ].includes(key)
-  ) {
-    return "success";
-  }
-
-  if (
-    [
-      "borrador",
-      "draft",
-    ].includes(key)
-  ) {
-    return "warning";
-  }
-
-  if (
-    [
-      "anulada",
-      "anulado",
-      "void",
-      "cancelada",
-      "cancelado",
-      "cancelled",
-      "canceled",
-    ].includes(key)
-  ) {
-    return "danger";
-  }
-
-  if (
-    [
-      "emitida",
-      "emitido",
-      "issued",
-    ].includes(key)
-  ) {
-    return "accent";
-  }
-
-  return "neutral";
+  return FACTURAS_TONE_CLASS[
+    statusTone(value)
+  ] || "neutral";
 }
 
 /* =========================================================
@@ -2777,13 +2695,17 @@ function renderActionSpinner(
   `;
 }
 
+/* `state` es el estado de dominio; `tone` sigue existiendo para los chips que
+   NO son estados (los de IVA e IRPF, que sólo usan la paleta). */
 function renderChip(
   label = "",
-  tone = "neutral"
+  tone = "neutral",
+  state = ""
 ) {
   return `
     <span
-      class="facturas-detail-chip facturas-detail-chip--${attr(tone)}"
+      class="facturas-detail-chip facturas-detail-chip--${attr(state ? toneClass(state) : tone)}"${state ? `
+      data-status-tone="${attr(statusTone(state))}"` : ""}
     >${escapeHtml(label)}</span>
   `;
 }
@@ -3454,8 +3376,11 @@ function renderResumenSection(
       factura
     );
 
+  /* La tarjeta del resumen no es un chip de estado --la pinta la hoja de
+     Facturas, no StatusSystem-- pero su tono SÍ sale del estado de cobro, así
+     que lo pregunta a la misma autoridad que el chip de la cabecera. */
   const paymentTone =
-    getEstadoPagoTone(
+    toneClass(
       getFacturaEstadoPagoRaw(
         factura
       )
@@ -3482,6 +3407,10 @@ function renderResumenSection(
             moneda
           ),
           {
+            /* Énfasis, no estado. El Total es la cifra que se busca al abrir
+               el resumen; sus hermanas van sin tono. La autoridad de estados
+               no puede darlo --un importe no tiene estado-- así que este tono
+               es de la vista a propósito. */
             tone: "accent",
           }
         )}
@@ -4063,18 +3992,16 @@ function renderFacturasDetailParts({
                   getFacturaEstadoPagoLabel(
                     factura
                   ),
-                  getEstadoPagoTone(
-                    paymentRaw
-                  )
+                  "neutral",
+                  paymentRaw
                 )}
 
                 ${renderChip(
                   getFacturaEstadoLabel(
                     factura
                   ),
-                  getEstadoTone(
-                    estadoRaw
-                  )
+                  "neutral",
+                  estadoRaw
                 )}
               </div>
 

@@ -16,6 +16,7 @@ import { slugKey } from "../../core/slug-key.js";
 import { coercedNumber } from "../../core/numbers.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 import { CURRENCY_POLICIES, DATE_PRESETS, dateFormatter, formatCurrency, formatDecimal } from "../../core/format.js";
+import { statusTone } from "../../core/status-tone.js";
 
 export {
   normalizeClienteModel,
@@ -267,7 +268,7 @@ function renderRow(item = {}, vm = {}) {
         </div>
       </td>
       <td class="clientes-cell clientes-cell--status">
-        <span class="clientes-chip clientes-chip--${attr(statusBucket(current))}">
+        <span class="clientes-chip clientes-chip--${attr(statusBucket(current))}" data-status-tone="${attr(statusTone(statusBucket(current)))}">
           <span class="clientes-chip-dot" aria-hidden="true"></span>
           <span>${escapeHtml(statusLabel(current))}</span>
         </span>

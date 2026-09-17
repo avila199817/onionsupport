@@ -440,8 +440,19 @@ body[data-theme="light"] {
      FOCUS / SELECTION / SCROLL
   ======================================================= */
 
-  --focus-ring: 0 0 0 4px rgba(82,82,82,.115);
-  --focus-ring-strong: 0 0 0 4px rgba(82,82,82,.175);
+  /* 3,11:1 y 4,02:1 sobre #ffffff. Antes .115/.175 daban 1,19:1 y 1,45:1,
+     por debajo del 3:1 que pide WCAG 2.4.11 para un indicador de foco. */
+  --focus-ring: 0 0 0 4px rgba(82,82,82,.63);
+  --focus-ring-strong: 0 0 0 4px rgba(82,82,82,.78);
+
+  /* El MISMO anillo, expresado como contorno. Un `box-shadow` no se suma al de
+     un componente: lo sustituye, y por eso 67 reglas del proyecto lo volvían a
+     declarar. Un `outline` es otra propiedad y convive con la sombra
+     decorativa, así que el anillo deja de competir y esas 67 sobran. Mismo
+     grosor y mismo color: el contraste medido no cambia. */
+  --focus-ring-width: 4px;
+  --focus-ring-color: rgba(82,82,82,.63);
+  --focus-ring-strong-color: rgba(82,82,82,.78);
 
   --selection-bg: rgba(82,82,82,.16);
   --selection-text: #0D0D0D;
@@ -1139,8 +1150,13 @@ body[data-theme="light"] {
     --border-strong: rgba(13,13,13,.34);
     --border-stronger: rgba(13,13,13,.46);
 
-    --focus-ring: 0 0 0 4px rgba(13,13,13,.22);
-    --focus-ring-strong: 0 0 0 4px rgba(13,13,13,.34);
+    /* 3,21:1 y 4,63:1 sobre #ffffff. Antes .22/.34 daban 1,64:1 y 2,13:1. */
+    --focus-ring: 0 0 0 4px rgba(13,13,13,.46);
+    --focus-ring-strong: 0 0 0 4px rgba(13,13,13,.62);
+
+    --focus-ring-width: 4px;
+    --focus-ring-color: rgba(13,13,13,.46);
+    --focus-ring-strong-color: rgba(13,13,13,.62);
 
     --input-border: rgba(13,13,13,.22);
     --input-border-hover: rgba(13,13,13,.34);

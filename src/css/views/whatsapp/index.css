@@ -299,8 +299,8 @@
 }
 
 .whatsapp-conversation:focus-visible {
-  outline: none;
-  box-shadow: inset var(--focus-ring);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: calc(var(--focus-ring-width) * -1);
 }
 
 .whatsapp-conversation.is-active,

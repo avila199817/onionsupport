@@ -96,12 +96,16 @@ body[data-theme="light"] {
   .cuenta-chip--danger,
   .ui-detail-modal-chip[class*="--status-"],
   .ui-detail-modal-chip[class*="--status_"],
+  .ui-detail-modal-chip[class*="--priority-"],
+  .ui-detail-modal-chip[class*="--priority_"],
   .clientes-modal-chip[class*="--status-"],
   .clientes-modal-chip[class*="--status_"],
   .facturas-detail-chip--success,
   .facturas-detail-chip--warning,
   .facturas-detail-chip--danger,
   .facturas-detail-chip--error,
+  .facturas-detail-chip--info,
+  .facturas-detail-chip--neutral,
   .server-meta-pill--healthy,
   .server-meta-pill--warning,
   .server-meta-pill--critical,
@@ -134,7 +138,10 @@ body[data-theme="light"] {
   .incidencias-status-chip--in-progress,
   .incidencias-status-chip.is-in_progress,
   .incidencias-status-chip.is-in-progress,
+  .incidencias-status-chip--progress,
+  .incidencias-status-chip.is-progress,
   .home-status--info,
+  .facturas-detail-chip--info,
   .ui-detail-modal-chip--status-open,
   .ui-detail-modal-chip--status_open,
   .ui-detail-modal-chip--status-progress,
@@ -250,7 +257,6 @@ body[data-theme="light"] {
   .incidencias-priority-badge--urgent,
   .incidencias-priority-badge--critical,
   .facturas-chip--overdue,
-  .agenda-status-chip--cancelada,
   .clientes-chip--blocked,
   .usuarios-chip--blocked,
   .usuarios-chip--inactive,
@@ -279,8 +285,69 @@ body[data-theme="light"] {
   --ui-status-dot: var(--ui-status-danger-dot);
 }
 
-/* Cancelled is terminal but not successful. */
-.facturas-chip--cancelled {
+/* =========================================================
+   CANCELADO / ARCHIVADO · NEUTRO
+
+   Cerrar sin resolver no es un éxito --no puede ser verde-- ni un fallo del
+   sistema --no puede ser rojo--. Es la línea que la cabecera de esta hoja
+   declara desde el principio y que sólo Facturas cumplía.
+========================================================= */
+
+:where(
+  .facturas-chip--cancelled,
+  .agenda-status-chip--cancelada
+) {
+  --ui-status-fg: var(--ui-status-neutral-fg);
+  --ui-status-bg: var(--ui-status-neutral-bg);
+  --ui-status-border: var(--ui-status-neutral-border);
+  --ui-status-dot: var(--ui-status-neutral-dot);
+}
+
+/* =========================================================
+   TONO DECLARADO · LA ÚLTIMA PALABRA
+
+   Los bloques de arriba son un mapa de CLASE a tono: cada vista bautizaba su
+   chip y esta hoja adivinaba el tono por el nombre. Eso funciona mientras
+   nadie nombre mal, y se nombraba mal: la lista de Usuarios pintaba «Inactivo»
+   en rojo y su propio detalle lo pintaba VERDE, porque el modal lo emitía como
+   `--status-closed`.
+
+   Ahora el tono no se adivina: lo declara quien conoce el estado, con una sola
+   autoridad --`src/core/status-tone.js`-- y viaja en un atributo. Estas reglas
+   van las ÚLTIMAS del fichero y con especificidad cero, así que entre iguales
+   ganan por orden: el tono declarado se impone al nombre de la clase, y una
+   superficie que todavía no lo declare sigue pintándose por su clase.
+========================================================= */
+
+:where([data-status-tone="open"]) {
+  --ui-status-fg: var(--ui-status-open-fg);
+  --ui-status-bg: var(--ui-status-open-bg);
+  --ui-status-border: var(--ui-status-open-border);
+  --ui-status-dot: var(--ui-status-open-dot);
+}
+
+:where([data-status-tone="pending"]) {
+  --ui-status-fg: var(--ui-status-pending-fg);
+  --ui-status-bg: var(--ui-status-pending-bg);
+  --ui-status-border: var(--ui-status-pending-border);
+  --ui-status-dot: var(--ui-status-pending-dot);
+}
+
+:where([data-status-tone="success"]) {
+  --ui-status-fg: var(--ui-status-success-fg);
+  --ui-status-bg: var(--ui-status-success-bg);
+  --ui-status-border: var(--ui-status-success-border);
+  --ui-status-dot: var(--ui-status-success-dot);
+}
+
+:where([data-status-tone="danger"]) {
+  --ui-status-fg: var(--ui-status-danger-fg);
+  --ui-status-bg: var(--ui-status-danger-bg);
+  --ui-status-border: var(--ui-status-danger-border);
+  --ui-status-dot: var(--ui-status-danger-dot);
+}
+
+:where([data-status-tone="neutral"]) {
   --ui-status-fg: var(--ui-status-neutral-fg);
   --ui-status-bg: var(--ui-status-neutral-bg);
   --ui-status-border: var(--ui-status-neutral-border);

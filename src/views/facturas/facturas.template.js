@@ -10,6 +10,7 @@
 ========================================================= */
 
 import { cleanText } from "../../core/presentation-text.js";
+import { statusTone } from "../../core/status-tone.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation, synchronizeAvatars } from "../../features/avatar-system/index.js";
 import { renderFacturasCreateModal } from "./facturas.template.create.js";
@@ -726,7 +727,7 @@ function renderAvatar(item = {}) {
 function renderEstadoPagoChip(item = {}) {
   const raw = getPaymentRaw(item);
   const key = getEstadoPagoKey(raw);
-  return `<span class="facturas-chip facturas-chip--${attr(key)}"><span class="facturas-chip-dot" aria-hidden="true"></span><span>${escapeHtml(getEstadoPagoLabel(raw))}</span></span>`;
+  return `<span class="facturas-chip facturas-chip--${attr(key)}" data-status-tone="${attr(statusTone(key))}"><span class="facturas-chip-dot" aria-hidden="true"></span><span>${escapeHtml(getEstadoPagoLabel(raw))}</span></span>`;
 }
 
 function renderDeliveryBadge(item = {}) {

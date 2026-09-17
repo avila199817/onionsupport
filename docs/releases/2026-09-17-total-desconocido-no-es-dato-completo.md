@@ -15,6 +15,28 @@ guarda de caché añadida en la entrega anterior no saltaba, y la tarjeta se
 quedaba en «No disponible» —indistinguible de un ámbito que no aplica a la
 sesión— sin nada que pulsar.
 
+### El recuento no confirmado no es sólo un COUNT caído
+
+Medido sobre el recorrido real de sesión, el camino que lo dispara todos los
+días no es un fallo de Cosmos: **Home reutiliza la lista que ya trajo
+`/incidencias`**, y esa vista la pide en modo cursor y con `includeTotal=false`.
+El backend no cuenta cuando no se lo piden —es su contrato, no un defecto—, así
+que el recuento llega legítimamente sin confirmar.
+
+Con lo que había en `main`, eso bastaba para dejar la tarjeta muerta durante
+toda la sesión. Medido en el recorrido conjunto, sobre el build real:
+
+```
+main   · 1ª entrada a Home → incidencias=unavailable «Incidencias — No disponible»
+       · salir y volver     → igual, y así hasta recargar el documento
+rama   · 1ª entrada a Home → incidencias=unknown     «Incidencias — Sin confirmar»
+       · salir y volver     → incidencias=value      «Incidencias 8»
+       · y volver otra vez  → 0 lecturas nuevas: ya no hay nada que confirmar
+```
+
+Es decir: el defecto no dependía de que fallara una consulta. Bastaba con
+visitar Incidencias antes que Home.
+
 ## Qué cambia aquí (frontend)
 
 El backend ya declara el estado (`oniontech`, PR aparte). Esta mitad lo
@@ -69,6 +91,23 @@ está corrigiendo. Se muestra «—» y «Sin confirmar», que es recuperable.
 `tools/home-domain-counts-contract.mjs` pasa a exigir `unknown` + «Sin
 confirmar» donde antes fijaba «No disponible»: el contrato distingue ahora más,
 no menos.
+
+### Y en la sesión completa: `tools/spa-session-contract.mjs`, paso 19 (N15)
+
+El recorrido conjunto gana un paso que recorre el camino entero sin recargar:
+estado honesto → salir y volver → número real → y una tercera entrada que **no**
+vuelve a leer. Su negativa está comprobada por mutación: con las mismas
+herramientas y el `src` de `main`, el paso cae con estado `unavailable` y la
+tarjeta diciendo «Incidencias — No disponible».
+
+Ese mismo paso obligó a corregir los dos pasos de comparación de fichas (ahora
+20 y 21). Tomaban la entidad de la **primera** pintada de Home, que era
+justamente la del panel sin recuperar; al recuperarse, la lista de actividad
+pasa a ser la verdadera y aquella entrada ya no está. Estaban midiendo sobre un
+panel obsoleto y pasaban por eso. Ahora eligen su ficha con el panel ya
+asentado, con un clic directo —el reintento de clic que probé antes era una
+tirita sobre este mismo efecto y se ha retirado— y la comprobación de huella
+(N9) queda exactamente igual de estricta.
 
 ## Límite
 

@@ -45,10 +45,6 @@ const CONSUMERS = Object.freeze({
   "src/views/server/server.api.js": "payloadFirst",
   "src/views/usuarios/usuarios.template.create.js": "payloadFirst",
   "src/views/whatsapp/index.js": "payloadFirst",
-  /* Agenda: los códigos de `router/citas` traen su propia explicación (qué
-     hora no existe, qué campos no se pueden fijar, qué versión falta), así
-     que manda el texto del backend sobre el del Error envoltorio. */
-  "src/views/agenda/agenda.api.js": "payloadFirst",
 });
 // Extractors with a policy of their own that stay local (upper bound; each has a reason):
 // - clientes.api errorMessage(response): reads a response envelope and falls back to its error/code text (envelope reader, not an Error reader)
@@ -57,6 +53,50 @@ const CONSUMERS = Object.freeze({
 const LOCAL_EXTRACTORS = Object.freeze(["src/views/clientes/clientes.api.js", "src/views/whatsapp/whatsapp.api.js"]);
 const LOCAL_DEFINERS = Object.freeze(["src/views/clientes/clientes.api.js", "src/features/public-support/index.js"]);
 const CHAIN_FINGERPRINT = /\?\.data\?\.message|error\?\.payload\?\.message|response\?\.data\?\.message/u;
+/* ALTA EXPLICITA DE UN CONSUMIDOR NUEVO.
+
+   El mapa de arriba se mide contra `src`, y los jobs que validan con el
+   tooling de la base lo ejecutan contra el `src` del candidato. Un modulo
+   NUEVO que consuma la autoridad no puede estar en ese mapa todavia --el
+   archivo no existe aun en la base-- y comparar el mapa entero con
+   `deepEqual` lo rechazaba, de modo que ningun PR podia estrenar un
+   consumidor de `errorMessage`. La salida no es relajar la comprobacion:
+   es que el modulo nuevo DECLARE su orden en su propio origen, donde el
+   revisor lo ve en el diff y donde este contrato puede comprobarlo.
+
+   La declaracion no elige nada por su cuenta. Tiene que nombrar un orden
+   que exista y coincidir con el que el modulo llama de verdad; si no,
+   falla igual. Y un modulo que SI esta medido se gobierna por el mapa y no
+   puede declarar: moverlo entre ordenes sigue siendo una decision que se
+   escribe aqui, no en el modulo. Una entrega de mantenimiento puede pasar
+   una declaracion al mapa cuando el modulo ya viva en la base. */
+const ORDER_DECLARATION_FORM = "/* @error-message-order <orden> \u00b7 <motivo> */";
+const ORDER_DECLARATION = /@error-message-order\s+([A-Za-z]\w*)/gu;
+
+function reviewConsumerOrder(path, code, order, listed = CONSUMERS) {
+  assert.ok(Object.hasOwn(POLICIES, order), `${path}: nombra un orden que no existe (${order})`);
+  const declared = [...code.matchAll(ORDER_DECLARATION)].map((match) => match[1]);
+  if (Object.hasOwn(listed, path)) {
+    assert.deepEqual(declared, [], `${path}: esta medido; su orden vive en el mapa de este contrato, no en una declaracion`);
+    return;
+  }
+  assert.equal(declared.length, 1, `${path}: un consumidor que este contrato no midio declara su orden una vez, en su propio origen (${ORDER_DECLARATION_FORM})`);
+  assert.ok(Object.hasOwn(POLICIES, declared[0]), `${path}: declara un orden que no existe (${declared[0]})`);
+  assert.equal(declared[0], order, `${path}: declara ${declared[0]} y llama ${order}`);
+}
+
+/* Las protecciones siguen puestas, y aqui se demuestra una por una. */
+const NUEVO = "src/views/nueva/nueva.api.js";
+const MEDIDO = "src/views/home/index.js";
+reviewConsumerOrder(NUEVO, "/* @error-message-order payloadFirst \u00b7 el backend explica el codigo */", "payloadFirst");
+assert.throws(() => reviewConsumerOrder(NUEVO, "sin declaracion", "payloadFirst"), /declara su orden una vez/u, "un consumidor nuevo sin declarar no pasa");
+assert.throws(() => reviewConsumerOrder(NUEVO, "/* @error-message-order inventado */", "payloadFirst"), /declara un orden que no existe/u, "una politica desconocida no pasa");
+assert.throws(() => reviewConsumerOrder(NUEVO, "/* @error-message-order messageFirst */", "payloadFirst"), /declara messageFirst y llama payloadFirst/u, "declarar una cosa y llamar otra no pasa");
+assert.throws(() => reviewConsumerOrder(NUEVO, "/* @error-message-order payloadFirst */\n/* @error-message-order messageFirst */", "payloadFirst"), /una vez/u, "dos declaraciones no pasan");
+assert.throws(() => reviewConsumerOrder(NUEVO, "/* @error-message-order payloadFirst */", "inventado"), /nombra un orden que no existe/u, "llamar a una politica inexistente no pasa");
+assert.throws(() => reviewConsumerOrder(MEDIDO, "/* @error-message-order payloadFirst */", "messageFirst"), /su orden vive en el mapa/u, "un consumidor medido no se mueve declarando");
+reviewConsumerOrder(MEDIDO, "sin declaracion", "messageFirst"); /* y su orden lo sigue decidiendo el mapa, mas abajo */
+
 const SECRET = "S3cr3tV4lu3XYZ";
 
 assert.deepEqual(Object.fromEntries(Object.entries(ERROR_MESSAGE_POLICIES).map(([k, v]) => [k, [...v]])), POLICIES, "the two orders are the frozen ones");
@@ -135,6 +175,7 @@ for (const file of sourceFiles(SRC_ROOT)) {
   assert.equal(orders.length, calls, `${path}: every errorMessage call names its order as its third argument (${calls} calls, ${orders.length} order references)`);
   const distinct = [...new Set(orders.map((o) => o.split(".")[1]))];
   assert.equal(distinct.length, 1, `${path}: one order per module (${distinct.join(", ")})`);
+  reviewConsumerOrder(path, code, distinct[0]);
   consumers[path] = distinct[0];
 }
 /* SÓLO HABLA QUIEN PUEDE RESPONDER · la decisión vive en el dominio.
@@ -161,10 +202,15 @@ for (const [ruta, politica] of Object.entries(PRESENTACION_POR_DOMINIO)) {
 }
 
 assert.deepEqual(definers.sort(), [AUTHORITY, ...LOCAL_DEFINERS].sort(), "errorMessage is defined only in core/errors.js and the two listed locals (envelope reader, presentation mapper)");
-assert.deepEqual(consumers, CONSUMERS, "each consumer uses the order measured before the migration; moving one is a decision");
+/* Los medidos, contra el mapa y en los dos sentidos: uno que se mueva de
+   orden falla, y uno que desaparezca de `src` tambien. Los que este
+   contrato no midio ya han pasado por su declaracion, arriba. */
+const listedConsumers = Object.fromEntries(Object.entries(consumers).filter(([path]) => Object.hasOwn(CONSUMERS, path)));
+assert.deepEqual(listedConsumers, CONSUMERS, "each consumer uses the order measured before the migration; moving one is a decision");
+const declaredConsumers = Object.keys(consumers).filter((path) => !Object.hasOwn(CONSUMERS, path)).sort();
 assert.deepEqual(chainsOutside, [], "no module reads data/payload message chains outside the authority and the two listed local extractors");
 assert.deepEqual(statusChains, [], "no module reads status || statusCode chains: errorStatus does");
 assert.deepEqual(codeChains, [], "no module reads code || error chains or upper-cases a code by hand: errorCode does");
 for (const path of LOCAL_EXTRACTORS) assert.ok(CHAIN_FINGERPRINT.test(readFileSync(join(SRC_ROOT, path.slice("src/".length)), "utf8")), `${path} still carries its own extractor (drop it from the list when it converges)`);
 
-console.log(`Error extraction contract: PASS · errorMessage (2 orders frozen, ${Object.keys(CONSUMERS).length} consumers on their measured order), errorStatus, errorCode and describeError in core/errors.js · one definer · ${LOCAL_EXTRACTORS.length} local extractors listed · no status/code chain outside the authority · behaviour of the four · Usuarios presenta por estado o código`);
+console.log(`Error extraction contract: PASS · errorMessage (2 orders frozen, ${Object.keys(CONSUMERS).length} consumers on their measured order, ${declaredConsumers.length} declaring their own${declaredConsumers.length ? `: ${declaredConsumers.join(", ")}` : ""}), errorStatus, errorCode and describeError in core/errors.js · one definer · ${LOCAL_EXTRACTORS.length} local extractors listed · no status/code chain outside the authority · behaviour of the four · Usuarios presenta por estado o código`);

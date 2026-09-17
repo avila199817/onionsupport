@@ -29,21 +29,24 @@ const JS_ROOT = resolve(DIST, "assets/js");
 // what the SPA loads, so it belongs in this closure; the ceiling moves to
 // 218600, leaving 57 bytes. Nothing is preloaded: the growth is the rule, not
 // the payload. app and auth keep their ceilings.
-// R06 (2026-09-17): Agenda deja de ser una vista sin datos y pasa a consumir
-// el sistema modal compartido (entity-overlay: shell, host, lifecycle y
-// confirmaciones) y el combobox accesible de seleccion de usuario. Esa
-// reutilizacion es la regla, no el payload: al compartirlos, Vite extrae dos
-// chunks nuevos --el combobox sale de Incidencias, que ENCOGE-- y sus dos
+// R06 (2026-09-17): Agenda pasa a consumir el sistema modal compartido
+// (entity-overlay: shell, host, lifecycle y confirmaciones) y el combobox
+// accesible de seleccion de usuario. Al compartirlos, Vite deja de meterlos
+// en el chunk de Incidencias y los extrae a dos chunks propios, cuyos dos
 // nombres entran en la tabla de precarga que vive dentro de `routes`, que si
 // esta en el cierre bootstrap/Home.
-// Medido sobre el mismo build, main d5db0bdb -> esta rama: 218563 -> 218694,
-// +131 raw bytes. NINGUN modulo nuevo entra en el cierre: los quince chunks
-// restantes (main, app, enhancements, home, core, http, errors, styles...)
-// son byte a byte identicos a main; los 131 bytes son enteros de `routes`
-// (20774 -> 20905) y se explican uno a uno: 57 del nombre del chunk del
-// combobox, 43 del de la confirmacion modal y 31 de los indices que la ruta
-// /agenda anade a su lista de dependencias. El techo pasa a 218750, dejando
-// 56 bytes. app y auth conservan los suyos.
+//   baseline  d5db0bdbecf89563f0e5109ebd4b66b277e82110 (main) -> 218563
+//   candidato 78f2dd003f2ae2abed8ec1ce4c7c09c29bca1ab9 (#690) -> 218694
+//   crecimiento +131 raw bytes, TODOS dentro de `routes` (20774 -> 20905):
+//     57  "assets/js/incidencias.create-user-combobox-<hash>.js",
+//     43  "assets/js/modal-confirmation-<hash>.js",
+//     31  los indices que la ruta /agenda anade a su lista de dependencias.
+//   Los otros quince chunks del cierre son byte a byte identicos a main, y
+//   el chunk de Incidencias ENCOGE 3.511 bytes (222994 -> 219483). No hay
+//   payload nuevo: hay dos modulos que pasan a compartirse.
+//   techo 218600 -> 218750, margen resultante 56 bytes.
+// app y auth conservan los suyos. Esta cota se sube a mano, con su medida,
+// cada vez: nada aqui la mueve solo.
 const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218750 });
 
 function staticImports(code, identifier) {

@@ -20,9 +20,6 @@ const AUTHORITY = "src/core/format.js";
 const ENTRY_AND_LEAF = Object.freeze(["src/main.js", "src/analytics/google-tag.js"]);
 // Measured before the migration: every consumer with the currency policies it names.
 const CONSUMERS = Object.freeze({
-  /* Agenda consume `dateFormatter` con sus propios presets de día civil
-     (`views/agenda/agenda.dates.js`); no formatea importes. */
-  "src/views/agenda/agenda.dates.js": [],
   "src/features/facturas-paid-confirm/index.js": ["standard"],
   "src/features/incidencias-detail-state/index.js": [],
   "src/features/incidencias-technician-profile/index.js": [],
@@ -68,6 +65,61 @@ const LOCAL_CURRENCY_FORMATTERS = Object.freeze({
   // chart axis labels: compact notation from 1000 and digits that depend on the value
   "src/views/server/server.template.js": 1,
 });
+
+/* ALTA EXPLICITA DE UN CONSUMIDOR NUEVO · mismo criterio que en
+   `error-extraction-contract`.
+
+   Los mapas de arriba se miden contra `src`, y los jobs que validan con el
+   tooling de la base los ejecutan contra el `src` del candidato. Un modulo
+   NUEVO no puede estar en ellos todavia --el archivo no existe aun en la
+   base-- y comparar el mapa entero con `deepEqual` lo rechazaba, de modo
+   que ningun PR podia estrenar un consumidor de estas autoridades. La
+   salida no es relajar la comprobacion: es que el modulo nuevo DECLARE en
+   su propio origen QUE usa, donde el revisor lo ve en el diff y donde este
+   contrato puede comprobarlo contra lo que llama de verdad.
+
+   `none` significa "ninguna", y hay que escribirlo: el silencio no declara. */
+const CURRENCY_DECLARATION_FORM = "/* @format-currency-policies <none|lista> */";
+const PRESET_DECLARATION_FORM = "/* @format-date-presets <none|lista> */";
+const CURRENCY_DECLARATION = /@format-currency-policies\s+([A-Za-z][A-Za-z0-9,\t ]*)/gu;
+const PRESET_DECLARATION = /@format-date-presets\s+([A-Za-z][A-Za-z0-9,\t ]*)/gu;
+
+function declaredNames(code, pattern) {
+  return [...code.matchAll(pattern)].map((match) =>
+    match[1].split(",").map((name) => name.trim()).filter(Boolean).filter((name) => name !== "none"));
+}
+
+function reviewDeclaredUse({ path, code, used, listed, valid, pattern, form, label }) {
+  for (const name of used) assert.ok(Object.hasOwn(valid, name), `${path}: nombra ${label} que no existe (${name})`);
+  const declared = declaredNames(code, pattern);
+  if (Object.hasOwn(listed, path)) {
+    assert.deepEqual(declared, [], `${path}: esta medido; ${label} vive en el mapa de este contrato, no en una declaracion`);
+    return;
+  }
+  assert.equal(declared.length, 1, `${path}: un consumidor que este contrato no midio declara una vez, en su propio origen (${form})`);
+  for (const name of declared[0]) assert.ok(Object.hasOwn(valid, name), `${path}: declara ${label} que no existe (${name})`);
+  assert.deepEqual([...declared[0]].sort(), [...used].sort(), `${path}: declara [${declared[0]}] y usa [${used}]`);
+}
+
+/* Las protecciones siguen puestas, y aqui se demuestra una por una. */
+const NUEVO = "src/views/nueva/nueva.dates.js";
+const MEDIDO = "src/views/facturas/facturas.template.js";
+const currencyCase = (path, code, used, listed = CONSUMERS) => () => reviewDeclaredUse({
+  path, code, used, listed, valid: CURRENCY_POLICIES, pattern: CURRENCY_DECLARATION,
+  form: CURRENCY_DECLARATION_FORM, label: "una politica",
+});
+currencyCase(NUEVO, "/* @format-currency-policies none */", [])();
+currencyCase(NUEVO, "/* @format-currency-policies standard, precise */", ["precise", "standard"])();
+assert.throws(currencyCase(NUEVO, "sin declaracion", []), /declara una vez/u, "un consumidor nuevo sin declarar no pasa");
+assert.throws(currencyCase(NUEVO, "/* @format-currency-policies inventada */", ["standard"]), /declara una politica que no existe/u, "una politica desconocida no pasa");
+assert.throws(currencyCase(NUEVO, "/* @format-currency-policies none */", ["standard"]), /declara \[\] y usa \[standard\]/u, "declarar una cosa y usar otra no pasa");
+assert.throws(currencyCase(NUEVO, "/* @format-currency-policies standard */", ["inventada"]), /nombra una politica que no existe/u, "usar una politica inexistente no pasa");
+assert.throws(currencyCase(NUEVO, "/* @format-currency-policies none */\n/* @format-currency-policies standard */", []), /una vez/u, "dos declaraciones no pasan");
+assert.throws(currencyCase(MEDIDO, "/* @format-currency-policies none */", ["standard"]), /vive en el mapa/u, "un consumidor medido no se mueve declarando");
+assert.throws(() => reviewDeclaredUse({
+  path: NUEVO, code: "/* @format-date-presets inventado */", used: ["dateTime"], listed: DATE_CONSUMERS,
+  valid: DATE_PRESETS, pattern: PRESET_DECLARATION, form: PRESET_DECLARATION_FORM, label: "un preset",
+}), /declara un preset que no existe/u, "y lo mismo vale para los presets de fecha");
 
 // Policies: frozen and distinct.
 assert.deepEqual(Object.keys(CURRENCY_POLICIES), ["standard", "grouped", "precise", "currencyDigits"]);
@@ -159,11 +211,20 @@ for (const file of sourceFiles(SRC_ROOT)) {
     else localDateFormatters[path] = (localDateFormatters[path] || 0) + 1;
   }
   const presets = [...new Set([...executable.matchAll(/DATE_PRESETS\.(\w+)/gu)].map((m) => m[1]))].sort();
-  if (presets.length) dateConsumers[path] = presets;
+  if (presets.length) {
+    reviewDeclaredUse({ path, code, used: presets, listed: DATE_CONSUMERS, valid: DATE_PRESETS,
+      pattern: PRESET_DECLARATION, form: PRESET_DECLARATION_FORM, label: "un preset" });
+    dateConsumers[path] = presets;
+  }
   const calls = [...executable.matchAll(/(?<![\w$.])(formatCurrency|currencyFormatter|formatDecimal|currencyCode|dateFormatter)\s*\(/gu)];
   if (calls.length && !imports) callersWithoutBinding.push(path);
   for (const alias of imported) if (/\sas\s/u.test(alias)) callersWithoutBinding.push(`${path} → ${alias}`);
-  if (calls.length) consumers[path] = [...new Set([...executable.matchAll(/CURRENCY_POLICIES\.(\w+)/gu)].map((m) => m[1]))].sort();
+  if (calls.length) {
+    const policies = [...new Set([...executable.matchAll(/CURRENCY_POLICIES\.(\w+)/gu)].map((m) => m[1]))].sort();
+    reviewDeclaredUse({ path, code, used: policies, listed: CONSUMERS, valid: CURRENCY_POLICIES,
+      pattern: CURRENCY_DECLARATION, form: CURRENCY_DECLARATION_FORM, label: "una politica" });
+    consumers[path] = policies;
+  }
   if (ENTRY_AND_LEAF.includes(path) && code.includes("/core/format.js\"")) entryImports.push(path);
 }
 assert.deepEqual(definers, [AUTHORITY], "the primitives are defined in core/format.js only");
@@ -171,10 +232,22 @@ assert.deepEqual(currencyOutside, LOCAL_CURRENCY_FORMATTERS, "no currency Intl f
 assert.deepEqual(cachesOutside, [], "no module keeps a money formatter cache of its own");
 assert.deepEqual(plainOutside, [], "no module builds the plain es-ES number formatter again");
 assert.deepEqual(callersWithoutBinding, [], "every caller imports core/format.js by name");
-assert.deepEqual(consumers, CONSUMERS, "the consumers and their policies are the measured map");
+/* Los medidos, contra el mapa y en los dos sentidos: uno que cambie de
+   politica falla, y uno que desaparezca de `src` tambien. Los que este
+   contrato no midio ya han pasado por su declaracion, arriba. */
+const listedConsumers = Object.fromEntries(Object.entries(consumers).filter(([path]) => Object.hasOwn(CONSUMERS, path)));
+assert.deepEqual(listedConsumers, CONSUMERS, "the consumers and their policies are the measured map");
 assert.deepEqual(sharedPresetOutside, [], "no module builds a shared date preset again");
-assert.deepEqual(localDateFormatters, LOCAL_DATE_FORMATTERS, "local date presets stay within the measured upper bound per module");
-assert.deepEqual(dateConsumers, DATE_CONSUMERS, "the date preset consumers are the measured map");
+/* COTA SUPERIOR, que es lo que este mapa dice ser. Un modulo puede dejar de
+   construir formateadores propios --y Agenda lo hace al pasar a la
+   autoridad--; lo que no puede es construir mas de los medidos, ni
+   estrenarlos sin medida: el que no esta listado tiene cota cero. */
+const overLocalBound = Object.entries(localDateFormatters)
+  .filter(([path, count]) => count > (LOCAL_DATE_FORMATTERS[path] || 0))
+  .map(([path, count]) => `${path}: ${count} > ${LOCAL_DATE_FORMATTERS[path] || 0}`);
+assert.deepEqual(overLocalBound, [], "local date presets stay within the measured upper bound per module");
+const listedDateConsumers = Object.fromEntries(Object.entries(dateConsumers).filter(([path]) => Object.hasOwn(DATE_CONSUMERS, path)));
+assert.deepEqual(listedDateConsumers, DATE_CONSUMERS, "the date preset consumers are the measured map");
 assert.deepEqual(entryImports, [], "main.js and analytics/google-tag.js never import core/format.js");
 
-console.log(`Format contract: PASS · formatCurrency/currencyFormatter/currencyCode/formatDecimal/dateFormatter in core/format.js · 4 currency policies and 4 date presets frozen · behaviour with real Intl (EUR, USD, JPY, unknown and malformed codes; preset shapes) · ${Object.keys(consumers).length} consumers on their measured policies · ${Object.keys(dateConsumers).length} date consumers on their measured presets · 1 local currency policy and ${Object.values(localDateFormatters).reduce((a, b) => a + b, 0)} local date presets listed · no shared preset, formatter cache or plain es-ES formatter outside · callers bind by name · entry and analytics leaf import none`);
+console.log(`Format contract: PASS · formatCurrency/currencyFormatter/currencyCode/formatDecimal/dateFormatter in core/format.js · 4 currency policies and 4 date presets frozen · behaviour with real Intl (EUR, USD, JPY, unknown and malformed codes; preset shapes) · ${Object.keys(listedConsumers).length} consumers on their measured policies (${Object.keys(consumers).length - Object.keys(listedConsumers).length} declaring their own) · ${Object.keys(listedDateConsumers).length} date consumers on their measured presets (${Object.keys(dateConsumers).length - Object.keys(listedDateConsumers).length} declaring their own) · 1 local currency policy and ${Object.values(localDateFormatters).reduce((a, b) => a + b, 0)} local date presets listed · no shared preset, formatter cache or plain es-ES formatter outside · callers bind by name · entry and analytics leaf import none`);

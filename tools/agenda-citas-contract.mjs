@@ -555,4 +555,73 @@ pass("1 · versiones y zona canónica declaradas");
   pass("13 · «Eliminar cita» cancela por contrato, sin DELETE ni Cosmos, y la leyenda no deja rastro");
 }
 
+/* =========================================================
+   14 · QUIÉN MIRA LO DICE LA SESIÓN, NO QUIEN MONTA LA VISTA
+
+   El defecto que cierra este bloque: la Agenda derivaba `admin` del objeto
+   que le pasa quien la monta (`context.isAdmin` / `context.role`). El Router
+   monta TODAS las vistas con el mismo contexto --AppCore, Auth, Router, la
+   ruta, el publicPath, los parámetros, el origen y su AbortSignal--, y ahí no
+   viaja ningún rol. Resultado en producción: todo administrador con
+   `admin: false`, el pie del detalle compuesto vacío --sin «Editar» y sin
+   «Eliminar cita»-- y sin las filas «Usuario» y «Comunicación», mientras el
+   «+» seguía apareciendo porque su permiso lo da el backend en la respuesta
+   del listado. Dos autoridades para lo mismo y la de la vista siempre falsa.
+
+   Se comprueba, sobre el origen:
+   a) el contexto de montaje del Router NO lleva rol ni identidad --es el
+      hecho que hacía imposible resolverlo desde ahí--;
+   b) la Agenda no vuelve a leer el rol ni la identidad de ese contexto;
+   c) la Agenda pregunta a la MISMA autoridad de sesión que el resto de las
+      vistas privadas, y la pregunta en cada pintado, no una vez al montar;
+   d) el recorrido en navegador de la Agenda no se monta con un rol inventado.
+========================================================= */
+{
+  const raiz = resolve(fileURLToPath(new URL("../", import.meta.url)));
+  const leer = (ruta) => readFileSync(join(raiz, ruta), "utf8");
+
+  /* a) El único punto donde el Router entrega su contexto a la vista. */
+  const router = leer("src/router/index.js");
+  const entrega = router.slice(router.indexOf("await route.render("));
+  const contextoDelRouter = entrega.slice(0, entrega.indexOf("} finally {"));
+  assert.ok(contextoDelRouter.includes("source:"),
+    "no se ha localizado el contexto que el Router entrega a la vista");
+  for (const clave of [/role\s*:/u, /isAdmin\s*:/u, /userId\s*:/u]) {
+    assert.doesNotMatch(contextoDelRouter, clave,
+      `el contexto de montaje del Router no declara ${clave}; ninguna vista puede derivar de ahí quién mira`);
+  }
+
+  /* b) La Agenda ya no lo intenta. */
+  const controlador = leer("src/views/agenda/index.js");
+  for (const patron of [/context\??\.\s*isAdmin/u, /context\??\.\s*role/u, /context\??\.\s*rol/u, /context\??\.\s*userId/u]) {
+    assert.doesNotMatch(controlador, patron,
+      `la Agenda vuelve a derivar quién mira del contexto de montaje: ${patron}`);
+  }
+
+  /* c) Pregunta a la autoridad compartida, y la pregunta viva. */
+  assert.match(controlador, /import\s*\{\s*AppCore\s*\}\s*from\s*"\.\.\/\.\.\/core\/index\.js"/u,
+    "la Agenda importa la autoridad de sesión del kernel");
+  assert.match(controlador, /AppCore\.getCurrentRole\?\.\(\)/u,
+    "el rol se pregunta a AppCore.getCurrentRole()");
+  assert.match(controlador, /AppCore\.getCurrentUser\?\.\(\)/u,
+    "la identidad se pregunta a AppCore.getCurrentUser()");
+  assert.match(controlador, /get admin\(\)\s*\{\s*return sessionRole\(\) === "admin";\s*\}/u,
+    "`admin` se resuelve en cada lectura, no se congela en el montaje");
+
+  /* Y es la misma autoridad que usa el resto de lo privado, no una propia. */
+  for (const vista of ["src/views/facturas/index.js", "src/views/clientes/index.js"]) {
+    assert.match(leer(vista), /AppCore\.getCurrentRole\?\.\(\)/u,
+      `${vista} comparte la autoridad de rol con la Agenda`);
+  }
+
+  /* d) El recorrido en navegador monta como monta el Router: sin rol. */
+  const recorrido = leer("tools/agenda-citas-browser-contract.mjs");
+  assert.doesNotMatch(recorrido, /__mount\(\s*\{\s*role\s*:/u,
+    "el recorrido de la Agenda no puede montar con un rol inventado: eso fue lo que dio verde al defecto");
+  assert.match(recorrido, /AppCore\.applySession\(/u,
+    "el recorrido establece una sesión real antes de montar");
+
+  pass("14 · el rol y la identidad salen de la sesión, no del contexto de montaje");
+}
+
 console.log(`\nAgenda citas contract: PASS · ${checks.length} bloques · fechas civiles, proyección por rol, errores y habilitación`);

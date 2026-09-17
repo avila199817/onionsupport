@@ -28,24 +28,6 @@
   box-shadow: 0 0 0 4px var(--success-soft);
 }
 
-.server-meta-pill--healthy {
-  border-color: var(--border-success);
-  background: var(--success-bg);
-  color: var(--success-strong, var(--success));
-}
-
-.server-meta-pill--warning {
-  border-color: var(--border-warning);
-  background: var(--warning-bg);
-  color: var(--warning-strong, var(--warning));
-}
-
-.server-meta-pill--critical {
-  border-color: var(--border-error);
-  background: var(--error-bg);
-  color: var(--error-strong, var(--error));
-}
-
 /* =========================================================
    SUMMARY SEMANTICS
 ========================================================= */
@@ -169,8 +151,6 @@
   padding-inline: 9px;
   border: 1px solid color-mix(in srgb, var(--server-service-state) 36%, var(--badge-border));
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--server-service-state) 8%, var(--badge-bg));
-  color: var(--server-service-state);
   font-size: var(--font-xs);
   font-weight: var(--weight-semibold);
   line-height: 1;

@@ -172,7 +172,6 @@
   block-size: 6px;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: currentColor;
 }
 
 .incidencias-status-chip--open,
@@ -200,14 +199,6 @@
   border-color: var(--border-success);
   background: var(--success-bg);
   color: var(--success-strong, var(--success));
-}
-
-.incidencias-priority-badge--high,
-.incidencias-priority-badge--urgent,
-.incidencias-priority-badge--critical {
-  border-color: var(--border-error);
-  background: var(--error-bg);
-  color: var(--error-strong, var(--error));
 }
 
 .incidencias-priority-badge svg,

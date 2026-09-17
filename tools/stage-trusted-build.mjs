@@ -2,11 +2,23 @@ import { copyFile, lstat, mkdir, readdir, realpath } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { resolveToolchainSource } from "./toolchain-transition.mjs";
+
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 
-const TRUSTED_FILES = Object.freeze([
+/* El toolchain: los dos únicos archivos que una transición A01 autorizada por
+   la BASE puede tomar del candidato, y sólo cuando sus digests coinciden
+   exactamente con los que la base ya declaró. Por defecto salen de la base,
+   igual que todo lo demás. Ver tools/toolchain-transition.mjs. */
+const TOOLCHAIN_FILES = Object.freeze([
   "package.json",
   "package-lock.json",
+]);
+
+/* Configuración ejecutable que NUNCA sale del candidato, con transición o sin
+   ella: una transición de toolchain cambia la VERSIÓN del compilador, no cómo
+   se le pide que compile. */
+const TRUSTED_FILES = Object.freeze([
   "vite.config.js",
 ]);
 
@@ -121,6 +133,15 @@ export async function stageTrustedBuild({ trustedSource, candidateSource, destin
     throw new Error("Trusted staging destination must be outside both source trees.");
   }
 
+  /* Único punto de decisión sobre el origen del toolchain, y ANTES de crear
+     nada: sin declaración en la base devuelve "base" sin leer nada más; con
+     declaración, sólo devuelve "candidate" si los dos digests coinciden con los
+     autorizados. Un rechazo no debe dejar a medio construir el destino, porque
+     el propio guard de «el destino ya existe» convertiría el reintento en un
+     segundo fallo que no nombra la causa real. */
+  const toolchain = resolveToolchainSource({ trustedRoot, candidateRoot });
+  const toolchainRoot = toolchain.source === "candidate" ? candidateRoot : trustedRoot;
+
   try {
     await lstat(outputRoot);
     throw new Error(`Trusted staging destination already exists: ${outputRoot}`);
@@ -130,6 +151,10 @@ export async function stageTrustedBuild({ trustedSource, candidateSource, destin
   await mkdir(outputRoot, { recursive: false });
 
   let trustedFiles = 0;
+  for (const path of TOOLCHAIN_FILES) {
+    await copyCheckedFile(toolchainRoot, outputRoot, path);
+    trustedFiles += 1;
+  }
   for (const path of TRUSTED_FILES) {
     await copyCheckedFile(trustedRoot, outputRoot, path);
     trustedFiles += 1;
@@ -143,7 +168,7 @@ export async function stageTrustedBuild({ trustedSource, candidateSource, destin
   }
   candidateFiles += await copyCheckedTree(candidateRoot, outputRoot, "src");
 
-  return { destination: outputRoot, trustedFiles, candidateFiles };
+  return { destination: outputRoot, trustedFiles, candidateFiles, toolchain };
 }
 
 async function main() {
@@ -159,6 +184,7 @@ async function main() {
     `Trusted build staged: ${result.trustedFiles} base-tooling files + ` +
     `${result.candidateFiles} candidate-data files.`
   );
+  console.log(`Toolchain source: ${result.toolchain.source} (${result.toolchain.reason}).`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {

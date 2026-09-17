@@ -29,7 +29,18 @@ const JS_ROOT = resolve(DIST, "assets/js");
 // what the SPA loads, so it belongs in this closure; the ceiling moves to
 // 218600, leaving 57 bytes. Nothing is preloaded: the growth is the rule, not
 // the payload. app and auth keep their ceilings.
-const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218600 });
+// Agenda deja de ser una vista sin datos y pasa a consumir el sistema modal
+// compartido (entity-overlay: shell, host, lifecycle y confirmaciones) y el
+// combobox accesible de selección de usuario. Esa reutilización es la regla,
+// no el payload: Vite extrae dos chunks compartidos nuevos (el combobox sale
+// de incidencias, que ENCOGE 3.511 bytes) y la lista de precarga de la ruta
+// /agenda crece dentro de `routes`, que sí está en el cierre bootstrap/Home.
+// Medido sobre el mismo build: 218567 en 399fa844 (main) -> 218698 con Agenda
+// conectada, +131 raw bytes, todos de listas de precarga. Ningún módulo nuevo
+// entra en el cierre: los cinco chunks raíz (main, app, enhancements y los dos
+// home) son byte a byte idénticos a main. El techo pasa a 218750, dejando 52
+// bytes. app y auth conservan los suyos.
+const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218750 });
 
 function staticImports(code, identifier) {
   // PARSE ONLY. Never link, evaluate or supply a dynamic-import callback.

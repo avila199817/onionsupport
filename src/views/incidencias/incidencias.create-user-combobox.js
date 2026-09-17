@@ -5,7 +5,8 @@
    ACCESSIBLE · KEYBOARD-FIRST · DOM ENHANCEMENT
 
    Responsabilidad:
-   - Mejorar exclusivamente el selector de usuario del Create admin.
+   - Mejorar el selector de usuario de las altas que declaran el marcador
+     compartido `data-create-user-picker-root` (Incidencias y Agenda).
    - Mantener el foco en el input mientras se navega por resultados.
    - ArrowUp/ArrowDown/Home/End cambian la opción activa.
    - Enter selecciona la opción activa usando el click canónico existente.
@@ -18,9 +19,17 @@
 ========================================================= */
 
 export const INCIDENCIAS_CREATE_USER_COMBOBOX_VERSION =
-  "incidencias.create-user-combobox.v2-enter-safe";
+  "incidencias.create-user-combobox.v3-shared-root";
 
-const ROOT_SELECTOR = "[data-incidencias-create-root='true']";
+/*
+  Marcador COMPARTIDO del selector de usuario. El alta de Incidencias lo
+  declara junto a su propia marca de dominio, y cualquier otra alta que
+  reutilice este mismo contrato de campos (Agenda) lo declara también. Así
+  hay una sola autoridad de teclado, ARIA e IME para la selección de
+  usuario, en vez de una copia por dominio. Ningún comportamiento cambia
+  para Incidencias.
+*/
+const ROOT_SELECTOR = "[data-create-user-picker-root='true']";
 const INPUT_SELECTOR = "[data-create-user-search-input='true']";
 const LIST_SELECTOR = "[data-create-user-results='true']";
 const OPTION_SELECTOR = "[role='option'][data-create-action='create-user-select']";

@@ -915,6 +915,8 @@ export function renderIncidenciasCreateModal(input = {}) {
     rootClass: `inc-create-root is-${vm.mode}`,
     rootAttributes: {
       "data-incidencias-create-root": "true",
+      /* Marcador compartido del selector de usuario (combobox accesible). */
+      "data-create-user-picker-root": "true",
       "data-incidencias-modal": "create",
       "data-create-mode": vm.mode,
     },

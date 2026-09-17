@@ -209,7 +209,7 @@ Tres rutas privadas tienen un respaldo distinto y se documentan explícitamente 
 
 | Ruta | Rol | Respaldo backend | Estado |
 | --- | --- | --- | --- |
-| `/agenda` | `admin` y `user` | Ninguno: calendario mensual local, sin HTTP ni storage (`src/views/agenda/index.js`). | Decisión del propietario (2026-09-15): visible para `admin` y `user`; cada rol verá su propia agenda cuando se integre en el sistema. Hoy no hay citas ni persistencia. |
+| `/agenda` | `admin` y `user` | `GET/POST /api/citas`, `GET/PATCH /api/citas/:id`, `POST /api/citas/:id/cancelar` (`src/views/agenda/agenda.api.js`). Sólo el intervalo civil visible; sin `localStorage` ni estado que sustituya a la persistencia. | Citas V1 (2026-09-17). El administrador crea, edita y cancela citas desde el calendario; el usuario ve **únicamente las suyas** y no muta nada. El permiso lo decide el backend (`router/citas/cita_acl.js`), no la ruta: acceder a `/agenda` no amplía nada. Entidad, partición y flujo de notificación en [`oniontech/docs/production/2026-09-17-agenda-citas-v1.md`](https://github.com/avila199817/oniontech/blob/main/docs/production/2026-09-17-agenda-citas-v1.md). |
 | `/empleados` | `admin` | API de usuarios (`loadUsuarioDetail`, plantilla y modal canónicos de Usuarios). | Productiva; muestra el equipo interno actual (el administrador autenticado). |
 | `/whatsapp` | `admin` | `whatsapp.api.js` → API WhatsApp Cloud del backend (`oniontech/docs/WHATSAPP_CLOUD_API.md`). | Productiva; bandeja con sondeo acotado mientras la vista vive. |
 

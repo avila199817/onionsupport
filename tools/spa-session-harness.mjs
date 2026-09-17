@@ -236,6 +236,9 @@ export function syntheticWorld() {
 ========================================================= */
 
 const JSON_TYPE = "application/json; charset=utf-8";
+
+/* Marca que sólo existe en la respuesta de detalle, nunca en la lista. */
+export const DETAIL_HYDRATION_MARK = "Hidratado desde el detalle de";
 const SESSION_TOKEN = "token-sintetico-de-prueba";
 
 function findById(collection, id) {
@@ -314,7 +317,12 @@ export async function openSpaSession(browser, origin, options = {}) {
       if (ticket) {
         const found = findById(world.tickets, decodeURIComponent(ticket[1]));
         if (!found) return respond({ ok: false, error: { code: "TICKET_NOT_FOUND" } }, 404);
-        return respond({ ok: true, ticket: found, data: found, ...found });
+        /* Como un backend real, el detalle trae MÁS que la fila. Ese extra es lo
+           único que demuestra que la hidratación de ESTA apertura ha terminado:
+           sin él, una lectura abortada pasaría inadvertida porque el modal ya se
+           pinta con los datos que la lista tenía. */
+        const hidratado = { ...found, description: `${found.description} ${DETAIL_HYDRATION_MARK} ${found.id}.` };
+        return respond({ ok: true, ticket: hidratado, data: hidratado, ...hidratado });
       }
       if (path === "/api/facturas/stats") {
         /* Las cifras salen de las mismas facturas sintéticas: una estadística que
@@ -342,6 +350,14 @@ export async function openSpaSession(browser, origin, options = {}) {
         const found = findById(world.facturas, decodeURIComponent(factura[1]));
         if (!found) return respond({ ok: false, error: { code: "FACTURA_NOT_FOUND" } }, 404);
         return respond({ ok: true, factura: found, data: found, ...found });
+      }
+      const persona = path.match(/^\/api\/users\/([^/]+)$/u);
+      if (persona && decodeURIComponent(persona[1]) !== "avatar") {
+        const id = decodeURIComponent(persona[1]);
+        const encontrada = [world.titular, world.segundoTitular, world.tecnico, world.conectado]
+          .find((quien) => quien.userId === id || quien.id === id);
+        if (!encontrada) return respond({ ok: false, error: { code: "USER_NOT_FOUND" } }, 404);
+        return respond({ ok: true, user: encontrada, data: encontrada, ...encontrada });
       }
       if (path === "/api/users") {
         const people = [world.titular, world.segundoTitular, world.tecnico, world.conectado];

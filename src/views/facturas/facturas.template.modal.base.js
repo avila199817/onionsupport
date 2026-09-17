@@ -3407,6 +3407,10 @@ function renderResumenSection(
             moneda
           ),
           {
+            /* Énfasis, no estado. El Total es la cifra que se busca al abrir
+               el resumen; sus hermanas van sin tono. La autoridad de estados
+               no puede darlo --un importe no tiene estado-- así que este tono
+               es de la vista a propósito. */
             tone: "accent",
           }
         )}

@@ -390,6 +390,12 @@
   overflow-wrap: anywhere;
 }
 
+/* `--accent` NO es un estado: es ÉNFASIS. Lo lleva sólo la tarjeta del Total,
+   para que la cifra principal destaque entre sus hermanas --que no llevan tono
+   ninguno--. No lo puede dar `statusTone()`: un importe no tiene estado, y
+   ninguno de los cinco tonos del sistema significa «esta es la cifra
+   importante». Se queda donde está a propósito.
+   `--info` sí es un estado: lo produce la autoridad para «emitida». */
 .facturas-detail-stat--accent,
 .facturas-detail-stat--info {
   border-color: var(--border-info);
@@ -402,10 +408,8 @@
 .facturas-detail-stat--success .facturas-detail-stat-value { color: var(--success-strong, var(--success)); }
 .facturas-detail-stat--warning { border-color: var(--border-warning); background: var(--warning-bg); }
 .facturas-detail-stat--warning .facturas-detail-stat-value { color: var(--warning-strong, var(--warning)); }
-.facturas-detail-stat--danger,
-.facturas-detail-stat--error { border-color: var(--border-error); background: var(--error-bg); }
-.facturas-detail-stat--danger .facturas-detail-stat-value,
-.facturas-detail-stat--error .facturas-detail-stat-value { color: var(--error-strong, var(--error)); }
+.facturas-detail-stat--danger { border-color: var(--border-error); background: var(--error-bg); }
+.facturas-detail-stat--danger .facturas-detail-stat-value { color: var(--error-strong, var(--error)); }
 
 .facturas-detail-tax-grid {
   min-inline-size: 0;

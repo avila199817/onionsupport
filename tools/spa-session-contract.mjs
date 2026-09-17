@@ -399,6 +399,26 @@ async function recorrer(entorno) {
     await page.keyboard.press("Enter");
     await page.waitForSelector("#onion-facturas-paid-confirm-root [data-fpc-dialog='true']", { timeout: 10000 });
     assert.equal(await page.locator("[data-fpc-dialog='true']").count(), 1, "La acción no abre dos capas");
+    /* Y ocupa su capa de verdad: un z-index correcto con el velo de la capa de
+       debajo todavía vivo seguiría siendo una interfaz bloqueada, así que se
+       comprueba quién recibe el clic, no qué dice el z-index. */
+    await espera(240);
+    const superposicion = await page.evaluate(() => {
+      const dialogo = document.querySelector("[data-fpc-dialog='true']");
+      const caja = dialogo.getBoundingClientRect();
+      const recibe = document.elementFromPoint(Math.round(caja.x + caja.width / 2), Math.round(caja.y + caja.height / 2));
+      const raices = [...document.querySelectorAll(".ui-detail-modal-root")].map((raiz) => ({
+        z: Number(getComputedStyle(raiz).zIndex) || 0,
+        retenida: Boolean(raiz.querySelector("[data-modal-stack-held='true']")),
+        velo: getComputedStyle(raiz.querySelector(":scope > .ui-detail-modal-overlay") || raiz).pointerEvents,
+      }));
+      return { dentro: Boolean(recibe && dialogo.contains(recibe)), recibe: recibe?.className?.toString?.().split(" ")[0] || "", raices };
+    });
+    assert.equal(superposicion.dentro, true, `Valoraciones recibe sus propios clics, no la capa de debajo (llegó a ${superposicion.recibe})`);
+    const retenida = superposicion.raices.find((r) => r.retenida);
+    const activa = superposicion.raices.find((r) => !r.retenida);
+    assert.ok(activa && retenida && activa.z > retenida.z, `La capa activa se pinta encima (${JSON.stringify(superposicion.raices)})`);
+    assert.equal(retenida.velo, "none", "El velo de la capa retenida no se queda con los clics");
     await cerrar("[data-fpc-dialog='true']");
     await cerrar("[data-facturas-detail-modal='true']");
     paso(15, `«Valoraciones» con icono ${boton.ancho}×${boton.alto} y apertura única (N6)`);

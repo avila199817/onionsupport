@@ -113,10 +113,10 @@ function renderSelectedUser(vm = {}) {
   if (!user?.userId) return "";
 
   return `
-    <div class="agenda-create-selected-user inc-create-selected-user" data-create-selected-user="true">
-      <div class="agenda-create-selected-user-main inc-create-selected-user-main">
+    <div class="agenda-create-selected-user agenda-picker-selected" data-create-selected-user="true">
+      <div class="agenda-create-selected-user-main agenda-picker-selected-main">
         ${renderUserAvatar(user)}
-        <span class="agenda-create-user-copy inc-create-selected-user-copy">
+        <span class="agenda-create-user-copy agenda-picker-selected-copy">
           <strong>${escapeHtml(user.nombre || "Usuario seleccionado")}</strong>
           <span>${escapeHtml(userSubtitle(user))}</span>
         </span>
@@ -129,25 +129,25 @@ function renderUserSearchResults(vm = {}) {
   const search = vm.userSearch;
 
   if (search.loading) {
-    return `<div class="agenda-create-user-state inc-create-user-search-state" data-user-search-state="loading" aria-live="polite"><span class="inc-create-spinner" aria-hidden="true"></span><span>Buscando usuarios...</span></div>`;
+    return `<div class="agenda-create-user-state agenda-picker-search-state" data-user-search-state="loading" aria-live="polite"><span class="inc-create-spinner" aria-hidden="true"></span><span>Buscando usuarios...</span></div>`;
   }
 
   if (search.error) {
-    return `<div class="agenda-create-user-state is-error inc-create-user-search-state" data-user-search-state="error" role="alert">${escapeHtml(search.error)}</div>`;
+    return `<div class="agenda-create-user-state is-error agenda-picker-search-state" data-user-search-state="error" role="alert">${escapeHtml(search.error)}</div>`;
   }
 
   if (search.empty) {
-    return `<div class="agenda-create-user-state inc-create-user-search-state" data-user-search-state="empty" aria-live="polite">No hay usuarios para esta búsqueda.</div>`;
+    return `<div class="agenda-create-user-state agenda-picker-search-state" data-user-search-state="empty" aria-live="polite">No hay usuarios para esta búsqueda.</div>`;
   }
 
   if (!search.results.length) return "";
 
   return `
-    <div class="agenda-create-user-results inc-create-user-results" role="listbox" data-create-user-results="true" aria-label="Resultados de búsqueda de usuarios">
+    <div class="agenda-create-user-results agenda-picker-results" role="listbox" data-create-user-results="true" aria-label="Resultados de búsqueda de usuarios">
       ${search.results.map((user) => `
         <button
           type="button"
-          class="agenda-create-user-result inc-create-user-result"
+          class="agenda-create-user-result agenda-picker-result"
           role="option"
           data-create-action="${AGENDA_CREATE_ACTIONS.USER_SELECT}"
           data-user-id="${attr(user.userId)}"
@@ -158,7 +158,7 @@ function renderUserSearchResults(vm = {}) {
           ${disabledAttrs(vm.submitting)}
         >
           ${renderUserAvatar(user)}
-          <span class="agenda-create-user-copy inc-create-user-result-copy">
+          <span class="agenda-create-user-copy agenda-picker-result-copy">
             <strong>${escapeHtml(user.nombre)}</strong>
             <span>${escapeHtml(userSubtitle(user))}</span>
           </span>
@@ -168,7 +168,7 @@ function renderUserSearchResults(vm = {}) {
 
 function renderUserBlock(vm = {}) {
   return `
-    <section class="inc-create-block inc-create-block--target" data-create-admin-user-search="true">
+    <section class="inc-create-block agenda-picker-block" data-create-admin-user-search="true">
       <div class="inc-create-block-head">
         <div>
           <span>Usuario</span>
@@ -177,14 +177,14 @@ function renderUserBlock(vm = {}) {
         <small>Busca y selecciona el usuario que debe acudir.</small>
       </div>
 
-      <div class="inc-create-selected-user-slot" data-create-selected-user-slot="true">${renderSelectedUser(vm)}</div>
+      <div class="agenda-picker-selected-slot" data-create-selected-user-slot="true">${renderSelectedUser(vm)}</div>
 
       <label class="inc-create-field" data-create-field="userSearch">
         <span class="inc-create-label">Buscar usuario</span>
         <span class="inc-create-search-control">
           <span class="inc-create-search-icon" aria-hidden="true">${icon("search")}</span>
           <input
-            class="inc-create-input inc-create-input--with-icon inc-create-user-search-input"
+            class="inc-create-input inc-create-input--with-icon agenda-picker-search-input"
             data-field="userSearch"
             data-create-user-search-input="true"
             name="userSearch"
@@ -200,8 +200,8 @@ function renderUserBlock(vm = {}) {
 
       ${renderHidden("userId", vm.form.userId)}
 
-      <div class="inc-create-user-search-slot" data-create-user-search-slot="true">${renderUserSearchResults(vm)}</div>
-      <div class="inc-create-target-error-slot">${renderFieldError(vm.errors.userId)}</div>
+      <div class="agenda-picker-search-slot" data-create-user-search-slot="true">${renderUserSearchResults(vm)}</div>
+      <div class="agenda-picker-error-slot">${renderFieldError(vm.errors.userId)}</div>
     </section>`;
 }
 
@@ -211,8 +211,8 @@ function renderUserBlock(vm = {}) {
 
 function renderWhenBlock(vm = {}) {
   const zoneNote = browserZoneDiffers(vm.zona)
-    ? `<small class="inc-create-hint">La hora es de ${escapeHtml(vm.zona)}. Tu navegador está en ${escapeHtml(browserZone())}.</small>`
-    : `<small class="inc-create-hint">Hora de ${escapeHtml(vm.zona)}.</small>`;
+    ? `<small class="agenda-form-hint">La hora es de ${escapeHtml(vm.zona)}. Tu navegador está en ${escapeHtml(browserZone())}.</small>`
+    : `<small class="agenda-form-hint">Hora de ${escapeHtml(vm.zona)}.</small>`;
 
   return `
     <section class="inc-create-block">
@@ -235,7 +235,7 @@ function renderWhenBlock(vm = {}) {
         </div>
 
         <label class="inc-create-field" data-create-field="horaLocal">
-          <span class="inc-create-label">Hora de inicio <span class="inc-create-required" aria-hidden="true">*</span></span>
+          <span class="inc-create-label">Hora de inicio <span class="agenda-form-required" aria-hidden="true">*</span></span>
           <span class="inc-create-search-control">
             <span class="inc-create-search-icon" aria-hidden="true">${icon("clock")}</span>
             <input
@@ -268,7 +268,7 @@ function renderWhereBlock(vm = {}) {
       </div>
 
       <label class="inc-create-field" data-create-field="lugar">
-        <span class="inc-create-label">Lugar <span class="inc-create-required" aria-hidden="true">*</span></span>
+        <span class="inc-create-label">Lugar <span class="agenda-form-required" aria-hidden="true">*</span></span>
         <span class="inc-create-search-control">
           <span class="inc-create-search-icon" aria-hidden="true">${icon("place")}</span>
           <input
@@ -297,7 +297,7 @@ function renderWhereBlock(vm = {}) {
           placeholder="Opcional. Lo que escribas aquí lo verá el usuario en su correo y en su cita."
           ${disabledAttrs(vm.submitting)}
         >${escapeHtml(vm.form.nota)}</textarea>
-        <small class="inc-create-hint">Esta nota es visible para el destinatario.</small>
+        <small class="agenda-form-hint">Esta nota es visible para el destinatario.</small>
         ${renderFieldError(vm.errors.nota)}
       </label>
     </section>`;

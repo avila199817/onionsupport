@@ -29,6 +29,7 @@ import {
 } from "../../features/entity-overlay/modal-host.js";
 import {
   createModalLifecycle,
+  liveModalOpener,
   restoreModalFocus,
 } from "../../features/entity-overlay/modal-lifecycle.js";
 import { openModalConfirmation } from "../../features/entity-overlay/modal-confirmation.js";
@@ -409,7 +410,8 @@ function createController(host, context = {}) {
     citaId: "",
     userHint: "",
     opener: null,
-    form: { fechaLocal: "", horaLocal: "", lugar: "", nota: "", motivo: "" },
+    form: { fechaLocal: "", horaLocal: "", lugar: "", nota: "", motivo: "", confirmarPasado: false },
+    pastWarning: "",
   };
 
   let destroyed = false;
@@ -598,7 +600,7 @@ function createController(host, context = {}) {
     createLifecycle = null;
     createHost.remove();
 
-    if (!silent) restoreModalFocus(opener);
+    if (!silent) restoreModalFocus(openerVivo(opener));
     createState.opener = null;
     return true;
   }
@@ -752,6 +754,22 @@ function createController(host, context = {}) {
     }
   }
 
+  /* EL NODO QUE ABRIÓ PUEDE HABER MUERTO ANTES DE CERRARSE EL DIÁLOGO.
+   *
+   * El «+» y los chips de cita viven dentro de la rejilla, y tanto seleccionar
+   * un día como recargar el intervalo la repintan entera. `restoreModalFocus`
+   * rechaza --con razón-- un nodo desconectado, así que sin esto el foco caía
+   * al <body> al cerrar. `liveModalOpener` devuelve el equivalente vivo sólo
+   * cuando su identidad es inequívoca dentro del anfitrión; si no, no inventa. */
+  function openerVivo(opener = null) {
+    if (!opener) return null;
+    if (opener.isConnected) return opener;
+    return liveModalOpener(opener, {
+      within: host,
+      identity: ["data-agenda-date", "data-agenda-cita", "data-agenda-action", "id"],
+    }) || null;
+  }
+
   function focusCita(citaId = "") {
       const escaped = typeof CSS !== "undefined" && typeof CSS.escape === "function"
       ? CSS.escape(citaId)
@@ -869,7 +887,7 @@ function createController(host, context = {}) {
       citaId: id,
       userHint: cleanText(userHint, ""),
       opener,
-      form: { fechaLocal: "", horaLocal: "", lugar: "", nota: "", motivo: "" },
+      form: { fechaLocal: "", horaLocal: "", lugar: "", nota: "", motivo: "", confirmarPasado: false },
     });
 
     const node = detailHost.ensure();
@@ -937,7 +955,7 @@ function createController(host, context = {}) {
     detailLifecycle = null;
     detailHost.remove();
 
-    if (!silent) restoreModalFocus(opener);
+    if (!silent) restoreModalFocus(openerVivo(opener));
     detailState.opener = null;
     return true;
   }
@@ -987,6 +1005,10 @@ function createController(host, context = {}) {
           horaLocal: detailState.form.horaLocal,
           lugar: detailState.form.lugar,
           nota: detailState.form.nota,
+          /* Reprogramar a un instante ya pasado exige confirmación EXPLÍCITA,
+             igual que el alta: el backend responde 409 CITA_EN_PASADO hasta
+             que llega. Sin enviarla, ese cambio no tenía salida. */
+          ...(detailState.form.confirmarPasado ? { confirmarPasado: true } : {}),
         },
         { etag: detailState.cita.etag, userId: detailState.cita.userId || detailState.userHint }
       );
@@ -994,6 +1016,7 @@ function createController(host, context = {}) {
       if (destroyed) return false;
       detailState.cita = cita;
       detailState.editing = false;
+      detailState.pastWarning = "";
       detailState.form = {
         fechaLocal: cita.fechaLocal,
         horaLocal: cita.horaLocal,
@@ -1005,7 +1028,16 @@ function createController(host, context = {}) {
       return true;
     } catch (error) {
       if (destroyed) return false;
-      detailState.error = agendaErrorMessage(error, "No se han podido guardar los cambios.");
+
+      /* El código lo lee la autoridad de errores, que lo normaliza. */
+      if (errorCode(error) === "CITA_EN_PASADO") {
+        /* No se mueve la fecha: se avisa y se pide confirmación explícita. */
+        detailState.pastWarning = agendaErrorMessage(error, "Ese momento ya ha pasado.");
+        detailState.form.confirmarPasado = true;
+        detailState.error = "";
+      } else {
+        detailState.error = agendaErrorMessage(error, "No se han podido guardar los cambios.");
+      }
       return false;
     } finally {
       if (!destroyed) {

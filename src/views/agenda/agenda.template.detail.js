@@ -139,14 +139,23 @@ function renderEdit(vm = {}) {
   const form = vm.form;
 
   return `
+    ${vm.pastWarning ? `
+      <div class="inc-create-alert agenda-alert--warning" role="status">
+        <span class="agenda-alert-icon" aria-hidden="true"></span>
+        <div class="agenda-alert-copy">
+          <strong>La fecha y hora ya han pasado.</strong>
+          <p>${escapeHtml(vm.pastWarning)}</p>
+        </div>
+      </div>` : ""}
     <form id="${AGENDA_DETAIL_FORM_ID}" data-agenda-detail-form="true" novalidate class="inc-create-form is-admin">
+      ${form.confirmarPasado ? `<input type="hidden" name="confirmarPasado" value="true">` : ""}
       <div class="inc-create-grid inc-create-grid--2">
         ${field("Fecha", "fechaLocal", `<input class="inc-create-input" data-field="fechaLocal" name="fechaLocal" type="date" required value="${attr(form.fechaLocal)}" ${disabledAttrs(vm.saving)}>`, vm.errors.fechaLocal)}
         ${field("Hora de inicio", "horaLocal", `<input class="inc-create-input" data-field="horaLocal" name="horaLocal" type="time" step="300" required value="${attr(form.horaLocal)}" ${disabledAttrs(vm.saving)}>`, vm.errors.horaLocal)}
       </div>
       ${field("Lugar", "lugar", `<input class="inc-create-input" data-field="lugar" name="lugar" type="text" maxlength="200" required value="${attr(form.lugar)}" ${disabledAttrs(vm.saving)}>`, vm.errors.lugar)}
       ${field("Nota para el usuario", "nota", `<textarea class="inc-create-textarea" data-field="nota" name="nota" rows="3" maxlength="600" ${disabledAttrs(vm.saving)}>${escapeHtml(form.nota)}</textarea>`, vm.errors.nota)}
-      <small class="inc-create-hint">La hora es de ${escapeHtml(cita.zona)}. Cada cambio se comunica al usuario.</small>
+      <small class="agenda-form-hint">La hora es de ${escapeHtml(cita.zona)}. Cada cambio se comunica al usuario.</small>
     </form>`;
 }
 
@@ -204,7 +213,9 @@ export function buildDetailVm(input = {}) {
       lugar: cleanText(form.lugar, ""),
       nota: typeof form.nota === "string" ? form.nota : "",
       motivo: typeof form.motivo === "string" ? form.motivo : "",
+      confirmarPasado: form.confirmarPasado === true,
     },
+    pastWarning: cleanText(source.pastWarning, ""),
   };
 }
 
@@ -228,7 +239,12 @@ export function renderAgendaDetailModal(input = {}) {
       kind: "error",
       title: "No se ha podido abrir la cita",
       message: vm.error,
-      action: `<button type="button" class="inc-create-submit" data-detail-action="${AGENDA_DETAIL_ACTIONS.RETRY}">Reintentar</button>`,
+      /* La API compartida compone el botón a partir de {label, attributes}: una
+         cadena HTML aquí se descarta en silencio y el reintento no existe. */
+      action: {
+        label: "Reintentar",
+        attributes: { "data-detail-action": AGENDA_DETAIL_ACTIONS.RETRY },
+      },
     });
   } else if (!cita) {
     body = renderModalState({ kind: "empty", title: "No se ha encontrado la cita", message: "" });

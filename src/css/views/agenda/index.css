@@ -1741,3 +1741,228 @@
     }
   }
 }
+
+/* =========================================================
+   SELECTOR DE USUARIO DEL ALTA · presentación propia de /agenda
+
+   El COMPORTAMIENTO del combobox accesible es compartido y se ata por
+   atributos de datos (`data-create-user-picker-root`), nunca por clase. La
+   PRESENTACIÓN, en cambio, es de cada ruta: `/agenda` sólo carga esta hoja,
+   así que vestirse con nombres de `views/incidencias/create.css` dejaba todo
+   este bloque sin estilo --medido: once clases inertes--. Mismas medidas y
+   mismos tokens que el original; lo que cambia es de quién es la regla.
+========================================================= */
+
+.agenda-picker-selected-slot,
+.agenda-picker-search-slot,
+.agenda-picker-error-slot {
+  min-inline-size: 0;
+}
+
+.agenda-picker-selected {
+  min-inline-size: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: 10px 11px;
+  border: 1px solid var(--border-success);
+  border-radius: var(--radius-sm);
+  background: var(--success-bg);
+}
+
+.agenda-picker-selected-main {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agenda-picker-selected-copy,
+.agenda-picker-result-copy {
+  min-inline-size: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.agenda-picker-selected-copy strong,
+.agenda-picker-result-copy strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agenda-picker-selected-copy span,
+.agenda-picker-result-copy span {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* El navegador decora por su cuenta un input de búsqueda: se anula aquí,
+   porque la regla que lo hacía vivía en una hoja que /agenda no carga. */
+.agenda-picker-search-input::-webkit-search-decoration,
+.agenda-picker-search-input::-webkit-search-cancel-button,
+.agenda-picker-search-input::-webkit-search-results-button,
+.agenda-picker-search-input::-webkit-search-results-decoration {
+  -webkit-appearance: none;
+}
+
+.agenda-picker-search-state {
+  min-block-size: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1, var(--input-bg));
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+}
+
+.agenda-picker-search-state.is-error {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error-strong, var(--error));
+}
+
+.agenda-picker-results {
+  max-block-size: 250px;
+  display: grid;
+  gap: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1, var(--panel-bg));
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.agenda-picker-results::-webkit-scrollbar {
+  inline-size: var(--scrollbar-size, 9px);
+}
+
+.agenda-picker-results::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.agenda-picker-results::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.agenda-picker-result {
+  appearance: none;
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+
+.agenda-picker-result:hover:not(:disabled),
+.agenda-picker-result:focus-visible {
+  border-color: var(--border-default);
+  background: var(--solid-hover);
+  outline: none;
+}
+
+.agenda-picker-result:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.agenda-picker-result:disabled {
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+.agenda-picker-error-slot .inc-create-field-error {
+  margin: 0;
+  color: var(--error-strong, var(--error));
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.35;
+}
+
+/* =========================================================
+   TEXTOS AUXILIARES DEL FORMULARIO Y AVISO DE FECHA PASADA
+========================================================= */
+
+.agenda-form-hint {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  line-height: 1.4;
+}
+
+.agenda-form-required {
+  margin-inline-start: 2px;
+  color: var(--error-strong, var(--error));
+  font-weight: var(--weight-bold);
+}
+
+.agenda-create-actions,
+.agenda-detail-note {
+  min-inline-size: 0;
+  display: grid;
+  gap: var(--space-xs);
+}
+
+/* El aviso comparte la caja de `.inc-create-alert` --que sí es compartida-- y
+   añade SU tono: sin esto, un aviso de fecha pasada salía en azul informativo
+   porque la combinación `is-warning` no existía en ninguna hoja. */
+.inc-create-alert.agenda-alert--warning {
+  border-color: var(--border-warning, var(--border-default));
+  background: var(--warning-bg, var(--surface-2, var(--panel-bg)));
+  color: var(--warning-strong, var(--text-strong));
+}
+
+.agenda-alert-icon {
+  inline-size: 18px;
+  block-size: 18px;
+  border-radius: var(--radius-pill);
+  background: var(--warning-strong, var(--text-muted));
+  opacity: .28;
+}
+
+.agenda-alert-copy {
+  min-inline-size: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.agenda-alert-copy p {
+  margin: 0;
+  font-size: var(--font-xs);
+  line-height: 1.4;
+}
+
+/* El bloque que agrupa el destinatario: hereda la caja de `.inc-create-block`
+   (compartida) y sólo declara lo suyo. Antes se llamaba `inc-create-block--target`
+   y no existía en ninguna hoja, así que no hacía absolutamente nada. */
+.agenda-picker-block {
+  min-inline-size: 0;
+  display: grid;
+  gap: var(--space-xs);
+}

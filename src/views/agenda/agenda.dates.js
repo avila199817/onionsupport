@@ -13,6 +13,15 @@
    Los formateadores salen del núcleo (`core/format.js`): aquí sólo viven
    los conjuntos de opciones que usa esta vista, como indica esa autoridad
    ("un preset usado por un módulo se queda con ese módulo").
+
+   Consumidor nuevo de `dateFormatter`, así que declara qué usa, donde
+   `tools/format-contract.mjs` lo comprueba contra lo que llama de verdad:
+
+   @format-currency-policies none
+   @format-date-presets none
+
+   Ninguna de las dos: la Agenda no formatea dinero, y sus tres conjuntos de
+   opciones son propios de esta vista, no los presets compartidos.
 ========================================================= */
 
 import { dateFormatter } from "../../core/format.js";

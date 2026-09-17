@@ -13,6 +13,15 @@
      Incidencias (`/api/users`), no una lista propia.
    - Los mensajes de error los decide la autoridad de presentación
      (`core/error-rules.js`) sobre los códigos que publica el backend.
+
+   Consumidor nuevo de `errorMessage`, así que declara su orden aquí, donde
+   se revisa en el diff y donde `tools/error-extraction-contract.mjs` lo
+   comprueba contra lo que este módulo llama de verdad:
+
+   @error-message-order payloadFirst · los códigos de `router/citas` traen
+   su propia explicación —qué hora no existe, qué campos no se pueden fijar,
+   qué versión falta—, así que manda el texto del backend sobre el del Error
+   envoltorio.
 ========================================================= */
 
 import Http from "../../core/http.js";

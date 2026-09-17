@@ -268,28 +268,36 @@ ok(
    filtra con él. El tono dejó de usarlo; el ciclo de vida sigue igual.
 ========================================================= */
 
-const incidenciasSource = read("src/views/incidencias/incidencias.template.js");
-ok(
-  /cancelled: "closed", canceled: "closed"/.test(incidenciasSource),
-  "el pliegue de ciclo de vida de Incidencias ha cambiado: cambiaría el filtrado"
-);
-ok(
-  /const CLOSED_STATUS_KEYS = new Set\(\["resolved", "closed"\]\);/.test(incidenciasSource),
-  "las claves de cierre de Incidencias han cambiado: cambiaría el filtrado"
-);
+/* Se mide RENDERIZANDO, no leyendo el fichero: el pliegue se ve en la clase
+   que sale --`--closed` para una incidencia cancelada-- y eso es lo que usa
+   `isClosed()`. Comprobarlo sobre el texto fuente ataría el contrato a cómo
+   está escrita una línea, que no es lo que hay que proteger. */
+const LIFECYCLE = Object.freeze([
+  ["cancelada", "closed", "neutral"],
+  ["archivada", "closed", "neutral"],
+  ["resuelta", "resolved", "success"],
+  ["cerrada", "closed", "success"],
+  ["abierta", "open", "open"],
+]);
 
-/* La lista sigue emitiendo la clave de ciclo de vida en su clase; sólo el tono
-   cambió de fuente. */
-const cancelledRow = [{ id: "T-1", ticketId: "T-1", titulo: "x", status: "cancelada", priority: "medium" }];
-const cancelledHtml = incidencias.renderTemplate({ items: cancelledRow, incidencias: cancelledRow });
-ok(
-  cancelledHtml.includes('class="incidencias-status-chip incidencias-status-chip--closed is-closed"'),
-  "la clase de ciclo de vida de Incidencias cambió: el filtrado depende de ella"
-);
-ok(
-  cancelledHtml.includes(`${STATUS_TONE_ATTRIBUTE}="neutral"`),
-  "una incidencia cancelada sigue declarando un tono que no es neutral"
-);
+for (const [state, lifecycleKey, tone] of LIFECYCLE) {
+  const row = [{ id: "T-1", ticketId: "T-1", titulo: "x", status: state, priority: "medium" }];
+  const html = incidencias.renderTemplate({ items: row, incidencias: row });
+
+  /* La clave de ciclo de vida sigue saliendo en la clase: el filtrado depende
+     de ella y este trabajo no la tocó. */
+  ok(
+    html.includes(`incidencias-status-chip--${lifecycleKey} is-${lifecycleKey}`),
+    `"${state}" ya no pliega sobre "${lifecycleKey}": cambiaría el filtrado de Incidencias`
+  );
+
+  /* Y el tono ya no sale de esa clave. «Cancelada» y «cerrada» comparten
+     clave y NO comparten tono: ésa es toda la separación. */
+  ok(
+    new RegExp(`${STATUS_TONE_ATTRIBUTE}="${tone}"`).test(html),
+    `"${state}" debería declarar el tono "${tone}"`
+  );
+}
 
 console.log(
   `Status tone contract: PASS · ${checks} comprobaciones · ` +

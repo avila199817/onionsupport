@@ -13,6 +13,7 @@
 ========================================================= */
 
 import { cleanText } from "../../core/presentation-text.js";
+import { slugKey } from "../../core/slug-key.js";
 import Http from "../../core/http.js";
 import {
   normalizeUsuariosCollection,
@@ -34,6 +35,24 @@ const USUARIOS_CURSOR_TIMEOUT = 20_000;
   Empleados reutiliza el usuario interno con rol administrativo. Hasta que el
   backend exponga una audiencia separada en /api/users, la vista Usuarios no
   debe mezclar cuentas internas con usuarios funcionales.
+*/
+/*
+  LA CLAVE DEL DIRECTORIO ES `slugKey`, Y ESTE CONSUMIDOR LA IMPORTA.
+
+  Los marcadores de abajo se escriben en la forma que produce `slugKey`:
+  minúsculas, sin acentos, y espacios o guiones unidos con "_" --de ahí
+  `super_admin` y `team_member`--. Un rol que llega como «Super Admin»,
+  «super-admin» o «SUPER_ADMIN» tiene que colapsar a la misma clave o el
+  límite entre el directorio funcional y las identidades internas deja de
+  aplicarse.
+
+  Aquí vivía una copia local llamada `directoryKey` con exactamente el cuerpo
+  de `slugKey`. El barrido de claves por semántica (#646) la clasificó como
+  copia muerta y la retiró, pero tenía dos llamadas vivas en este mismo
+  fichero: la vista quedó lanzando `ReferenceError: directoryKey is not
+  defined` en CADA carga de página, y el `catch` del controlador lo convertía
+  en una pantalla sin usuarios. Por eso el nombre de la autoridad se usa tal
+  cual, sin alias local: un alias vuelve a parecer una copia.
 */
 const INTERNAL_EMPLOYEE_MARKERS = new Set([
   "admin",
@@ -73,7 +92,7 @@ function isInternalEmployeeUsuario(item = {}) {
     source.profile?.rol,
     ...safeArray(source.profile?.roles),
   ]
-    .map(directoryKey)
+    .map(slugKey)
     .filter(Boolean);
 
   if (roleMarkers.some((marker) => INTERNAL_EMPLOYEE_MARKERS.has(marker))) {
@@ -90,7 +109,7 @@ function isInternalEmployeeUsuario(item = {}) {
     source.employeeType,
     source.tipo,
   ]
-    .map(directoryKey)
+    .map(slugKey)
     .filter(Boolean);
 
   return audienceMarkers.some((marker) => INTERNAL_EMPLOYEE_MARKERS.has(marker));

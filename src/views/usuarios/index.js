@@ -77,7 +77,7 @@ import {
 import { isObject, safeObject, isFunction, firstNonEmpty } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
-import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { ERROR_MESSAGE_POLICIES, errorCode, errorMessage, errorStatus } from "../../core/errors.js";
 import { coercedNumber } from "../../core/numbers.js";
 
 const USUARIOS_MODULE_NAME = "usuarios";
@@ -423,6 +423,29 @@ async function dispatchUsuarioDetail(id, opener = null, originHost = null) {
   if (!cleanText(id, "")) return false;
   const { EntityOverlay } = await import("../../features/entity-overlay/index.js");
   return EntityOverlay.open({ type: "usuario", id, opener, originHost });
+}
+
+/* SÓLO HABLA QUIEN PUEDE RESPONDER.
+
+   `errorMessage` extrae el texto que un error lleva dentro; decidir si ese
+   texto se le enseña a alguien es de esta vista. Un error del backend llega
+   siempre con estado HTTP o con código --lo pone `core/http.js`, y el cursor de
+   Usuarios además copia el mensaje de la respuesta--, así que sigue hablando
+   con sus propias palabras. Una falta de programación no trae ninguno de los
+   dos: `ReferenceError: directoryKey is not defined` tenía `status: null` y
+   `code: null`, y aun así acabó impreso en la pantalla de Usuarios.
+
+   Cuando no hay ni estado ni código no sabemos de qué hablamos, así que manda
+   el texto por defecto que declara cada llamada. El detalle técnico no se
+   pierde: el motor lo sigue registrando y `describeError` lo conserva.
+
+   Se decide por los hechos que ya calcula la autoridad --estado y código--, no
+   por el nombre de la clase del error: así ningún error propio del producto con
+   nombre propio se queda mudo por parecerse a una falta del motor. */
+function humanErrorText(error, fallback) {
+  return errorStatus(error, 0) || errorCode(error)
+    ? errorMessage(error, fallback, ERROR_MESSAGE_POLICIES.messageFirst)
+    : cleanText(fallback, "");
 }
 
 function createUsuariosController(rawHost = null, rawContext = {}) {
@@ -920,7 +943,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       return items;
     } catch (loadError) {
       if (destroyed || epoch !== queryEpoch) return items;
-      error = errorMessage(loadError, "No se pudieron cargar los usuarios.", ERROR_MESSAGE_POLICIES.messageFirst);
+      error = humanErrorText(loadError, "No se pudieron cargar los usuarios.");
       loading = false;
       refreshing = false;
       if (keepVisibleRows && !keepAccumulatedPages) {
@@ -1028,7 +1051,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         return items.length;
       } catch (pageError) {
         if (!destroyed && epoch === queryEpoch) {
-          loadMoreError = errorMessage(pageError, "No se pudieron cargar más usuarios.", ERROR_MESSAGE_POLICIES.messageFirst);
+          loadMoreError = humanErrorText(pageError, "No se pudieron cargar más usuarios.");
           showToast(loadMoreError, "error");
           render();
         }
@@ -1186,7 +1209,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         return normalized;
       } catch (detailError) {
         if (destroyed || request.signal.aborted || epoch !== detailEpoch || !routeActive()) return null;
-        if (!cached) showToast(errorMessage(detailError, "No se pudo abrir el usuario.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
+        if (!cached) showToast(humanErrorText(detailError, "No se pudo abrir el usuario."), "error");
         return cached;
       } finally {
         if (detailRequest === request) detailRequest = null;
@@ -1224,7 +1247,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       return normalized;
     } catch (refreshError) {
       if (!request.signal.aborted && epoch === detailRefreshEpoch && !destroyed) {
-        showToast(errorMessage(refreshError, "No se pudo actualizar el usuario.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
+        showToast(humanErrorText(refreshError, "No se pudo actualizar el usuario."), "error");
       }
       return null;
     } finally {
@@ -1251,7 +1274,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       if (!createOpen) createOpen = emitEvent("usuarios:create:open", { source: USUARIOS_INDEX_SOURCE });
       return createOpen;
     } catch (createError) {
-      showToast(errorMessage(createError, "No se pudo abrir el alta de usuario.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
+      showToast(humanErrorText(createError, "No se pudo abrir el alta de usuario."), "error");
       return false;
     } finally {
       creating = false;
@@ -1284,7 +1307,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       showToast(`CSV generado con ${items.length} usuarios cargados.`, "success");
       return true;
     } catch (exportError) {
-      showToast(errorMessage(exportError, "No se pudo exportar el CSV.", ERROR_MESSAGE_POLICIES.messageFirst), "error");
+      showToast(humanErrorText(exportError, "No se pudo exportar el CSV."), "error");
       return false;
     } finally {
       exporting = false;

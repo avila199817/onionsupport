@@ -46,7 +46,13 @@ const BASELINE = Object.freeze({
   // valoraciones es su sitio: la alternativa era una segunda copia del cliente
   // HTTP en la feature. Ampliación autorizada, medida y de una sola función.
   "src/views/facturas": 154,
-  "src/views/home": 75,
+  // 75 -> 74: home.template.foundation.js exportaba su propio `statusKey`, que
+  // no era una clave sino una LECTURA del estado --devolvía success|warning|
+  // error|info|neutral-- y no coincidía con la de las demás vistas: pintaba
+  // «Cancelada» en rojo y «Nueva» en azul mientras Incidencias y Clientes las
+  // pintaban neutra y ámbar. El tono lo decide ahora src/core/status-tone.js y
+  // esa exportación deja de existir.
+  "src/views/home": 74,
   // 168 -> 171 (2026-09-16): incidenciaStatusLabel / incidenciaPriorityLabel /
   // incidenciaCategoryLabel. La autoridad que ya declaraba los valores declara
   // ahora cómo se leen, y el chip de la cabecera deja de etiquetar por su

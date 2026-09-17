@@ -147,10 +147,15 @@ try {
     paso("2 · búsqueda: filtra y se deshace sin recargar");
 
     /* 3 · Filtros de estado, contra el mismo endpoint. */
+    /* CONTAR FILAS NO ES ESPERAR: dos filtros distintos pueden dejar el mismo
+       número. Se espera por QUIÉNES están, que es lo que se va a afirmar. */
     const porEstado = async (etiqueta, esperados) => {
+      const firma = [...esperados].sort().join("|");
       const boton = page.locator(`[data-usuarios-action="filter"]`).filter({ hasText: etiqueta }).first();
       await boton.click();
-      await untilTrue(page, ({ sel, n }) => document.querySelectorAll(sel).length === n, { arg: { sel: FILA, n: esperados.length }, timeout: 15000, message: `El filtro ${etiqueta} no dejó ${esperados.length} filas` });
+      await untilTrue(page, ({ sel, esperada }) => [...document.querySelectorAll(sel)]
+        .map((fila) => fila.getAttribute("data-user-id") || "").sort().join("|") === esperada,
+      { arg: { sel: FILA, esperada: firma }, timeout: 15000, message: `El filtro ${etiqueta} no dejó ${firma}` });
       assert.deepEqual((await filasDe(page)).map((f) => f.id).sort(), [...esperados].sort(), `Filtro ${etiqueta}`);
     };
     await porEstado("Bloqueados", ["u-dir-3"]);

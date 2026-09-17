@@ -62,23 +62,26 @@ const JS_ROOT = resolve(DIST, "assets/js");
 // R08 (2026-09-17): seis vistas dejan de decidir por su cuenta el tono de un
 // estado --«Cancelada» llegó a pintarse verde en Incidencias, roja en Agenda y
 // en Home, y neutra en Facturas-- y se lo preguntan a src/core/status-tone.js.
-// Al compartirlo seis vistas, el bundler le da su propio chunk y la tabla de
-// precarga que vive en `routes` --que sí está en el cierre-- nombra uno más.
-//   base      95ce9d67f86079ff48d63f757952c750f1ac6831 -> 218747
-//   candidato con la autoridad                         -> 218807
-//   crecimiento +60 raw bytes, TODOS dentro de `routes` (el resto del cierre
-//   no se mueve un byte; medido fichero a fichero). El chunk nuevo pesa 1073
-//   bytes y NO entra en el cierre: no se precarga para la Home pública, que no
-//   pinta estados.
-// Se midió la alternativa: meter la autoridad en un módulo que ya está en el
-// cierre (presentation-text) evita el nombre en `routes` pero mete los 1073
-// bytes de la tabla DENTRO del arranque. Sale 18 veces peor, así que el chunk
-// aparte es la forma barata. En el resto de la app las vistas ADELGAZAN al
-// perder sus lecturas privadas (facturas -315, home -135).
-// El techo pasa de 218750 a 218863 y deja 56 bytes de margen, el mismo que
-// dejaron R05 y R06. El siguiente que lo roce vuelve a medir y a subirlo a
-// mano.
-const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218863 });
+// Al compartirlo seis vistas, el bundler le daba su propio chunk y la tabla de
+// precarga que vive en `routes` --que sí está en el cierre-- nombraba uno más:
+// +60 raw bytes, TODOS dentro de `routes`, medidos fichero a fichero.
+//
+// EL TECHO NO SUBE. `status-tone.js` y `slug-key.js` son dos módulos diminutos
+// del núcleo y el primero IMPORTA al segundo: quien carga uno carga siempre el
+// otro. Servirlos por separado costaba una petición de más y una entrada de más
+// en la tabla; juntos no cuestan ninguna de las dos. vite.config.js los agrupa
+// en el chunk `key-tone` y el crecimiento pasa de +60 a +3.
+//   main c0c16d6b...4412fb86 -> 218747
+//   rama con la autoridad    -> 218750
+// Los 3 bytes que quedan no son un nombre ni una entrada nueva --el manifiesto
+// sigue teniendo 55-- sino dígitos de índice: al cambiar un nombre de chunk
+// cambia su posición y algún índice de ruta pasa de una cifra a dos. Probados
+// `tone-key` y `slug-tone`: 218750 y 218752. No hay nada que recuperar ahí.
+//
+// AVISO PARA EL SIGUIENTE: el margen queda en 0. Antes de esta rama eran 3.
+// Quien roce este cierre tendrá que medir y decidir de verdad, no subir el
+// número.
+const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218750 });
 
 function staticImports(code, identifier) {
   // PARSE ONLY. Never link, evaluate or supply a dynamic-import callback.

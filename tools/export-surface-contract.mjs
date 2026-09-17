@@ -20,7 +20,10 @@ import { fileURLToPath } from "node:url";
 //   exports lowers it in the same commit. The number is a record of a
 //   decision, not an architectural target: it is expected to move.
 const BASELINE = Object.freeze({
-  "src/features/avatar-system": 48,
+  // 49 desde la fotografía vigente: applyConfirmedAvatar es la operación mínima
+  // que la autoridad de avatares ofrece a quien confirma un perfil, para no
+  // releer un documento sólo por refrescar una imagen.
+  "src/features/avatar-system": 49,
   "src/ui/chrome": 4,
   "src/views/agenda": 1,
   "src/ui/sidebar": 7,

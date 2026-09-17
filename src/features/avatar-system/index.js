@@ -19,6 +19,7 @@
 
 import {
   AVATAR_IDENTITY_VERSION,
+  avatarIdentityFingerprint,
   avatarInitials,
   normalizeAvatarEmail,
   normalizeAvatarUserId,
@@ -159,6 +160,7 @@ const counters = {
   identityStates: 0,
   identityCorrections: 0,
   initialsCorrections: 0,
+  confirmedPhotos: 0,
 };
 
 /* =========================================================
@@ -1013,17 +1015,193 @@ function releaseWrapperState(host = null) {
   return false;
 }
 
+/* =========================================================
+   LA FOTOGRAFÍA VIGENTE ES IDENTIDAD, NO UN DATO DEL DOCUMENTO
+   =========================================================
+
+   Un ticket y una factura llevan la URL de la foto INCRUSTADA en su payload.
+   Esa URL envejece: cuando alguien cambia su fotografía, el documento sigue
+   trayendo la anterior, y releer el documento para refrescar una imagen sería
+   confundir dos cosas distintas --en una factura, además, tocaría su
+   instantánea fiscal, que es histórica y no se toca--.
+
+   Aquí no se relee nada. Cuando el servidor CONFIRMA una fotografía, esta
+   autoridad --la única que ya sabe qué identidad representa cada nodo-- anota
+   la versión vigente y la aplica a los nodos vivos de esa persona. El nombre,
+   la razón social, el NIF y el resto del documento siguen siendo del documento.
+
+   ENLAZAR SÓLO POR ALIAS INEQUÍVOCO. La semilla de identidad es jerárquica
+   (userId > email > username > nombre), así que la huella de un nodo la decide
+   su alias de mayor precedencia: quien conoce el userId comparte huella aunque
+   muestre otro nombre --el caso de una factura a nombre de una sociedad--, y
+   quien sólo conoce un NOMBRE tiene una huella propia que aquí no se registra
+   jamás. Dos personas no se enlazan por parecerse el nombre.
+
+   Consecuencia deliberada: una factura sin relación inequívoca con un perfil
+   conserva su reserva. Es lo correcto: no se adivina a quién retrata.
+========================================================= */
+
+const confirmedPhotos = new Map();
+
+/* Sólo identificadores. `name` queda fuera a propósito. */
+function identityAliasKeys(identity = {}) {
+  const keys = [];
+
+  const userId = normalizeAvatarUserId(
+    identity?.userId ?? identity?.id ?? identity?.uid ?? ""
+  );
+  if (userId) keys.push({ alias: `user:${userId}`, seed: { userId } });
+
+  const email = normalizeAvatarEmail(
+    identity?.email ?? identity?.emailLower ?? ""
+  );
+  if (email) keys.push({ alias: `email:${email}`, seed: { email } });
+
+  const username = normalizeAvatarUsername(identity?.username ?? "");
+  if (username) keys.push({ alias: `username:${username}`, seed: { username } });
+
+  return keys;
+}
+
+/*
+  Una URL confirmada se pinta en un `src`. No se aceptan esquemas ejecutables ni
+  cadenas con saltos de línea; tampoco se le añade nada: una URL firmada que se
+  toca deja de ser válida.
+*/
+function usableAvatarUrl(value = "") {
+  const raw = cleanText(value, "");
+  if (!raw) return "";
+  if (/[\r\n\t\\]/u.test(raw)) return "";
+  if (/^(javascript|vbscript|file):/iu.test(raw)) return "";
+  return raw;
+}
+
+function confirmedPhotoForIdentity(identity = {}) {
+  for (const { alias } of identityAliasKeys(identity)) {
+    const record = confirmedPhotos.get(alias);
+    if (record) return record;
+  }
+
+  return null;
+}
+
+/*
+  Aplica la fotografía confirmada al nodo, si esa identidad tiene una. Devuelve
+  las imágenes que el nodo debe considerar después.
+*/
+function reconcileConfirmedPhoto(host = null, images = []) {
+  const record = confirmedPhotoForIdentity(resolveHostIdentity(host));
+  if (!record) return images;
+
+  if (!record.hasAvatar) {
+    // Retirada confirmada: el marco vuelve a sus iniciales, que siempre están.
+    for (const image of images) image.remove?.();
+    setAttribute(host, "data-avatar-confirmed", "none");
+    return [];
+  }
+
+  const existing = images[0] || null;
+
+  if (existing) {
+    if (existing.getAttribute("src") !== record.url) {
+      existing.setAttribute("src", record.url);
+      existing.removeAttribute("data-avatar-failed");
+      existing.removeAttribute("data-avatar-failure-reason");
+      if (existing.getAttribute("data-avatar-hidden-by-system") === "true") {
+        existing.hidden = false;
+        existing.removeAttribute("data-avatar-hidden-by-system");
+      }
+    }
+    setAttribute(host, "data-avatar-confirmed", "image");
+    return images;
+  }
+
+  const document_ = host?.ownerDocument;
+  if (!document_?.createElement) return images;
+
+  /*
+    Sin `loading="lazy"`: esta imagen se inserta justo para verse ahora, y una
+    imagen diferida que además nace oculta no llega a descargarse nunca.
+  */
+  const image = document_.createElement("img");
+  image.setAttribute("data-avatar-image", "true");
+  image.setAttribute("data-avatar-confirmed-image", "true");
+  image.setAttribute("alt", "");
+  image.setAttribute("decoding", "async");
+  image.setAttribute("referrerpolicy", "no-referrer");
+  image.setAttribute("draggable", "false");
+  image.setAttribute("src", record.url);
+  host.insertBefore(image, host.firstChild);
+  setAttribute(host, "data-avatar-confirmed", "image");
+
+  return [image];
+}
+
+/* La huella de cada alias localiza sus nodos por el índice que ya existe en el
+   DOM (`data-avatar-identity`), sin recorrer todo el documento. */
+function refreshIdentityHosts(aliasKeys = []) {
+  if (!isBrowser() || !aliasKeys.length) return 0;
+
+  const selector = aliasKeys
+    .map(({ seed }) => `[data-avatar-identity="${avatarIdentityFingerprint(seed)}"]`)
+    .join(",");
+
+  let touched = 0;
+
+  for (const host of document.querySelectorAll(selector)) {
+    if (!isLikelyAvatarHost(host) || isOptedOut(host)) continue;
+    if (synchronizeAvatarHost(host)) touched += 1;
+  }
+
+  return touched;
+}
+
+/*
+  CONTRATO · La llaman los puntos que YA confirman un perfil, con la identidad
+  confirmada y la fotografía que el servidor ha devuelto. No hace peticiones, no
+  relee documentos, no toca datos del documento y no enlaza por nombre.
+  Devuelve cuántos nodos vivos se han actualizado.
+*/
+export function applyConfirmedAvatar(identity = {}, photo = {}) {
+  const aliasKeys = identityAliasKeys(identity);
+  if (!aliasKeys.length) return 0;
+
+  const url = usableAvatarUrl(photo?.url ?? photo?.avatarUrl ?? "");
+  const hasAvatar = photo?.hasAvatar === false ? false : Boolean(url);
+  const record = Object.freeze({ url: hasAvatar ? url : "", hasAvatar });
+
+  for (const { alias } of aliasKeys) confirmedPhotos.set(alias, record);
+
+  counters.confirmedPhotos += 1;
+
+  return refreshIdentityHosts(aliasKeys);
+}
+
+/* La sesión termina: lo vigente de la anterior no lo es de la siguiente.
+   No se exporta: su único consumidor está en este módulo, y la superficie
+   pública ya la ofrece el objeto AvatarSystem. */
+function forgetConfirmedAvatars() {
+  const size = confirmedPhotos.size;
+  confirmedPhotos.clear();
+  return size;
+}
+
 export function synchronizeAvatarHost(host = null, preferredImage = null) {
   if (!isElement(host) || isOptedOut(host)) return false;
 
-  const images = avatarImagesInside(host);
+  const rendered = avatarImagesInside(host);
+
+  // Un envoltorio no adopta imagen ni fotografía: manda el host de dentro.
+  if (!rendered.length && containsManagedAvatarHost(host)) {
+    return releaseWrapperState(host);
+  }
+
+  const images = reconcileConfirmedPhoto(host, rendered);
   const image = isImage(preferredImage) && host.contains?.(preferredImage)
     ? preferredImage
     : images[0] || null;
 
   if (!image) {
-    if (containsManagedAvatarHost(host)) return releaseWrapperState(host);
-
     return applyHostState(host, null, "fallback", "no-image");
   }
 
@@ -1305,6 +1483,7 @@ export function destroyAvatarSystem() {
   }
 
   pendingRoots.clear();
+  forgetConfirmedAvatars();
   scanQueued = false;
   active = false;
   runtimeContext = {};
@@ -1338,6 +1517,9 @@ export function getAvatarSystemSnapshot() {
       brokenImagesBecomeFallback: true,
       dynamicSpaDomObserved: true,
       identityMutationsReconciled: true,
+      confirmedPhotoBeatsEmbeddedUrl: true,
+      confirmedPhotoNeedsUnambiguousAlias: true,
+      confirmedPhotoNeverReadsDocuments: true,
       imageFormatsAreContentAgnostic: true,
       noPixelInspection: true,
       noNetwork: true,
@@ -1354,6 +1536,8 @@ export const AvatarSystem = Object.freeze({
   mount: mountAvatarSystem,
   sync: synchronizeAvatars,
   syncHost: synchronizeAvatarHost,
+  applyConfirmedAvatar,
+  forgetConfirmedAvatars,
   resolve: resolveAvatarPresentation,
   initials: avatarInitials,
   destroy: destroyAvatarSystem,

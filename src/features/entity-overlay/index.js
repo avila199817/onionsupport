@@ -6,6 +6,7 @@ import { inferEntityIntent, inferEntityIntentFromElement, normalizeEntityId, nor
 import { ENTITY_STYLE_PATHS } from "./styles.generated.js";
 import { cleanText, renderDetailPending} from "./pending-view.js";
 import { ERROR_MESSAGE_POLICIES, errorMessage } from "../../core/errors.js";
+import { MODAL_STYLE_CLAIM, reapplyRouteStyles } from "../../router/styles.js";
 
 /* One session dispatches every entity detail, from Home, lists, relations and
    deeplinks. Domain controllers own rendering, requests and close policy. */
@@ -132,16 +133,64 @@ function stopOwnerSession({ restore = false, reason = "detail-closed" } = {}) {
   if (!session) return false;
   session.restoreFocus = restore;
   session.scope.dispose(reason);
+  releaseManagedStyles();
   return true;
 }
 export function releaseOrigin(host) {
   return host && ownerSession?.originHost === host ? stopOwnerSession({ reason: "origin-released" }) : false;
 }
+/* UNA HOJA APARCADA ESTÁ CARGADA, PERO NO PUESTA.
+ *
+ * El router no borra las hojas de una ruta al salir de ella: las aparca con
+ * `media="not all"` para no volver a descargarlas. Siguen en el `<head>` y su
+ * `.sheet` sigue sin ser nulo --medido en el navegador--, así que este módulo,
+ * que las buscaba por href, las daba por puestas. Resultado: abrir el detalle
+ * de Incidencias desde Facturas en una sesión en la que ya se había visitado
+ * Incidencias montaba el modal con su CSS de dominio DESAPLICADO, y sólo
+ * sobrevivía el armazón estructural compartido. Medido: la cabecera pasaba de
+ * 779x84 a 873x84.
+ *
+ * Mientras este detalle esté montado, la hoja es suya aunque la ruta activa sea
+ * otra, así que la RECLAMA en el contador que el router respeta. Cerrar un
+ * consumidor no puede retirarle el recurso a los demás: el contador se suelta
+ * al terminar la sesión y el router reaplica entonces su estado vigente. No hay
+ * un segundo cargador: se usa el <link> que ya existe. */
+const claimedStyles = new Set();
+
+function claimManagedStyle(link = null) {
+  if (!link?.setAttribute) return false;
+  const previo = Number(link.getAttribute(MODAL_STYLE_CLAIM) || 0);
+  link.setAttribute(MODAL_STYLE_CLAIM, String(previo + 1));
+  link.media = "all";
+  link.disabled = false;
+  claimedStyles.add(link);
+  return true;
+}
+
+function releaseManagedStyles() {
+  if (!claimedStyles.size) return 0;
+  let sueltas = 0;
+  for (const link of claimedStyles) {
+    const previo = Number(link.getAttribute?.(MODAL_STYLE_CLAIM) || 0);
+    if (previo <= 1) link.removeAttribute?.(MODAL_STYLE_CLAIM);
+    else link.setAttribute(MODAL_STYLE_CLAIM, String(previo - 1));
+    sueltas += 1;
+  }
+  claimedStyles.clear();
+  /* La ruta activa vuelve a mandar: lo que ya no reclama nadie se aparca otra
+     vez, y lo que la ruta sí usa se queda. No se recalcula ningún manifiesto. */
+  try { reapplyRouteStyles(); } catch { /* El cierre no depende de la reaplicación. */ }
+  return sueltas;
+}
+
 function ensureStyle(path) {
   const href = new URL(path, document.baseURI).href;
-  if (stylePromises.has(href)) return stylePromises.get(href);
   const existing = [...document.querySelectorAll("link[rel='stylesheet']")].find((link) => link.href === href);
-  if (existing?.sheet) return Promise.resolve(true);
+  /* Reclamar SIEMPRE que la hoja ya exista, esté puesta o aparcada: mientras
+     este detalle viva, no puede aparcársele debajo. */
+  if (existing) claimManagedStyle(existing);
+  if (stylePromises.has(href)) return stylePromises.get(href);
+  if (existing?.sheet && existing.media !== "not all") return Promise.resolve(true);
   const promise = new Promise((resolve) => {
     const link = existing || document.createElement("link");
     let settled = false;

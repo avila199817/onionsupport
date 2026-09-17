@@ -114,6 +114,38 @@ display: none;
 }
 
 
+/* UNA CAPA RETENIDA NO COMPITE POR EL PINTADO NI SE QUEDA CON LOS CLICS.
+ *
+ * Todas las raices modales declaran el mismo `--z-modal`, y las de dos dominios
+ * distintos cuelgan de `body`, que aisla. Empate en el mismo contexto: decide el
+ * orden del arbol. Medido con el detalle de Facturas abierto y Valoraciones
+ * encima, `#onion-facturas-paid-confirm-root` es el hijo 6 de `body` --lo crea su
+ * modulo al importarse y no se mueve-- y `#facturas-detail-root` el 7 --se
+ * destruye al cerrar y se vuelve a anadir al final en cada apertura--, asi que el
+ * detalle ganaba siempre y el dialogo salia debajo.
+ *
+ * Y salia ademas inalcanzable: `holdModalPanel` retiene el PANEL, pero su velo
+ * hermano sigue siendo `position: fixed; inset: 0; pointer-events: auto`, de modo
+ * que se quedaba con todos los clics. Medido: el clic en el centro del dialogo y
+ * el clic en su propio boton aterrizaban los dos en `.ui-detail-modal-overlay`.
+ * Eso es lo que se veia como "la interfaz bloqueada".
+ *
+ * El orden de pintado pasa a seguir a la PILA, no al arbol: la pila ya marca lo
+ * que esta cubierto con `data-modal-stack-held`, y aqui esa marca baja un escalon
+ * a su raiz y apaga su velo. Sin z-index inventado --se deriva del token-- y sin
+ * otro gestor de capas: la pila declara el estado y esta autoridad lo dibuja.
+ *
+ * El `>` importa: una capa que se monta DENTRO de la raiz que cubre --el visor de
+ * adjuntos sobre Incidencias-- tiene su propio velo, que es hijo directo de SU
+ * raiz y no de la retenida, asi que conserva su clic para cerrarse. */
+.ui-detail-modal-root:has([data-modal-stack-held="true"]) {
+  z-index: calc(var(--z-modal) - 1);
+}
+
+.ui-detail-modal-root:has([data-modal-stack-held="true"]) > .ui-detail-modal-overlay {
+  pointer-events: none;
+}
+
 .ui-detail-modal-overlay {
 position: fixed;
   inset: 0;

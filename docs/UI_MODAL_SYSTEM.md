@@ -242,3 +242,20 @@ only HTTP/session boundaries. It covers real Home markup, nested clicks, media
 at desktop/mobile widths, gallery, close/focus/scroll, permission errors, late
 responses and owner replacement. These tests are not a claim of authenticated
 verification against production data.
+
+## Una capa retenida no compite por el pintado ni se queda con los clics
+
+Todas las raíces modales declaran el mismo `--z-modal`, y las de dos dominios distintos cuelgan de `body`, que aísla. Empate en el mismo contexto de apilamiento: decide el **orden del árbol**. Medido en el navegador con el detalle de Facturas abierto y Valoraciones encima:
+
+| Nodo | Hijo de `body` | Cuándo se crea |
+| --- | --- | --- |
+| `#onion-facturas-paid-confirm-root` | 6 | su módulo, al importarse; no se mueve nunca |
+| `#facturas-detail-root` | 7 | se destruye al cerrar y se vuelve a añadir al final en cada apertura |
+
+Así que el detalle ganaba siempre el empate y el diálogo salía debajo. Y salía además **inalcanzable**: `holdModalPanel` retiene el *panel*, pero su velo hermano seguía con `pointer-events: auto`, de modo que el clic en el centro del diálogo y el clic en su propio botón aterrizaban los dos en `.ui-detail-modal-overlay`. Eso es lo que se veía como «la interfaz bloqueada».
+
+El orden de pintado sigue ahora a la **pila**, no al árbol. La pila ya marca lo que está cubierto con `data-modal-stack-held`; `components/detail-modal.css` lee esa marca, baja un escalón la raíz retenida —derivado del token, `calc(var(--z-modal) - 1)`, no un número inventado— y apaga su velo. La pila declara el estado; esta autoridad lo dibuja. No hay otro gestor de capas, ni otro atrapa-foco, ni temporizadores.
+
+El `>` de la segunda regla importa: una capa que se monta **dentro** de la raíz que cubre —el visor de adjuntos sobre Incidencias— tiene su propio velo, hijo directo de *su* raíz y no de la retenida, así que conserva su clic para cerrarse.
+
+Contrato: `tools/paid-confirm-layer-contract.mjs`, ocho escenarios. No lee `z-index`: hace **prueba de impacto** con `elementFromPoint` sobre el diálogo y sobre su botón. Un `z-index` correcto con un velo vivo encima seguiría siendo una interfaz bloqueada.

@@ -351,6 +351,13 @@ export async function openSpaSession(browser, origin, options = {}) {
         if (!found) return respond({ ok: false, error: { code: "FACTURA_NOT_FOUND" } }, 404);
         return respond({ ok: true, factura: found, data: found, ...found });
       }
+      /* La guía de bienvenida y las estadísticas de clientes no tienen estado
+         en el mundo sintético. Se responden vacías A PROPÓSITO y de forma
+         declarada: así el recorrido comprueba que Home y Usuarios se sostienen
+         sin ellas, en vez de dejarlas como llamadas que el arnés no reproduce. */
+      if (path === "/api/users/me/onboarding" || path === "/api/clientes/stats") {
+        return respond({ ok: true, items: [], total: 0, data: [] });
+      }
       const persona = path.match(/^\/api\/users\/([^/]+)$/u);
       if (persona && decodeURIComponent(persona[1]) !== "avatar") {
         const id = decodeURIComponent(persona[1]);
@@ -361,7 +368,16 @@ export async function openSpaSession(browser, origin, options = {}) {
       }
       if (path === "/api/users") {
         const people = [world.titular, world.segundoTitular, world.tecnico, world.conectado];
-        return respond({ ok: true, items: people, total: people.length, data: people });
+        /* El directorio consulta al servidor cuando se busca o se filtra: un
+           endpoint que devuelve siempre todo no prueba ni la búsqueda ni el
+           filtro. Se responde a lo que se pregunta. */
+        const buscado = (url.searchParams.get("search") || "").trim().toLowerCase();
+        const estado = (url.searchParams.get("status") || "").trim().toLowerCase();
+        const items = people.filter((quien) => (
+          (!buscado || `${quien.name || ""} ${quien.email || ""}`.toLowerCase().includes(buscado))
+          && (!estado || estado === "all" || String(quien.status || "").toLowerCase() === estado)
+        ));
+        return respond({ ok: true, items, total: items.length, data: items });
       }
     }
 

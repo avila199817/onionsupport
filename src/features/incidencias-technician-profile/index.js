@@ -1,5 +1,5 @@
 import { escapeHtml } from "../../core/escape-html.js";
-import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
+import { createModalLifecycle, holdModalPanel, liveModalOpener, releaseModalPanel, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 import { createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support · Incidencias Technician Profile
@@ -87,6 +87,7 @@ let frame = 0;
 let requestSeq = 0;
 let returnFocus = null;
 let profileOrigin = null;
+let heldPanel = null;
 const profileHost = createModalHost({ id: HOST_ID, attributes: { "data-technician-profile-host": "true" } });
 let incidenceApiPromise = null;
 let usersApiPromise = null;
@@ -782,6 +783,17 @@ function modalPanel() {
   return document.getElementById(PANEL_ID);
 }
 
+/* EL PANEL QUE ESTA CAPA CUBRE, SI CUBRE ALGUNO.
+ *
+ * Abierto desde el detalle de una incidencia, el perfil se pinta ENCIMA de su
+ * panel. Abierto desde la lista no cubre ninguna capa: no hay empate que
+ * deshacer y no se retiene nada. */
+function coveredPanel() {
+  return profileOrigin?.matches?.(DETAIL_ROOT)
+    ? profileOrigin.querySelector?.(".ui-detail-modal-panel")
+    : null;
+}
+
 function paint(html = "", { focus = false } = {}) {
   if (!profileOrigin?.isConnected) return false;
   const host = profileHost.ensure();
@@ -789,6 +801,23 @@ function paint(html = "", { focus = false } = {}) {
   renderModalContent(host, html, {
     focusAttributes: ["id", "data-technician-profile-action", "href"],
   });
+
+  /* ESTA CAPA TAMBIÉN ENTRA EN LA PILA.
+   *
+   * Medido en el navegador: el host del perfil se crea una vez y no se retira;
+   * el del detalle se destruye y se vuelve a añadir al final de `body` con cada
+   * controlador nuevo. Ambas raíces declaran el mismo `--z-modal`, así que en
+   * cuanto el detalle queda DESPUÉS el perfil se pinta debajo y su velo se
+   * queda con los clics: el foco entraba, el teclado funcionaba y el ratón no.
+   * Tras cambiar de vista y volver, el perfil pasaba de body[8] a body[6] y el
+   * detalle de body[7] a body[9].
+   *
+   * No se inventa aquí ningún z-index ni ningún gestor: se usa la MISMA
+   * autoridad de pila que ya usan el visor de adjuntos y la confirmación de
+   * cobro. Ella marca lo cubierto y la hoja compartida lo dibuja. */
+  heldPanel = coveredPanel() || heldPanel;
+  holdModalPanel(heldPanel, { activeLayer: host });
+
   lockBody();
   queueMicrotask(() => synchronizeAvatars(host));
   if (focus) queueMicrotask(() => restoreModalFocus(modalPanel()));
@@ -798,11 +827,24 @@ function paint(html = "", { focus = false } = {}) {
 function closeProfile({ restoreFocus = true } = {}) {
   requestSeq += 1;
   profileHost.clear();
+  /* Se suelta lo que ESTA capa retuvo, y sólo eso. */
+  const released = heldPanel;
+  releaseModalPanel(released);
+  heldPanel = null;
   unlockBody();
   const target = returnFocus;
   returnFocus = null;
   profileOrigin = null;
-  if (restoreFocus) restoreModalFocus(target);
+  if (restoreFocus) {
+    /* El detalle de debajo pudo repintarse mientras el perfil lo cubría: el
+       disparador que se pulsó sería entonces un nodo suelto. La autoridad de
+       pila busca su equivalente vivo dentro del panel que se acaba de soltar. */
+    const vivo = liveModalOpener(target, {
+      within: released,
+      identity: ["data-ticket-id", "data-technician-profile-trigger", "id"],
+    }) || target;
+    restoreModalFocus(vivo);
+  }
   return true;
 }
 

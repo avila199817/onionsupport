@@ -39,6 +39,14 @@ Una autoridad por responsabilidad permite corregir un comportamiento en un solo 
 
 Los hosts de avatar proyectan los campos usados por `resolveAvatarPresentation` en `data-avatar-name`, `data-avatar-email`, `data-avatar-user-id` y `data-avatar-username`. El fingerprint y el tono no sustituyen esos aliases: el runtime necesita la identidad original para reconciliar cambios sin perder el email situado en otra celda ni inferir datos de una entidad contigua. Una proyección explícita delimita la identidad completa, incluidos aliases vacíos; sólo los hosts sin metadatos conservan el descubrimiento legacy. Las listas de gestión y los selectores/detalle de Facturas usan esta proyección. Home conserva también userId/username en sus relaciones cuando faltan emails; los demás detalles mantienen sus aliases explícitos. Los IDs de factura y cliente no se utilizan como IDs de usuario. La versión `avatar-identity.v5-user-id-first` prioriza userId, después email y username. Con el mismo userId, cambiar o borrar email/username no altera fingerprint ni tono. La transición cambia una vez el tono de algunos usuarios y conserva la paleta de 20 colores y el hash existentes.
 
+### Sólo habla quien puede responder
+
+`errorMessage` **extrae** el texto que un error lleva dentro; decidir si se le enseña a alguien es de la vista. Un error del backend llega siempre con estado HTTP o con código —los pone `core/http.js`—; una falta de programación no trae ninguno de los dos. Usuarios declara esa política en `humanErrorText`: con estado o código, el error habla con su propio texto; sin ninguno de los dos, manda el texto por defecto que declara cada llamada. Se decide por los hechos que la autoridad ya calcula, **no por el nombre de la clase del error**, para que `CuentaApiError`, `WhatsAppApiError` o `AuthLogoutError` no se queden mudos por parecerse a una falta del motor.
+
+La regla no vive en el núcleo a propósito: `core/errors.js` está en el cierre de arranque de la Home pública, cuyo presupuesto medido deja **33 bytes** (218567 sobre un techo de 218600), y la misma regla escrita allí costaba 91. Una política de presentación de vistas privadas no la paga cada visitante de la web pública. Contrato: `tools/error-extraction-contract.mjs`.
+
+El caso que lo motivó: `usuarios.cursor.js` llamaba a `directoryKey` sin definirlo —el barrido de claves por semántica retiró la copia local, que era `slugKey` letra por letra, clasificándola como muerta cuando tenía dos llamadas vivas— y la vista Usuarios presentaba «directoryKey is not defined» al usuario mientras se quedaba sin datos.
+
 ## Contrato de identidad visual
 
 La [simplificación incremental](releases/2026-09-12-private-reduction.md) elimina el postprocesador HTML del alta de Incidencias: su renderer emite directamente todos los aliases, incluidos los vacíos, y delega la normalización en la autoridad existente. No hay otro registro de identidad.
@@ -87,6 +95,14 @@ Durante la edición no se guarda un fallback visual como nuevo valor del dato: l
 `EntityOverlay` prepara los módulos y estilos, valida el origen comprometido y posee la cancelación de una sesión. Las factories `createFacturaDetailController`, `createIncidenciaDetailController`, `createClienteDetailController` y `createUsuarioDetailController` conservan los modales reales del dominio en modo `detailOnly`, sin montar listados. La ruta de origen permanece visible y sólo el Router escribe navegación.
 
 Cada apertura tiene una sola invocación inicial a la API de detalle. Incidencias y Facturas conservan el panel conectado en carga, error, reintento y refresco. Estado, live sync y avatares de Incidencias reciben la proyección del controlador; las señales solicitan el refresco a ese mismo propietario. Las listas posponen su reconciliación mientras su detalle está abierto y aplican los cambios al cerrar.
+
+### Una hoja aparcada está cargada, pero no puesta
+
+Al cambiar de ruta, `src/router/styles.js` no borra las hojas de la anterior: las **aparca** con `media="not all"` para no volver a descargarlas. Siguen en el `<head>` y su `.sheet` sigue sin ser nulo, así que buscarlas por `href` no dice si están **aplicadas**.
+
+Un detalle transversal abierto fuera de su ruta necesita su CSS de dominio mientras siga montado. Lo **reclama** con el contador `data-modal-style-claim` sobre el `<link>` que ya existe —no hay un segundo cargador—, y `setManagedLinkActive` respeta la reclamación: mientras haya alguna, la hoja no se aparca aunque la ruta activa sea otra. Al terminar la sesión del overlay, `EntityOverlay` suelta sus reclamaciones y llama a `reapplyRouteStyles()`, que devuelve el mando a la ruta activa: lo que ella usa se queda, lo que ya no reclama nadie vuelve a aparcarse. Cerrar un consumidor nunca le retira el recurso a los demás, y abrir el detalle dentro de su propia ruta no deja a la lista sin sus hojas al cerrarlo.
+
+`tools/detail-styles-ownership-contract.mjs` lo comprueba sin leer listas de hojas: descubre las entradas externas reales en el árbol construido y compara la **huella completa** del panel —caja, color, fondo, radio, tipografía, relleno, borde y distribución de cada nodo— contra el mismo registro abierto en frío desde su propia ruta.
 
 Las entradas, callbacks, contratos y ubicaciones para intervenir están definidos en [UI_MODAL_SYSTEM.md](UI_MODAL_SYSTEM.md). Se retiraron los puentes de apertura de Home/Facturas/Incidencias y los adaptadores de detalle de lectura de Clientes/Usuarios. Los adaptadores contextuales de identidad visual tienen otra responsabilidad y se conservan.
 

@@ -137,6 +137,29 @@ for (const file of sourceFiles(SRC_ROOT)) {
   assert.equal(distinct.length, 1, `${path}: one order per module (${distinct.join(", ")})`);
   consumers[path] = distinct[0];
 }
+/* SÓLO HABLA QUIEN PUEDE RESPONDER · la decisión vive en el dominio.
+
+   `errorMessage` extrae; presentar es de la vista. La extracción no puede
+   filtrar por su cuenta faltas del motor: `core/errors.js` está en el cierre de
+   arranque de la Home pública, cuyo presupuesto medido deja 33 bytes, y la
+   regla costaba 91. Usuarios --la vista donde un `ReferenceError` llegó a
+   imprimirse-- decide con los hechos que la autoridad ya calcula: sólo habla
+   con su propio texto un error que trae estado HTTP o código, que es lo que
+   distingue una respuesta del backend de una falta de programación. */
+const PRESENTACION_POR_DOMINIO = Object.freeze({
+  "src/views/usuarios/index.js": "humanErrorText",
+});
+for (const [ruta, politica] of Object.entries(PRESENTACION_POR_DOMINIO)) {
+  const codigo = readFileSync(join(SRC_ROOT, ruta.slice("src/".length)), "utf8");
+  assert.match(codigo, new RegExp(`function ${politica}\\(error, fallback\\)`, "u"), `${ruta}: declara su política de presentación`);
+  assert.match(codigo, /errorStatus\(error, 0\) \|\| errorCode\(error\)/u, `${ruta}: la política decide por estado o código, no por el nombre de la clase`);
+  const ejecutable = codigo.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  assert.equal((ejecutable.match(/(?<![\w$.])errorMessage\s*\(/gu) || []).length, 1,
+    `${ruta}: una sola extracción, dentro de su política`);
+  assert.equal((ejecutable.match(new RegExp(`(?<![\\w$.])${politica}\\s*\\(`, "gu")) || []).length >= 6, true,
+    `${ruta}: todas sus presentaciones pasan por la política`);
+}
+
 assert.deepEqual(definers.sort(), [AUTHORITY, ...LOCAL_DEFINERS].sort(), "errorMessage is defined only in core/errors.js and the two listed locals (envelope reader, presentation mapper)");
 assert.deepEqual(consumers, CONSUMERS, "each consumer uses the order measured before the migration; moving one is a decision");
 assert.deepEqual(chainsOutside, [], "no module reads data/payload message chains outside the authority and the two listed local extractors");
@@ -144,4 +167,4 @@ assert.deepEqual(statusChains, [], "no module reads status || statusCode chains:
 assert.deepEqual(codeChains, [], "no module reads code || error chains or upper-cases a code by hand: errorCode does");
 for (const path of LOCAL_EXTRACTORS) assert.ok(CHAIN_FINGERPRINT.test(readFileSync(join(SRC_ROOT, path.slice("src/".length)), "utf8")), `${path} still carries its own extractor (drop it from the list when it converges)`);
 
-console.log(`Error extraction contract: PASS · errorMessage (2 orders frozen, ${Object.keys(CONSUMERS).length} consumers on their measured order), errorStatus, errorCode and describeError in core/errors.js · one definer · ${LOCAL_EXTRACTORS.length} local extractors listed · no status/code chain outside the authority · behaviour of the four`);
+console.log(`Error extraction contract: PASS · errorMessage (2 orders frozen, ${Object.keys(CONSUMERS).length} consumers on their measured order), errorStatus, errorCode and describeError in core/errors.js · one definer · ${LOCAL_EXTRACTORS.length} local extractors listed · no status/code chain outside the authority · behaviour of the four · Usuarios presenta por estado o código`);

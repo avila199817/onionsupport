@@ -39,6 +39,23 @@ const ROUTE_STYLE_HREF =
 const ROUTE_STYLE_STATE =
   "data-onion-route-style-state";
 
+/* UNA HOJA APARCADA NO ES UNA HOJA RETIRADA, Y ESO SE LE NOTA A QUIEN LA USA.
+ *
+ * Al cambiar de ruta estas hojas no se borran: se aparcan con `media="not all"`
+ * para no volver a descargarlas. Siguen en el `<head>` y su `.sheet` sigue sin
+ * ser nulo --medido--, así que cualquiera que las busque por href las da por
+ * cargadas aunque estén desaplicadas. Eso es lo que le pasaba al detalle
+ * transversal abierto desde otra vista: encontraba la hoja de su dominio,
+ * la creía puesta y se montaba sin ella.
+ *
+ * Un consumidor que necesita una de estas hojas mientras vive fuera de su ruta
+ * la RECLAMA con este contador. Mientras haya reclamaciones la hoja no se
+ * aparca, aunque la ruta activa sea otra: cerrar un consumidor no puede
+ * retirarle el recurso a los demás. El contador lo lleva el que reclama, y el
+ * router sólo lo respeta. */
+export const MODAL_STYLE_CLAIM =
+  "data-modal-style-claim";
+
 const ALLOWED_PREFIX =
   "/src/css/";
 
@@ -461,9 +478,15 @@ function setManagedLinkActive(
     return false;
   }
 
+  const claimed =
+    !active &&
+    link.hasAttribute(
+      MODAL_STYLE_CLAIM
+    );
+
   try {
     link.media =
-      active
+      active || claimed
         ? MEDIA_ACTIVE
         : MEDIA_INACTIVE;
 
@@ -473,7 +496,9 @@ function setManagedLinkActive(
     if (state) {
       link.setAttribute(
         ROUTE_STYLE_STATE,
-        state
+        claimed
+          ? "claimed"
+          : state
       );
     }
 
@@ -487,6 +512,63 @@ function setManagedLinkActive(
    LOAD
    Descarga con media="not all" para no aplicar la hoja todavía.
 ========================================================= */
+
+/* Fuera del navegador o con el modo de ruta apagado, la respuesta es la misma
+   para todas las operaciones: se declara omitida, no fallida. */
+function skippedResult(
+  viewKey
+) {
+  return Object.freeze({
+    ok: true,
+    skipped: true,
+    mode: currentMode(),
+    viewKey,
+  });
+}
+
+/* La preparación pendiente se descarta en tres sitios --commit, rollback y
+   clear-- y siempre igual: una sola forma de olvidarla. */
+function resetPrepared() {
+  preparedViewKey =
+    "";
+
+  preparedHrefs =
+    new Set();
+}
+
+/* El conjunto activo sale de esta autoridad congelado, nunca por referencia. */
+function frozenActive() {
+  return Object.freeze([
+    ...activeHrefs,
+  ]);
+}
+
+/* UN SOLO SITIO PONE Y APARCA. Lo usan el commit de una ruta, su rollback y la
+   reaplicación al soltar una reclamación: los tres aplican el mismo conjunto
+   activo a los `<link>` gestionados, y ninguno decide por su cuenta. */
+function applyManagedLinks(
+  hrefs
+) {
+  for (
+    const link
+    of managedLinks()
+  ) {
+    const active =
+      hrefs.has(
+        linkHrefKey(
+          link
+        )
+      );
+
+    setManagedLinkActive(
+      link,
+      active,
+      active
+        ? "active"
+        : "cached"
+    );
+  }
+}
 
 function loadOne(
   href = "",
@@ -927,12 +1009,9 @@ export function commitRouteStyles(
     !isBrowser() ||
     !routeModeEnabled()
   ) {
-    return Object.freeze({
-      ok: true,
-      skipped: true,
-      mode: currentMode(),
-      viewKey,
-    });
+    return skippedResult(
+      viewKey
+    );
   }
 
   const hrefs =
@@ -956,28 +1035,9 @@ export function commitRouteStyles(
       hrefs
     );
 
-  for (
-    const link
-    of managedLinks()
-  ) {
-    const href =
-      linkHrefKey(
-        link
-      );
-
-    const active =
-      nextActive.has(
-        href
-      );
-
-    setManagedLinkActive(
-      link,
-      active,
-      active
-        ? "active"
-        : "cached"
-    );
-  }
+  applyManagedLinks(
+    nextActive
+  );
 
   activeViewKey =
     viewKey;
@@ -985,11 +1045,7 @@ export function commitRouteStyles(
   activeHrefs =
     nextActive;
 
-  preparedViewKey =
-    "";
-
-  preparedHrefs =
-    new Set();
+  resetPrepared();
 
   return Object.freeze({
     ok: true,
@@ -997,9 +1053,7 @@ export function commitRouteStyles(
     mode: ROUTE_MODE,
     viewKey,
     active:
-      Object.freeze([
-        ...activeHrefs,
-      ]),
+      frozenActive(),
   });
 }
 
@@ -1019,42 +1073,16 @@ export function rollbackRouteStyles(
     !isBrowser() ||
     !routeModeEnabled()
   ) {
-    return Object.freeze({
-      ok: true,
-      skipped: true,
-      mode: currentMode(),
-      viewKey,
-    });
-  }
-
-  for (
-    const link
-    of managedLinks()
-  ) {
-    const href =
-      linkHrefKey(
-        link
-      );
-
-    const active =
-      activeHrefs.has(
-        href
-      );
-
-    setManagedLinkActive(
-      link,
-      active,
-      active
-        ? "active"
-        : "cached"
+    return skippedResult(
+      viewKey
     );
   }
 
-  preparedViewKey =
-    "";
+  applyManagedLinks(
+    activeHrefs
+  );
 
-  preparedHrefs =
-    new Set();
+  resetPrepared();
 
   return Object.freeze({
     ok: true,
@@ -1063,9 +1091,7 @@ export function rollbackRouteStyles(
     viewKey,
     activeViewKey,
     active:
-      Object.freeze([
-        ...activeHrefs,
-      ]),
+      frozenActive(),
   });
 }
 
@@ -1102,28 +1128,19 @@ export function clearRouteStyles(
     });
   }
 
-  for (
-    const link
-    of managedLinks()
-  ) {
-    setManagedLinkActive(
-      link,
-      false,
-      "cached"
-    );
-  }
-
   activeViewKey =
     "";
 
   activeHrefs =
     new Set();
 
-  preparedViewKey =
-    "";
+  /* Vaciar el conjunto activo y aplicarlo es exactamente desactivarlo todo:
+     una sola forma de poner y aparcar, también aquí. */
+  applyManagedLinks(
+    activeHrefs
+  );
 
-  preparedHrefs =
-    new Set();
+  resetPrepared();
 
   return Object.freeze({
     ok: true,
@@ -1139,6 +1156,15 @@ export function clearRouteStyles(
 /* =========================================================
    INTROSPECTION
 ========================================================= */
+
+/* CONTRATO · La llama quien suelta una reclamación: el conjunto activo NO
+   cambia; sólo se vuelve a sincronizar con el `<head>`, de modo que lo que la
+   ruta usa se queda y lo que ya no reclama nadie se aparca otra vez. */
+export function reapplyRouteStyles() {
+  applyManagedLinks(
+    activeHrefs
+  );
+}
 
 export function hasRouteStyleManifest(
   viewKey = ""
@@ -1187,9 +1213,7 @@ export function getSnapshot() {
     preparedViewKey,
 
     activeHrefs:
-      Object.freeze([
-        ...activeHrefs,
-      ]),
+      frozenActive(),
 
     preparedHrefs:
       Object.freeze([

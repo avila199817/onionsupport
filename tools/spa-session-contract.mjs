@@ -2,7 +2,7 @@
    Onion Support · Recorrido integrado de sesión SPA
    Archivo: /tools/spa-session-contract.mjs
 
-   DIECISÉIS PASOS, UNA SOLA SESIÓN, NINGUNA RECARGA.
+   VEINTE PASOS, UNA SOLA SESIÓN, NINGUNA RECARGA.
 
    No comprueba piezas sueltas: abre la aplicación construida y recorre lo que
    hace una persona, en continuidad, porque en continuidad es donde se rompió.
@@ -54,6 +54,9 @@ const ALTA = "#incidencias-create-modal-panel";
 const TECNICO = "[data-technician-profile-trigger='true'], [data-modal-technician='true']";
 const PERFIL_TECNICO = "#incidencias-technician-profile-panel";
 const VALORACIONES = "[data-fpc-retry-action='true']";
+const USUARIO = "[data-user-row='true']";
+const BUSCAR = "[data-usuarios-search-input='true']";
+const DETALLE_USUARIO = "#usuarios-detail-modal-title";
 
 const ENTORNOS = [
   { nombre: "escritorio", viewport: { width: 1440, height: 900 } },
@@ -399,6 +402,26 @@ async function recorrer(entorno) {
     await page.keyboard.press("Enter");
     await page.waitForSelector("#onion-facturas-paid-confirm-root [data-fpc-dialog='true']", { timeout: 10000 });
     assert.equal(await page.locator("[data-fpc-dialog='true']").count(), 1, "La acción no abre dos capas");
+    /* Y ocupa su capa de verdad: un z-index correcto con el velo de la capa de
+       debajo todavía vivo seguiría siendo una interfaz bloqueada, así que se
+       comprueba quién recibe el clic, no qué dice el z-index. */
+    await espera(240);
+    const superposicion = await page.evaluate(() => {
+      const dialogo = document.querySelector("[data-fpc-dialog='true']");
+      const caja = dialogo.getBoundingClientRect();
+      const recibe = document.elementFromPoint(Math.round(caja.x + caja.width / 2), Math.round(caja.y + caja.height / 2));
+      const raices = [...document.querySelectorAll(".ui-detail-modal-root")].map((raiz) => ({
+        z: Number(getComputedStyle(raiz).zIndex) || 0,
+        retenida: Boolean(raiz.querySelector("[data-modal-stack-held='true']")),
+        velo: getComputedStyle(raiz.querySelector(":scope > .ui-detail-modal-overlay") || raiz).pointerEvents,
+      }));
+      return { dentro: Boolean(recibe && dialogo.contains(recibe)), recibe: recibe?.className?.toString?.().split(" ")[0] || "", raices };
+    });
+    assert.equal(superposicion.dentro, true, `Valoraciones recibe sus propios clics, no la capa de debajo (llegó a ${superposicion.recibe})`);
+    const retenida = superposicion.raices.find((r) => r.retenida);
+    const activa = superposicion.raices.find((r) => !r.retenida);
+    assert.ok(activa && retenida && activa.z > retenida.z, `La capa activa se pinta encima (${JSON.stringify(superposicion.raices)})`);
+    assert.equal(retenida.velo, "none", "El velo de la capa retenida no se queda con los clics");
     await cerrar("[data-fpc-dialog='true']");
     await cerrar("[data-facturas-detail-modal='true']");
     paso(15, `«Valoraciones» con icono ${boton.ancho}×${boton.alto} y apertura única (N6)`);
@@ -421,6 +444,123 @@ async function recorrer(entorno) {
     await page.keyboard.press("Escape");
     await untilTrue(page, (sel) => !document.querySelector(sel), { arg: ALTA, timeout: 10000, message: "el alta no cerró" });
     paso(16, "cierre limpio: 0 capas, 0 anfitriones prestados, 0 inertes y el alta sigue abriendo");
+
+    /* =====================================================================
+       ACEPTACIÓN CONJUNTA · los tres defectos, en esta misma sesión y sin
+       recargar: la vista que no cargaba, la capa que bloqueaba (paso 15) y la
+       presentación que se perdía al entrar desde otra vista.
+    ===================================================================== */
+
+    /* 17 · Usuarios por el router: carga, y la frontera del directorio con las
+       identidades internas se mantiene. (N8) */
+    await clickInPage(page, `a[href='${RUTA}/usuarios']`);
+    await untilTrue(page, (sel) => document.querySelectorAll(sel).length > 0,
+      { arg: USUARIO, timeout: 20000, message: "Usuarios no pintó ninguna fila" });
+    const directorio = await page.evaluate((sel) => [...document.querySelectorAll(sel)]
+      .map((fila) => fila.getAttribute("data-user-id")).sort(), USUARIO);
+    assert.deepEqual(directorio, ["u-cliente-1", "u-cliente-2"],
+      `El directorio funcional es el esperado, no todo lo que devuelve el endpoint: ${JSON.stringify(directorio)}`);
+    const pantalla = await page.evaluate(() => (document.body.innerText || "").replace(/\s+/gu, " "));
+    assert.equal(/is not defined|is not a function|Cannot read propert/u.test(pantalla), false,
+      "Ninguna falta del motor puede presentarse como mensaje al usuario (N8)");
+    paso(17, `Usuarios por el router: ${directorio.join(", ")} · técnico y administrador fuera · 0 texto del motor (N8)`);
+
+    /* 18 · Buscar, filtrar, abrir el correcto, cerrar y volver sin recargar. */
+    await page.fill(BUSCAR, "Carlos");
+    await untilTrue(page, ({ sel, id }) => {
+      const filas = [...document.querySelectorAll(sel)];
+      return filas.length === 1 && filas[0].getAttribute("data-user-id") === id;
+    }, { arg: { sel: USUARIO, id: "u-cliente-2" }, timeout: 15000, message: "La búsqueda no dejó a quien corresponde" });
+    await page.fill(BUSCAR, "");
+    await untilTrue(page, (sel) => document.querySelectorAll(sel).length === 2,
+      { arg: USUARIO, timeout: 15000, message: "Vaciar la búsqueda no restauró el directorio" });
+    /* Se espera por QUIÉNES quedan, no por cuántos: dos filtros distintos
+       pueden dejar el mismo número y la espera se cumpliría con la lista
+       anterior. */
+    for (const [etiqueta, esperados] of [["Bloqueados", []], ["Usuarios", ["u-cliente-1", "u-cliente-2"]]]) {
+      await page.locator("[data-usuarios-action='filter']").filter({ hasText: etiqueta }).first().click();
+      await untilTrue(page, ({ sel, firma }) => [...document.querySelectorAll(sel)]
+        .map((fila) => fila.getAttribute("data-user-id") || "").sort().join("|") === firma,
+      { arg: { sel: USUARIO, firma: esperados.join("|") }, timeout: 15000, message: `El filtro ${etiqueta} no dejó ${esperados.join("|") || "(ninguna)"}` });
+    }
+    await clickInPage(page, `${USUARIO}[data-user-id='u-cliente-1'] [data-usuarios-action='detail'], ${USUARIO}[data-user-id='u-cliente-1']`);
+    await untilTrue(page, (sel) => Boolean(document.querySelector(sel)),
+      { arg: DETALLE_USUARIO, timeout: 15000, message: "El detalle del usuario no se abrió" });
+    const abierto = await page.evaluate(() => (document.querySelector("#usuarios-detail-modal-panel") || document.body).textContent.replace(/\s+/gu, " "));
+    assert.ok(abierto.includes("Ana Cliente Sintética"), "Se abre el usuario pulsado, no otro");
+    await cerrar(DETALLE_USUARIO);
+    await clickInPage(page, `a[href='${RUTA}/incidencias']`);
+    await page.waitForSelector(FILA, { timeout: 15000 });
+    await clickInPage(page, `a[href='${RUTA}/usuarios']`);
+    await untilTrue(page, (sel) => document.querySelectorAll(sel).length === 2,
+      { arg: USUARIO, timeout: 20000, message: "Al volver a Usuarios no reapareció el directorio" });
+    paso(18, "Usuarios: búsqueda, dos filtros por identidad, apertura correcta, cierre por teclado y vuelta sin recargar");
+
+    /* 19-20 · Una ficha abierta desde SU ruta y desde una entrada de Home, en
+       la misma sesión caliente, tiene que verse exactamente igual. No se
+       comprueba que exista un <link>: se compara la huella del panel. (N9) */
+    const huella = (sel) => page.evaluate((selector) => {
+      const panel = document.querySelector(selector);
+      if (!panel) return null;
+      return [...panel.querySelectorAll("*")].map((nodo, indice) => {
+        const estilo = getComputedStyle(nodo);
+        const caja = nodo.getBoundingClientRect();
+        return [indice, `${nodo.tagName}.${(nodo.className || "").toString().trim().split(/\s+/)[0] || "-"}`,
+          `${Math.round(caja.width)}x${Math.round(caja.height)}`, estilo.backgroundColor, estilo.color,
+          estilo.borderRadius, estilo.fontSize, estilo.fontWeight, estilo.padding, estilo.borderTopWidth,
+          estilo.display, estilo.gap].join("|");
+      });
+    }, sel);
+    /* Asentar es esperar a lo que se va a medir: la huella repetida, no un
+       reloj. Una hoja ausente da una huella estable y DISTINTA. */
+    const asentar = async (sel) => {
+      let previa = null;
+      for (let intento = 0; intento < 60; intento += 1) {
+        const actual = await huella(sel);
+        if (previa && JSON.stringify(previa) === JSON.stringify(actual)) return actual;
+        previa = actual;
+        await page.waitForTimeout(150);
+      }
+      throw new Error(`El detalle ${sel} no deja de cambiar de presentación`);
+    };
+    const comparar = (base, otra) => {
+      const total = Math.max(base?.length || 0, otra?.length || 0);
+      const distintos = [];
+      for (let i = 0; i < total; i += 1) if (base[i] !== otra[i]) distintos.push(`su ruta: ${base[i]} · desde Home: ${otra[i]}`);
+      return distintos;
+    };
+
+    for (const [numero, tipo, ruta, lista, panel, fuente] of [
+      [19, "incidencia", "/incidencias", FILA, DETALLE, "home.activity"],
+      [20, "factura", "/facturas", "[data-factura-id]", "[data-facturas-detail-modal='true']", "home.invoices"],
+    ]) {
+      await clickInPage(page, `a[href='${RUTA}']`);
+      await untilTrue(page, ({ f, t }) => Boolean(document.querySelector(`[data-home-entity-source='${f}'][data-entity-type='${t}']`)),
+        { arg: { f: fuente, t: tipo }, timeout: 20000, message: `Home no pintó la entrada ${fuente} de ${tipo}` });
+      const disparador = `[data-home-entity-source='${fuente}'][data-entity-type='${tipo}']`;
+      const identidad = await page.evaluate((sel) => document.querySelector(sel)?.getAttribute("data-entity-id") || "", disparador);
+      assert.ok(identidad, `La entrada ${fuente} no declara identidad`);
+
+      /* Referencia: la MISMA ficha, desde su propia ruta. */
+      await clickInPage(page, `a[href='${RUTA}${ruta}']`);
+      await page.waitForSelector(lista, { timeout: 20000 });
+      await clickInPage(page, `${lista}[data-${tipo === "incidencia" ? "ticket" : "factura"}-id='${identidad}']`);
+      await untilTrue(page, (sel) => Boolean(document.querySelector(sel)), { arg: panel, timeout: 20000, message: `${identidad} no abrió desde su ruta` });
+      const referencia = await asentar(panel);
+      await cerrar(panel);
+
+      /* Y ahora desde Home, con la hoja de ese dominio ya aparcada. */
+      await clickInPage(page, `a[href='${RUTA}']`);
+      await untilTrue(page, (sel) => Boolean(document.querySelector(sel)), { arg: `${disparador}[data-entity-id='${identidad}']`, timeout: 20000, message: "Home no volvió a pintar su entrada" });
+      await clickInPage(page, `${disparador}[data-entity-id='${identidad}']`);
+      await untilTrue(page, (sel) => Boolean(document.querySelector(sel)), { arg: panel, timeout: 20000, message: `${identidad} no abrió desde ${fuente}` });
+      const desdeHome = await asentar(panel);
+      const distintos = comparar(referencia, desdeHome);
+      assert.deepEqual(distintos, [],
+        `${identidad} desde ${fuente}: ${distintos.length} de ${referencia.length} nodos pierden su presentación (N9). Primero: ${distintos[0]}`);
+      await cerrar(panel);
+      paso(numero, `${identidad} desde ${fuente}: ${desdeHome.length} nodos idénticos a su apertura desde ${ruta} (N9)`);
+    }
 
     /* Invariantes de toda la sesión. */
     assert.equal(sesion.loads.length, 1, `La sesión cargó el documento ${sesion.loads.length} veces`);
@@ -464,7 +604,7 @@ for (const entorno of ENTORNOS) {
   }
 }
 
-console.log(`SPA session contract: PASS · 16 pasos · ${ENTORNOS.length} entornos · 2 entradas en frío por entorno · 7 negativas`);
+console.log(`SPA session contract: PASS · 20 pasos · ${ENTORNOS.length} entornos · 2 entradas en frío por entorno · 9 negativas`);
 for (const { entorno, pasos, llamadas } of informe) {
   console.log(`  [${entorno}] ${llamadas} llamadas a la API · 1 documento · 0 fuera de origen · 0 errores · 0 escrituras`);
   for (const linea of pasos) console.log(`    ${linea}`);

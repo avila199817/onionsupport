@@ -45,6 +45,24 @@ export function buildVm(input = {}) {
     return null;
   }
 
+  /* SIN VALOR NO SIGNIFICA LO MISMO QUE NO SE PUDO LEER.
+   *
+   * Cuando un dominio no contesta, el panel se compone igual con los demás y
+   * deja esa cuenta sin valor, pero apunta el aviso con su dominio. Aquí --y
+   * sólo aquí-- se cruza una cosa con la otra, para que la tarjeta pueda decir
+   * «no se pudo cargar» y ofrecer reintentar, en vez de una raya muda que no
+   * se distingue de un dato que de verdad no existe.
+   *
+   * Los avisos de un dominio pueden llegar con su sufijo (`facturas_stats`),
+   * así que se compara por el dominio y sus ramas, no por igualdad exacta. */
+  const failedDomains = safeArray(dashboard.warnings)
+    .map((warning) => cleanText(isObject(warning) ? warning.domain : "", ""))
+    .filter(Boolean);
+
+  const domainFailed = (name) => failedDomains.some(
+    (domain) => domain === name || domain.startsWith(`${name}_`)
+  );
+
   const totalInvoiced = finiteNumber(
     firstNonEmpty(
       summary.totalInvoiced,
@@ -170,6 +188,12 @@ export function buildVm(input = {}) {
       totalInvoiced,
       currency,
       invoiceStatsAvailable,
+      failed: {
+        incidencias: domainFailed("incidencias"),
+        facturas: domainFailed("facturas"),
+        clientes: admin && domainFailed("clientes"),
+        usuarios: admin && domainFailed("usuarios"),
+      },
     },
     billing: {
       available: invoiceStatsAvailable,

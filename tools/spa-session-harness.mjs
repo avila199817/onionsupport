@@ -351,12 +351,22 @@ export async function openSpaSession(browser, origin, options = {}) {
         if (!found) return respond({ ok: false, error: { code: "FACTURA_NOT_FOUND" } }, 404);
         return respond({ ok: true, factura: found, data: found, ...found });
       }
-      /* La guía de bienvenida y las estadísticas de clientes no tienen estado
-         en el mundo sintético. Se responden vacías A PROPÓSITO y de forma
-         declarada: así el recorrido comprueba que Home y Usuarios se sostienen
-         sin ellas, en vez de dejarlas como llamadas que el arnés no reproduce. */
-      if (path === "/api/users/me/onboarding" || path === "/api/clientes/stats") {
+      /* La guía de bienvenida no tiene estado en el mundo sintético: se
+         responde vacía A PROPÓSITO, para comprobar que Home se sostiene sin
+         ella. Las estadísticas SÍ contestan con un total real: Home pinta con
+         ellas sus contadores, y un endpoint que no contesta convertía la
+         tarjeta de Usuarios en un fallo que no existe --`/api/users/stats`
+         caía además en la regla de «usuario por identificador» y devolvía 404--. */
+      if (path === "/api/users/me/onboarding") {
         return respond({ ok: true, items: [], total: 0, data: [] });
+      }
+      if (path === "/api/users/stats") {
+        const people = [world.titular, world.segundoTitular, world.tecnico, world.conectado];
+        return respond({ ok: true, total: people.length, stats: { total: people.length } });
+      }
+      if (path === "/api/clientes/stats") {
+        const clientes = [world.titular, world.segundoTitular];
+        return respond({ ok: true, total: clientes.length, stats: { total: clientes.length } });
       }
       const persona = path.match(/^\/api\/users\/([^/]+)$/u);
       if (persona && decodeURIComponent(persona[1]) !== "avatar") {

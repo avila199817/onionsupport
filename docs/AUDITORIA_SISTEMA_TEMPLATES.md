@@ -123,12 +123,19 @@ Nombradas para que nadie las «arregle»:
 ## 5 · Presupuesto de arranque
 
 `tools/invoice-api-split-dist-contract.mjs` mide el cierre estático de la Home
-pública contra un techo. **Hoy el margen es 0.**
+pública contra un techo de 218.750 bytes. Sobre el main de hoy el cierre son
+**214.920 bytes: 3.830 de margen (1,75 %)**, por encima de la holgura del
+1,20 % que declaró R03.
 
-Si tu cambio lo roza, mídelo fichero a fichero antes de tocar el número: la
-nota R08 del contrato explica cómo se resolvió el último caso sin subirlo
---agrupando dos módulos del núcleo en un solo chunk-- y deja el método escrito.
-Subir el techo es la última opción, no la primera.
+Si tu cambio lo roza, mídelo fichero a fichero antes de tocar el número. Subir
+el techo es la última opción, no la primera; la nota R08 del contrato deja
+escrito el método y los dos callejones sin salida que ya se recorrieron.
+
+Y uno de ellos conviene saberlo antes de intentarlo: **`vite.config.js` es un
+fichero de confianza** (`TRUSTED_FILES` en `tools/stage-trusted-build.mjs`). La
+referencia con la que CI compara tu dist se construye con el `vite.config.js`
+del base, no con el tuyo. Cambiarlo hace que los dos artefactos diverjan
+enteros y la puerta trusted se pone en rojo. No lo toques para afinar bytes.
 
 ---
 

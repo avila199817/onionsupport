@@ -29,39 +29,6 @@ function buildOutputDirectory() {
 
 const outputDirectory = buildOutputDirectory();
 
-/* =========================================================
-   CLAVE Y TONO · UN SOLO TROZO
-
-   `src/core/slug-key.js` y `src/core/status-tone.js` son dos módulos diminutos
-   del núcleo, y el segundo IMPORTA al primero: quien carga uno carga siempre el
-   otro. Servirlos por separado cuesta una petición de más y una entrada de más
-   en la tabla de precarga que vive dentro de `routes`, que sí entra en el
-   cierre de arranque. Juntos no cuestan ninguna de las dos, y a la ruta le
-   llegan exactamente los mismos bytes.
-
-   El trozo se llama por lo que lleva: de un valor crudo de dominio, su CLAVE
-   (slug-key) y su TONO (status-tone). Es una decisión de empaquetado, no de
-   arquitectura: cada concepto sigue teniendo su fichero y su autoridad.
-========================================================= */
-
-const CORE_SEMANTICS_GROUP = Object.freeze({
-  name: "key-tone",
-  test: /(?:^|\/)src\/core\/(?:slug-key|status-tone)\.js(?:\?.*)?$/,
-  priority: 90,
-  /* No arrastrar aquí nada más: el grupo son estos dos ficheros. */
-  includeDependenciesRecursively: false,
-});
-
-function coreSemanticsOutput(base = {}) {
-  return {
-    ...base,
-    codeSplitting: {
-      ...base.codeSplitting,
-      groups: [...(base.codeSplitting?.groups || []), CORE_SEMANTICS_GROUP],
-    },
-  };
-}
-
 const HTML_INPUTS = Object.freeze({
   main: "index.html",
   login: "login.html",
@@ -355,7 +322,7 @@ export default defineConfig({
         ])
       ),
       output: {
-        ...coreSemanticsOutput(invoiceApiSplitOutput(ROOT)),
+        ...invoiceApiSplitOutput(ROOT),
         entryFileNames: "assets/js/[name]-[hash].js",
         chunkFileNames: "assets/js/[name]-[hash].js",
         assetFileNames(assetInfo) {

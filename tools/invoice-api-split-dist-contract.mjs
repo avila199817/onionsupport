@@ -62,25 +62,34 @@ const JS_ROOT = resolve(DIST, "assets/js");
 // R08 (2026-09-17): seis vistas dejan de decidir por su cuenta el tono de un
 // estado --«Cancelada» llegó a pintarse verde en Incidencias, roja en Agenda y
 // en Home, y neutra en Facturas-- y se lo preguntan a src/core/status-tone.js.
-// Al compartirlo seis vistas, el bundler le daba su propio chunk y la tabla de
-// precarga que vive en `routes` --que sí está en el cierre-- nombraba uno más:
-// +60 raw bytes, TODOS dentro de `routes`, medidos fichero a fichero.
+// Al compartirlo seis vistas, el bundler le da su propio chunk y la tabla de
+// precarga que vive en `routes` --que sí está en el cierre-- nombra uno más.
 //
-// EL TECHO NO SUBE. `status-tone.js` y `slug-key.js` son dos módulos diminutos
-// del núcleo y el primero IMPORTA al segundo: quien carga uno carga siempre el
-// otro. Servirlos por separado costaba una petición de más y una entrada de más
-// en la tabla; juntos no cuestan ninguna de las dos. vite.config.js los agrupa
-// en el chunk `key-tone` y el crecimiento pasa de +60 a +3.
-//   main c0c16d6b...4412fb86 -> 218747
-//   rama con la autoridad    -> 218750
-// Los 3 bytes que quedan no son un nombre ni una entrada nueva --el manifiesto
-// sigue teniendo 55-- sino dígitos de índice: al cambiar un nombre de chunk
-// cambia su posición y algún índice de ruta pasa de una cifra a dos. Probados
-// `tone-key` y `slug-tone`: 218750 y 218752. No hay nada que recuperar ahí.
+//   ANTES DE #699 (base 4412fb86)
+//     cierre 218747, margen 3 bytes. Con ese margen los +60 no cabían, así que
+//     esta rama llegó a agrupar `status-tone` y `slug-key` en un solo chunk
+//     desde vite.config.js. Se descartó por dos razones independientes:
+//       · vite.config.js es TRUSTED_FILES en tools/stage-trusted-build.mjs, así
+//         que la referencia trusted se construye con el del base. Comprobado en
+//         local: con el config de main el dist sale byte a byte idéntico; con la
+//         agrupación divergen los 88 chunks. Una PR de diseño no puede pedir
+//         cambiar configuración ejecutable de build para ahorrar 60 bytes.
+//       · 4 listas de precarga traen `slug-key` SIN `status-tone`: agruparlos
+//         haría que cuatro rutas descargaran 1.073 bytes de tabla de tonos que
+//         no usan.
 //
-// AVISO PARA EL SIGUIENTE: el margen queda en 0. Antes de esta rama eran 3.
-// Quien roce este cierre tendrá que medir y decidir de verdad, no subir el
-// número.
+//   MAIN DE HOY (a975ea9b, con #699 dentro)
+//     #699 sacó el runtime privado del arranque público: 218747 -> 214860.
+//     cierre 214860, margen 3.890 bytes (1,78 %).
+//     con esta rama            214920, margen 3.830 bytes (1,75 %)
+//     +60 raw / +31 gzip, TODOS en `routes`; los otros 15 ficheros del cierre no
+//     se mueven un byte. Chunks 87 -> 88: el nuevo NO entra en el cierre, así
+//     que la Home pública no hace ninguna petición de más.
+//
+// El techo NO se mueve y sigue holgado: R03 declaró una holgura de
+// mantenimiento del 1,20 % y queda 1,75 %. Un chunk propio para una autoridad
+// compartida es la forma correcta cuando el presupuesto lo permite; no hay que
+// gastar complejidad en preservar cada byte.
 const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218750 });
 
 function staticImports(code, identifier) {

@@ -19,19 +19,16 @@
    pintarían DOS anillos, uno de sombra y otro de contorno, y nadie lo vería en
    un diff.
 
-   Este contrato es barato y se ejecuta en `validate:source`: el que mide que
+   Este contrato es barato y se ejecuta en `validate:source`: el job
+   `Repository Integrity` lo ejecuta ANTES de instalar dependencias. Por eso el
+   parser de este fichero es deliberadamente dependency-free. El que mide que
    el anillo se VE es `tools/focus-visible-browser-contract.mjs`.
 ========================================================= */
 
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-
-const require = createRequire(import.meta.url);
-const postcss = require("postcss");
-const { list } = postcss;
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const AUTHORITY = "src/css/components/focus-system.css";
@@ -52,6 +49,46 @@ const walk = (dir, out = []) => {
   return out;
 };
 
+const stripComments = (source) => source.replace(/\/\*[\s\S]*?\*\//gu, "");
+
+/* `validate:source` corre sin `npm ci`, así que este contrato no puede apoyarse
+   en PostCSS aunque Vite lo traiga transitivamente. Para lo que protegemos aquí
+   basta un lector estrecho: bloque principal de :focus-visible + declaraciones
+   box-shadow reales, después de quitar comentarios. */
+const parseDeclarations = (block) =>
+  block
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const colon = part.indexOf(":");
+      assert.ok(colon > 0, `declaración CSS ilegible en ${AUTHORITY}: ${part}`);
+      return {
+        prop: part.slice(0, colon).trim(),
+        value: part.slice(colon + 1).trim(),
+      };
+    });
+
+const braceDepthAt = (source, index) => {
+  let depth = 0;
+  for (let i = 0; i < index; i += 1) {
+    if (source[i] === "{") depth += 1;
+    else if (source[i] === "}") depth -= 1;
+  }
+  return depth;
+};
+
+const ringShadows = (source) => {
+  const values = [];
+  const pattern = /(?:^|[;{])\s*box-shadow\s*:\s*([^;}]*)/gimu;
+  let match;
+  while ((match = pattern.exec(source)) !== null) {
+    const value = match[1].trim();
+    if (/var\(--focus-ring(?:-strong)?\)/u.test(value)) values.push(value);
+  }
+  return values;
+};
+
 const files = [...walk("src/css"), ...walk("src/features")];
 assert.ok(files.length >= 60, `se esperaban al menos 60 hojas y hay ${files.length}`);
 
@@ -59,24 +96,24 @@ assert.ok(files.length >= 60, `se esperaban al menos 60 hojas y hay ${files.leng
    1 · LA AUTORIDAD DECLARA UN CONTORNO, NO UNA SOMBRA
 ========================================================= */
 
-const authority = readFileSync(join(ROOT, AUTHORITY), "utf8");
-const authorityRoot = postcss.parse(authority);
-
-let ringRule = null;
-authorityRoot.walkRules((rule) => {
-  if (ringRule || rule.parent.type === "atrule") return;
-  if (/:focus-visible\s*$/.test(rule.selector)) ringRule = rule;
-});
+const authority = stripComments(readFileSync(join(ROOT, AUTHORITY), "utf8"));
+const ringRule = authority.match(/:where\([\s\S]*?\):focus-visible\s*\{([^{}]*)\}/u);
 assert.ok(ringRule, `${AUTHORITY} ya no declara la regla del anillo`);
+assert.equal(
+  braceDepthAt(authority, ringRule.index),
+  0,
+  `${AUTHORITY}: la regla principal del anillo debe vivir fuera de un @media/@supports`
+);
 
-const props = ringRule.nodes.filter((n) => n.type === "decl").map((n) => n.prop);
+const declarations = parseDeclarations(ringRule[1]);
+const props = declarations.map((decl) => decl.prop);
 assert.ok(props.includes("outline"), `${AUTHORITY}: el anillo tiene que ser un outline`);
 assert.ok(
   !props.includes("box-shadow"),
   `${AUTHORITY}: el anillo ha vuelto a ser una sombra; volvería a competir con la de cada componente`
 );
 
-const outline = ringRule.nodes.find((n) => n.type === "decl" && n.prop === "outline");
+const outline = declarations.find((decl) => decl.prop === "outline");
 assert.ok(
   /var\(--focus-ring-width\)/.test(outline.value) && /var\(--focus-ring-color\)/.test(outline.value),
   `${AUTHORITY}: el anillo no sale de los tokens (${outline.value})`
@@ -104,18 +141,16 @@ const decorativeSeen = new Map();
 
 for (const file of files) {
   if (file === AUTHORITY) continue;
-  const css = readFileSync(join(ROOT, file), "utf8");
+  const css = stripComments(readFileSync(join(ROOT, file), "utf8"));
   if (!css.includes("--focus-ring")) continue;
 
-  postcss.parse(css).walkDecls("box-shadow", (decl) => {
-    const terms = list.comma(decl.value).filter((term) => /var\(--focus-ring(-strong)?\)/.test(term));
-    if (!terms.length) return;
+  for (const value of ringShadows(css)) {
     if (DECORATIVE.has(file)) {
       decorativeSeen.set(file, (decorativeSeen.get(file) || 0) + 1);
-      return;
+      continue;
     }
-    offenders.push(`${file}  ${decl.parent.selector.replace(/\s+/g, " ").trim()}\n     box-shadow: ${decl.value.replace(/\s+/g, " ")}`);
-  });
+    offenders.push(`${file}\n     box-shadow: ${value.replace(/\s+/g, " ")}`);
+  }
 }
 
 assert.deepEqual(

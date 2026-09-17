@@ -397,6 +397,8 @@ noindex_routes=(
   "/@ci-probe/incidencias/ci-ticket"
   "/incidencias"
   "/incidencias/ci-ticket"
+  "/agenda"
+  "/agenda/ci-probe"
   "/facturas"
   "/clientes"
   "/usuarios"

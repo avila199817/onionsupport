@@ -179,13 +179,22 @@ export function syntheticWorld() {
     id: "u-tecnico-1", userId: "u-tecnico-1", name: "Beatriz Técnica Sintética", fullName: "Beatriz Técnica Sintética",
     email: "beatriz@example.test", role: "admin", status: "active", avatarUrl: "", hasAvatar: false,
   };
+  /* SEGUNDO TÉCNICO, IDENTIDAD DISTINTA.
+   *
+   * Con un solo técnico cualquier atribución parece correcta: si sólo hay uno,
+   * acertar no significa nada. Dos técnicos con incidencias propias es lo que
+   * permite que una prueba distinga «el de este servicio» de «el que había». */
+  const segundoTecnico = {
+    id: "u-tecnico-2", userId: "u-tecnico-2", name: "Damián Técnico Sintético", fullName: "Damián Técnico Sintético",
+    email: "damian@example.test", role: "admin", status: "active", avatarUrl: "", hasAvatar: false,
+  };
 
   const adjuntos = [
     { id: "adj-1", attachmentId: "adj-1", name: "captura-uno.png", filename: "captura-uno.png", contentType: "image/png", size: 1024, viewUrl: "/@sintetico/adjunto-1.png" },
     { id: "adj-2", attachmentId: "adj-2", name: "captura-dos.png", filename: "captura-dos.png", contentType: "image/png", size: 2048, viewUrl: "/@sintetico/adjunto-2.png" },
   ];
 
-  const ticket = (numero, persona, extra = {}) => ({
+  const ticket = (numero, persona, quienAtiende = tecnico, extra = {}) => ({
     id: `INC-SINT-${numero}`, ticketId: `INC-SINT-${numero}`,
     subject: `Incidencia sintética ${numero}`,
     description: `Descripción sintética de la incidencia ${numero}. `.repeat(12),
@@ -193,7 +202,7 @@ export function syntheticWorld() {
     createdAt: "2026-09-08T09:00:00.000Z", updatedAt: "2026-09-08T09:30:00.000Z",
     userId: persona.userId, clientId: persona.userId, fullName: persona.name, name: persona.name,
     email: persona.email, avatarUrl: persona.avatarUrl, hasAvatar: Boolean(persona.avatarUrl),
-    assignedToUserId: tecnico.userId, assignedToName: tecnico.name, assignedToEmail: tecnico.email,
+    assignedToUserId: quienAtiende.userId, assignedToName: quienAtiende.name, assignedToEmail: quienAtiende.email,
     comments: [], history: [], attachments: [], canComment: true, canUpdate: true,
     ...extra,
   });
@@ -212,13 +221,25 @@ export function syntheticWorld() {
   });
 
   return {
-    conectado, titular, segundoTitular, tecnico, adjuntos,
+    conectado, titular, segundoTitular, tecnico, segundoTecnico, adjuntos,
+    /* Dos clientes y dos técnicos repartidos: ningún papel comparte identidad. */
     tickets: [
-      ticket(1, titular, { attachments: adjuntos }),
-      ticket(2, segundoTitular, { subject: "Incidencia sintética 2", category: "billing", status: "pending", priority: "low" }),
-      ticket(3, titular, { subject: "Incidencia sintética 3", category: "network", status: "in_progress", priority: "urgent" }),
+      ticket(1, titular, tecnico, { attachments: adjuntos }),
+      ticket(2, segundoTitular, segundoTecnico, { subject: "Incidencia sintética 2", category: "billing", status: "pending", priority: "low" }),
+      ticket(3, titular, tecnico, { subject: "Incidencia sintética 3", category: "network", status: "in_progress", priority: "urgent" }),
       /* Valores que la aplicación no declara: deben leerse, no aparecer en crudo. */
-      ticket(4, segundoTitular, { subject: "Incidencia sintética 4", category: "chimney_sweeping", status: "awaiting_customer", priority: "trivial" }),
+      ticket(4, segundoTitular, segundoTecnico, { subject: "Incidencia sintética 4", category: "chimney_sweeping", status: "awaiting_customer", priority: "trivial" }),
+    ],
+    /* LAS VALORACIONES SON DEL TÉCNICO DEL SERVICIO, NO DE QUIEN MIRA.
+     *
+     * Espejo del vínculo persistido del backend: cada respuesta guarda el
+     * técnico que el servidor resolvió al crear la invitación. Beatriz tiene dos
+     * (5 y 3, media 4,0); Damián ninguna. Una invitación sin respuesta NO es una
+     * valoración recibida, y por eso está aquí sin nota. */
+    valoraciones: [
+      { technicianId: tecnico.userId, overall: 5 },
+      { technicianId: tecnico.userId, overall: 3 },
+      { technicianId: segundoTecnico.userId, overall: null },
     ],
     facturas: [
       factura(1),
@@ -343,6 +364,24 @@ export async function openSpaSession(browser, origin, options = {}) {
       if (path === "/api/facturas") {
         return respond({ ok: true, items: world.facturas, total: world.facturas.length, data: world.facturas });
       }
+      /* RESUMEN POR TÉCNICO · la misma forma que publica el backend.
+         Sólo cuentan las respuestas presentes con nota entera dentro de escala:
+         una invitación sin responder no suma. Sin ninguna, `average` es null
+         --que NO es un cero-- y el navegador no recibe comentario, ni cliente,
+         ni solicitud de contacto. */
+      const resumenTecnico = path.match(/^\/api\/facturas\/tecnicos\/([^/]+)\/valoraciones$/u);
+      if (resumenTecnico) {
+        const technicianId = decodeURIComponent(resumenTecnico[1]);
+        const notas = (world.valoraciones || [])
+          .filter((entrada) => entrada.technicianId === technicianId)
+          .map((entrada) => entrada.overall)
+          .filter((nota) => Number.isInteger(nota) && nota >= 1 && nota <= 5);
+        return respond({
+          ok: true, technicianId, scope: "all", max: 5,
+          count: notas.length,
+          average: notas.length ? notas.reduce((total, nota) => total + nota, 0) / notas.length : null,
+        });
+      }
       const reviews = path.match(/^\/api\/facturas\/([^/]+)\/valoraciones$/u);
       if (reviews) return respond({ ok: true, summary: { status: "not_requested" }, services: [], data: { summary: { status: "not_requested" }, services: [] } });
       const factura = path.match(/^\/api\/facturas\/([^/]+)$/u);
@@ -361,7 +400,7 @@ export async function openSpaSession(browser, origin, options = {}) {
         return respond({ ok: true, items: [], total: 0, data: [] });
       }
       if (path === "/api/users/stats") {
-        const people = [world.titular, world.segundoTitular, world.tecnico, world.conectado];
+        const people = [world.titular, world.segundoTitular, world.tecnico, world.segundoTecnico, world.conectado];
         return respond({ ok: true, total: people.length, stats: { total: people.length } });
       }
       if (path === "/api/clientes/stats") {
@@ -371,13 +410,13 @@ export async function openSpaSession(browser, origin, options = {}) {
       const persona = path.match(/^\/api\/users\/([^/]+)$/u);
       if (persona && decodeURIComponent(persona[1]) !== "avatar") {
         const id = decodeURIComponent(persona[1]);
-        const encontrada = [world.titular, world.segundoTitular, world.tecnico, world.conectado]
+        const encontrada = [world.titular, world.segundoTitular, world.tecnico, world.segundoTecnico, world.conectado]
           .find((quien) => quien.userId === id || quien.id === id);
         if (!encontrada) return respond({ ok: false, error: { code: "USER_NOT_FOUND" } }, 404);
         return respond({ ok: true, user: encontrada, data: encontrada, ...encontrada });
       }
       if (path === "/api/users") {
-        const people = [world.titular, world.segundoTitular, world.tecnico, world.conectado];
+        const people = [world.titular, world.segundoTitular, world.tecnico, world.segundoTecnico, world.conectado];
         /* El directorio consulta al servidor cuando se busca o se filtra: un
            endpoint que devuelve siempre todo no prueba ni la búsqueda ni el
            filtro. Se responde a lo que se pregunta. */

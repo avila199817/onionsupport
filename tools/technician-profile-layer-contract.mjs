@@ -75,19 +75,11 @@ const limpieza = (page) => page.evaluate(() => ({
   cuerpo: document.body.className,
 }));
 
-const mundo = () => {
-  const world = syntheticWorld();
-  const segundo = {
-    id: "u-tecnico-2", userId: "u-tecnico-2", name: "Diego Segundo Técnico",
-    fullName: "Diego Segundo Técnico", email: "diego@example.test",
-    role: "admin", status: "active", avatarUrl: "", hasAvatar: false,
-  };
-  world.tecnico2 = segundo;
-  world.tickets = world.tickets.map((ticket, indice) => (indice % 2 === 1
-    ? { ...ticket, assignedToUserId: segundo.userId, assignedToName: segundo.name, assignedToEmail: segundo.email }
-    : ticket));
-  return world;
-};
+/* El segundo técnico ya vive en el mundo sintético --INC-SINT-2 e INC-SINT-4 son
+   suyas--, así que este contrato dejó de fabricarse el suyo. La copia local
+   nombraba a otra persona con el MISMO identificador, y el directorio manda
+   sobre el nombre que trae el ticket: la ficción chocaba con el mundo. */
+const mundo = () => syntheticWorld();
 
 const { origin, close: cerrarServidor } = await serveBuiltApp({ spaFallback: true });
 const browser = await launchBrowser();
@@ -195,7 +187,7 @@ try {
   await abrirDetalle("INC-SINT-2");
   await abrirPerfil();
   const segundo = await nombreDelPerfil();
-  assert.ok(/Diego Segundo Técnico/u.test(segundo), `El perfil del técnico asignado a INC-SINT-2: «${segundo.slice(0, 80)}»`);
+  assert.ok(/Damián Técnico Sintético/u.test(segundo), `El perfil del técnico asignado a INC-SINT-2: «${segundo.slice(0, 80)}»`);
   assert.equal(/Beatriz Técnica Sintética/u.test(segundo), false, "El contenido de un técnico no aparece en el perfil de otro");
   await cerrar(PERFIL);
   await cerrar(DETALLE);

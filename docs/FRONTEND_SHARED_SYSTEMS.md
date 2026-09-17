@@ -96,6 +96,14 @@ Durante la edición no se guarda un fallback visual como nuevo valor del dato: l
 
 Cada apertura tiene una sola invocación inicial a la API de detalle. Incidencias y Facturas conservan el panel conectado en carga, error, reintento y refresco. Estado, live sync y avatares de Incidencias reciben la proyección del controlador; las señales solicitan el refresco a ese mismo propietario. Las listas posponen su reconciliación mientras su detalle está abierto y aplican los cambios al cerrar.
 
+### Una hoja aparcada está cargada, pero no puesta
+
+Al cambiar de ruta, `src/router/styles.js` no borra las hojas de la anterior: las **aparca** con `media="not all"` para no volver a descargarlas. Siguen en el `<head>` y su `.sheet` sigue sin ser nulo, así que buscarlas por `href` no dice si están **aplicadas**.
+
+Un detalle transversal abierto fuera de su ruta necesita su CSS de dominio mientras siga montado. Lo **reclama** con el contador `data-modal-style-claim` sobre el `<link>` que ya existe —no hay un segundo cargador—, y `setManagedLinkActive` respeta la reclamación: mientras haya alguna, la hoja no se aparca aunque la ruta activa sea otra. Al terminar la sesión del overlay, `EntityOverlay` suelta sus reclamaciones y llama a `reapplyRouteStyles()`, que devuelve el mando a la ruta activa: lo que ella usa se queda, lo que ya no reclama nadie vuelve a aparcarse. Cerrar un consumidor nunca le retira el recurso a los demás, y abrir el detalle dentro de su propia ruta no deja a la lista sin sus hojas al cerrarlo.
+
+`tools/detail-styles-ownership-contract.mjs` lo comprueba sin leer listas de hojas: descubre las entradas externas reales en el árbol construido y compara la **huella completa** del panel —caja, color, fondo, radio, tipografía, relleno, borde y distribución de cada nodo— contra el mismo registro abierto en frío desde su propia ruta.
+
 Las entradas, callbacks, contratos y ubicaciones para intervenir están definidos en [UI_MODAL_SYSTEM.md](UI_MODAL_SYSTEM.md). Se retiraron los puentes de apertura de Home/Facturas/Incidencias y los adaptadores de detalle de lectura de Clientes/Usuarios. Los adaptadores contextuales de identidad visual tienen otra responsabilidad y se conservan.
 
 ## Contrato de estadísticas

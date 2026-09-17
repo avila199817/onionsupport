@@ -464,20 +464,23 @@ pass("1 · versiones y zona canónica declaradas");
     "src/css/views/agenda/index.css",
     "src/css/compositions/private-create-modal.css",
   ].map(leer).join("\n");
-  /* El alta compone su modificador, asi que se reproduce su regla sobre los
-     tipos que realmente invoca; el detalle lo escribe literal. */
-  assert.match(alta, /kind === "warning" \? "agenda-alert--warning"/u,
-    "el alta mapea el aviso al modificador que existe");
+  assert.doesNotMatch(leer("src/css/views/agenda/index.css"), /\.inc-create-alert\.(?:is-|agenda-alert--)/u,
+    "la hoja de Agenda no declara tonos para un componente compartido");
+  /* Agenda ya no declara tonos propios: emite `is-<tipo>` y el tono lo pone
+     la composicion compartida, dentro de su capa. Se comprueba que no vuelve
+     a aparecer un mecanismo paralelo de tono para este componente. */
+  assert.match(alta, /class="inc-create-alert is-\$\{attr\(kind\)\}"/u,
+    "el alta emite el modificador compartido, no uno propio");
   const modificadores = new Set();
-  for (const m of alta.matchAll(/renderAlert\(\s*"(\w+)"/gu)) {
-    modificadores.add(m[1] === "warning" ? "agenda-alert--warning" : `is-${m[1]}`);
-  }
+  for (const m of alta.matchAll(/renderAlert\(\s*"(\w+)"/gu)) modificadores.add(`is-${m[1]}`);
   for (const m of detalle.matchAll(/class="inc-create-alert ([^"$]*)"/gu)) {
     for (const clase of m[1].split(/\s+/)) if (clase) modificadores.add(clase);
   }
   assert.ok(modificadores.size >= 2, "se han encontrado los tonos que Agenda pinta");
-  assert.ok(!modificadores.has("is-warning"),
-    "el aviso no usa `is-warning`: esa combinacion no existe en ninguna hoja");
+  for (const clase of modificadores) {
+    assert.match(clase, /^is-[a-z]+$/u,
+      `el tono de una alerta compartida se nombra \`is-*\` y lo declara la composicion, no la vista (${clase})`);
+  }
   const sinHoja = [...modificadores].filter(
     (clase) => !new RegExp(`\\.${clase.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?![\\w-])`, "u").test(hojasCargadas));
   assert.deepEqual(sinHoja, [],

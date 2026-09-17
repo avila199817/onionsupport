@@ -1740,7 +1740,6 @@
       border-color: CanvasText;
     }
   }
-}
 
 /* =========================================================
    SELECTOR DE USUARIO DEL ALTA · presentación propia de /agenda
@@ -1929,15 +1928,6 @@
   gap: var(--space-xs);
 }
 
-/* El aviso comparte la caja de `.inc-create-alert` --que sí es compartida-- y
-   añade SU tono: sin esto, un aviso de fecha pasada salía en azul informativo
-   porque la combinación `is-warning` no existía en ninguna hoja. */
-.inc-create-alert.agenda-alert--warning {
-  border-color: var(--border-warning, var(--border-default));
-  background: var(--warning-bg, var(--surface-2, var(--panel-bg)));
-  color: var(--warning-strong, var(--text-strong));
-}
-
 .agenda-alert-icon {
   inline-size: 18px;
   block-size: 18px;
@@ -1966,3 +1956,4 @@
   display: grid;
   gap: var(--space-xs);
 }
+}  /* @layer views */

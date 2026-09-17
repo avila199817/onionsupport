@@ -140,7 +140,7 @@ function renderEdit(vm = {}) {
 
   return `
     ${vm.pastWarning ? `
-      <div class="inc-create-alert agenda-alert--warning" role="status">
+      <div class="inc-create-alert is-warning" role="status">
         <span class="agenda-alert-icon" aria-hidden="true"></span>
         <div class="agenda-alert-copy">
           <strong>La fecha y hora ya han pasado.</strong>

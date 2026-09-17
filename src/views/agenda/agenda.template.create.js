@@ -81,17 +81,15 @@ function renderFieldError(message = "") {
   `<strong>` + `<span>` sueltos, el título se metía en los 34px del icono. Se
   emiten los dos huecos, como hace el alta de Incidencias.
 
-  Y el tono: para `.inc-create-alert` sólo existen `is-success` e `is-error`.
-  `is-warning` no está en ninguna hoja, así que un aviso pintaba en azul
-  informativo. El aviso usa el modificador que SÍ existe y que ya emite el
-  detalle, `agenda-alert--warning`, declarado en la hoja de Agenda.
+  El tono lo decide la composición compartida: `is-success`, `is-error` e
+  `is-warning` viven las tres en `private-create-modal.css`. Agenda no
+  declara tonos propios para un componente que no es suyo.
 */
 function renderAlert(kind, title, message) {
   const text = cleanText(message, "");
   if (!text) return "";
-  const modifier = kind === "warning" ? "agenda-alert--warning" : `is-${attr(kind)}`;
   return `
-    <div class="inc-create-alert ${modifier}" role="${kind === "error" ? "alert" : "status"}">
+    <div class="inc-create-alert is-${attr(kind)}" role="${kind === "error" ? "alert" : "status"}">
       <span class="agenda-alert-icon" aria-hidden="true"></span>
       <div class="agenda-alert-copy">
         <strong>${escapeHtml(title)}</strong>

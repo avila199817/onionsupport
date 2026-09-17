@@ -865,12 +865,12 @@ try {
     await abrirEdicion();
     await page.locator('#agenda-detail-modal [data-field="horaLocal"]').fill("09:00");
     await page.locator('[data-detail-action="detail-save"]').click();
-    await page.waitForFunction(() => Boolean(document.querySelector(".agenda-alert--warning")));
+    await page.waitForFunction(() => Boolean(document.querySelector(".inc-create-alert.is-warning")));
     assert.equal(api.state.calls.patch, 1, "una sola petición");
     assert.equal(api.state.patchPayloads[0].confirmarPasado, undefined, "la primera no confirma el pasado");
 
     /* 4 · el aviso aparece */
-    assert.equal(await page.locator(".agenda-alert--warning").isVisible(), true, "aparece el aviso de fecha pasada");
+    assert.equal(await page.locator(".inc-create-alert.is-warning").isVisible(), true, "aparece el aviso de fecha pasada");
 
     /* 5 · rechazar NO produce una segunda petición */
     await page.locator('[data-detail-action="detail-edit-cancel"]').click();
@@ -882,7 +882,7 @@ try {
     await page.locator('[data-agenda-detail-form="true"]').waitFor({ state: "visible" });
     await page.locator('#agenda-detail-modal [data-field="horaLocal"]').fill("09:15");
     await page.locator('[data-detail-action="detail-save"]').click();
-    await page.waitForFunction(() => Boolean(document.querySelector(".agenda-alert--warning")));
+    await page.waitForFunction(() => Boolean(document.querySelector(".inc-create-alert.is-warning")));
     assert.equal(api.state.calls.patch, 2, "el reintento manda una segunda petición");
     await page.locator('[data-detail-action="detail-save"]').click();
     await page.waitForFunction(() => !document.querySelector('[data-agenda-detail-form="true"]'));
@@ -943,7 +943,7 @@ try {
     const alerta = await page.evaluate(() => {
       const host = document.querySelector("#agenda-create-modal .inc-create-body") || document.body;
       const div = document.createElement("div");
-      div.className = "inc-create-alert agenda-alert--warning";
+      div.className = "inc-create-alert is-warning";
       div.innerHTML = '<span class="agenda-alert-icon"></span><div class="agenda-alert-copy"><strong>T</strong><p>C</p></div>';
       host.appendChild(div);
       const base = document.createElement("div");

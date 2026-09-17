@@ -63,6 +63,8 @@ const privateSpaRoutes = [
   "/incidencias",
   "/incidencias/ci-ticket",
   "/tickets/INC-CI-000001",
+  "/agenda",
+  "/agenda/ci-probe",
   "/facturas",
   "/clientes",
   "/usuarios",

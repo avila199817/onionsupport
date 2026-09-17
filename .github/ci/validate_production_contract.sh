@@ -109,6 +109,16 @@ if user_agent_directives != ["user-agent: *"]:
         "no pueden omitir las reglas privadas del grupo global.",
     )
 
+# Este conjunto se compara EXACTO más abajo, y "Trusted PR integrity" ejecuta la
+# copia de main de este validador contra el árbol candidato. Consecuencia: una
+# directiva nueva no puede entrar en la misma PR que la añade aquí --la puerta la
+# rechaza hasta que main conozca el conjunto nuevo--, así que hace falta un paso
+# previo que enseñe el conjunto antes de tocar robots.txt.
+#
+# Por eso /agenda no se lista: la ruta ya sale del índice por su propia respuesta
+# (/agenda* envía X-Robots-Tag: noindex, nofollow, la señal fuerte; un Disallow
+# sólo impide el rastreo). Decisión del propietario, no un olvido: si algún día se
+# añade, primero el conjunto, después el archivo.
 required_robots = {
     "User-agent: *",
     "Allow: /",
@@ -402,6 +412,7 @@ private_routes = [
     "/@*",
     "/incidencias*",
     "/tickets*",
+    "/agenda*",
     "/facturas*",
     "/clientes*",
     "/usuarios*",
@@ -413,6 +424,12 @@ private_routes = [
 if not expanded:
     private_routes.insert(0, "/login")
 
+PRIVATE_CACHE_POLICY = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
 for route_name in private_routes:
     route = routes.get(route_name)
     if not route:
@@ -420,9 +437,17 @@ for route_name in private_routes:
         continue
     if route.get("rewrite") != "/index.html":
         error(config_path, f"{route_name} debe reescribir a /index.html.")
-    xrobots = str(route.get("headers", {}).get("X-Robots-Tag", "")).lower()
+    headers = route.get("headers", {})
+    xrobots = str(headers.get("X-Robots-Tag", "")).lower()
     if "noindex" not in xrobots or "nofollow" not in xrobots:
         error(config_path, f"{route_name} debe enviar X-Robots-Tag: noindex, nofollow.")
+    for header, value in PRIVATE_CACHE_POLICY.items():
+        if str(headers.get(header, "")) != value:
+            error(
+                config_path,
+                f"{route_name} debe enviar {header}: {value}; una ruta privada no puede "
+                "quedarse sin la política de no almacenamiento de sus hermanas.",
+            )
 
 csp = str(config.get("globalHeaders", {}).get("Content-Security-Policy", ""))
 if api not in csp:

@@ -24,6 +24,7 @@ const publicPathHygiene = await readFile(
 const staticConfig = JSON.parse(
   await readFile(resolve(ROOT, "staticwebapp.config.json"), "utf8")
 );
+const sitemap = await readFile(resolve(ROOT, "sitemap.xml"), "utf8");
 
 assert.equal(hasOneYearImmutableCache("public, max-age=31536000, immutable"), true);
 for (const unsafe of [
@@ -72,6 +73,91 @@ assert.match(
   "Ticket deep links must remain outside the index."
 );
 
+/* =========================================================
+   Onion Support · Agenda se navega EN DIRECTO desde un correo
+
+   El backend manda al destinatario de una cita a `${APP_URL}/agenda?citaId=…`.
+   Esa URL no la abre el router: la abre el navegador contra el host, en frío.
+   Static Web Apps elige la ruta por el PATHNAME, así que la query no participa
+   y `/agenda` tenía que estar declarada para que la petición llegara siquiera
+   a la SPA. No lo estaba --era la única vista privada del registro sin ruta--
+   y el host respondía con su 404 nativo: el enlace del correo moría en Azure.
+
+   Se declara la ruta, no un fallback. Es la diferencia entre servir el shell
+   donde hay vista y convertir cualquier URL inventada en un 200.
+========================================================= */
+
+const PRIVATE_SPA_POLICY = {
+  "Cache-Control": "no-cache, no-store, must-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+  "X-Robots-Tag": "noindex, nofollow",
+};
+
+const agendaRoute = routeMap.get("/agenda*");
+assert.ok(
+  agendaRoute,
+  "Agenda deep links must be declared: without /agenda* the host answers /agenda?citaId=… " +
+    "with Azure's native 404 and the appointment mail leads nowhere."
+);
+assert.equal(
+  agendaRoute.rewrite,
+  "/index.html",
+  "Agenda deep links must resolve to the SPA shell, byte for byte."
+);
+for (const [header, value] of Object.entries(PRIVATE_SPA_POLICY)) {
+  assert.equal(
+    agendaRoute.headers?.[header],
+    value,
+    `Agenda is private: it must send ${header}: ${value}, like every other private route.`
+  );
+}
+
+/* La política no se declara aparte para Agenda: es la de sus hermanas, literal. */
+for (const sibling of ["/dashboard*", "/incidencias*", "/tickets*", "/facturas*", "/ajustes*"]) {
+  assert.deepEqual(
+    routeMap.get(sibling)?.headers,
+    agendaRoute.headers,
+    `${sibling} and /agenda* must share one private policy, not two that drift apart.`
+  );
+}
+
+/* Declarar una ruta no puede degradar en fallback global. */
+assert.equal(
+  routeMap.has("/*"),
+  false,
+  "A global wildcard would serve the shell for every unknown URL: soft-404 by construction."
+);
+
+/* Y una URL que no pertenece a ninguna ruta declarada sigue sin shell que servir. */
+const spaPatterns = [...routeMap.values()]
+  .filter((entry) => entry.rewrite === "/index.html")
+  .map((entry) => entry.route);
+const matchesSpaRoute = (path) =>
+  spaPatterns.some((pattern) =>
+    pattern.endsWith("*") ? path.startsWith(pattern.slice(0, -1)) : path === pattern
+  );
+for (const unknown of [
+  "/__onion-not-found__/soft-404-probe",
+  "/__onion-not-found__/nested/soft-404-probe",
+  "/__onion-not-found__-single",
+  "/citas",
+  "/calendario",
+]) {
+  assert.equal(
+    matchesSpaRoute(unknown),
+    false,
+    `${unknown} belongs to no declared route and must stay a real 404, not a 200 with the shell.`
+  );
+}
+
+/* Agenda es privada: no se publica en el sitemap ni recibe canonical público. */
+assert.doesNotMatch(
+  sitemap,
+  /\/agenda/u,
+  "A private view has nothing to do in the public sitemap."
+);
+
 for (const token of [
   'redirect: "manual"',
   "response.url !== url.href",
@@ -84,6 +170,8 @@ for (const token of [
   '["/login.html", "/login"]',
   '"/@ci-probe/incidencias/ci-ticket"',
   '"/tickets/INC-CI-000001"',
+  '"/agenda"',
+  '"/agenda/ci-probe"',
   '"/activate-account/ci-verifier"',
   '"/password-reset/confirm/ci-verifier"',
   '"/reset-password/confirm/ci-verifier"',
@@ -131,6 +219,8 @@ for (const token of [
   "'unsafe-eval'",
   'api}" != "https://api.onionsupport.com"',
   '"/@ci-probe/incidencias/ci-ticket"',
+  '"/agenda"',
+  '"/agenda/ci-probe"',
   'assert_redirect "/index.html" "/"',
   'assert_redirect "/login.html" "/login"',
 ]) {
@@ -247,4 +337,5 @@ console.log("- generic unknown URLs are proven real HTTP 404 responses");
 console.log("- obsolete language-prefixed paths are rejected across the tracked tree");
 console.log("- fingerprinted and private cache policies resist conflicting directives");
 console.log("- deep private SPA routes remain exact, no-store and noindex");
+console.log("- Agenda deep links are a declared private route, never a global fallback");
 console.log("- production verification classifies skew from immutable deploy identities, failing closed");

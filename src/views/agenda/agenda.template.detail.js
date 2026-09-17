@@ -39,9 +39,12 @@ export const AGENDA_DETAIL_ACTIONS = Object.freeze({
   EDIT: "detail-edit",
   EDIT_CANCEL: "detail-edit-cancel",
   SAVE: "detail-save",
-  CANCEL_CITA: "detail-cancel-cita",
-  CANCEL_CONFIRM: "detail-cancel-confirm",
-  CANCEL_DISMISS: "detail-cancel-dismiss",
+  /* Producto la llama «Eliminar cita»; el backend no tiene DELETE y la
+     operación real es la cancelación contractual. La confirmación la pone
+     `openModalConfirmation`, no una caja propia dentro del cuerpo. */
+  DELETE_CITA: "detail-eliminar",
+  DELETE_CONFIRM: "detail-eliminar-confirmar",
+  DELETE_DISMISS: "detail-eliminar-volver",
   RETRY: "detail-retry",
 });
 
@@ -100,6 +103,22 @@ function renderNotificationRow(cita = {}) {
    LECTURA
 ========================================================= */
 
+/* Un error DE OPERACIÓN no puede tragarse el cuerpo: si lo sustituye por el
+   panel de error, el borrador de la edición desaparece de la vista y el único
+   camino de vuelta --«Reintentar»-- lo recarga del servidor. Se pinta en línea,
+   sobre lo que el usuario estaba haciendo. El panel completo queda para el
+   error de CARGA, que es el único en el que no hay nada que conservar. */
+function renderOperationError(vm = {}) {
+  if (!vm.error) return "";
+  return `
+    <div class="inc-create-alert is-error" role="alert" data-detail-error="true">
+      <span class="agenda-alert-icon" aria-hidden="true"></span>
+      <div class="agenda-alert-copy">
+        <p>${escapeHtml(vm.error)}</p>
+      </div>
+    </div>`;
+}
+
 function renderRead(vm = {}) {
   const cita = vm.cita;
   const zoneNote = browserZoneDiffers(cita.zona)
@@ -107,6 +126,7 @@ function renderRead(vm = {}) {
     : "";
 
   return `
+    ${renderOperationError(vm)}
     <dl class="agenda-detail-grid">
       ${row("Asunto", cita.asunto, { always: true })}
       ${row("Día", longDateLabelFromKey(cita.fechaLocal), { always: true })}
@@ -139,6 +159,15 @@ function renderEdit(vm = {}) {
   const form = vm.form;
 
   return `
+    ${renderOperationError(vm)}
+    ${vm.conflict ? `
+      <div class="inc-create-alert is-warning" role="status" data-detail-conflict="true">
+        <span class="agenda-alert-icon" aria-hidden="true"></span>
+        <div class="agenda-alert-copy">
+          <strong>La cita ha cambiado mientras la estabas editando.</strong>
+          <p>${escapeHtml(vm.conflict)}</p>
+        </div>
+      </div>` : ""}
     ${vm.pastWarning ? `
       <div class="inc-create-alert is-warning" role="status">
         <span class="agenda-alert-icon" aria-hidden="true"></span>
@@ -160,30 +189,6 @@ function renderEdit(vm = {}) {
 }
 
 /* =========================================================
-   CONFIRMACIÓN DE CANCELACIÓN
-========================================================= */
-
-function renderCancelConfirm(vm = {}) {
-  if (!vm.cancelling) return "";
-
-  return `
-    <div class="agenda-detail-confirm" role="group" aria-label="Confirmar cancelación">
-      <strong>¿Cancelar esta cita?</strong>
-      <p>El usuario recibirá un aviso de cancelación. La cita se conserva en el historial con su motivo.</p>
-      <label class="inc-create-field">
-        <span class="inc-create-label">Motivo (opcional)</span>
-        <textarea class="inc-create-textarea" data-field="motivo" name="motivo" rows="2" maxlength="300" ${disabledAttrs(vm.saving)}>${escapeHtml(vm.form.motivo || "")}</textarea>
-      </label>
-      <div class="agenda-detail-confirm-actions">
-        <button type="button" class="agenda-create-cancel" data-detail-action="${AGENDA_DETAIL_ACTIONS.CANCEL_DISMISS}" ${disabledAttrs(vm.saving)}>Volver</button>
-        <button type="button" class="agenda-detail-danger" data-detail-action="${AGENDA_DETAIL_ACTIONS.CANCEL_CONFIRM}" ${disabledAttrs(vm.saving)}>
-          ${vm.saving ? `<span class="inc-create-spinner" aria-hidden="true"></span><span>Cancelando...</span>` : `<span>Cancelar la cita</span>`}
-        </button>
-      </div>
-    </div>`;
-}
-
-/* =========================================================
    VIEW MODEL
 ========================================================= */
 
@@ -198,7 +203,6 @@ export function buildDetailVm(input = {}) {
     error: cleanText(source.error, ""),
     saving: source.saving === true,
     editing: source.editing === true,
-    cancelling: source.cancelling === true,
     admin: source.admin === true,
     errors: source.errors && typeof source.errors === "object" ? source.errors : {},
     cita: cita
@@ -216,6 +220,7 @@ export function buildDetailVm(input = {}) {
       confirmarPasado: form.confirmarPasado === true,
     },
     pastWarning: cleanText(source.pastWarning, ""),
+    conflict: cleanText(source.conflict, ""),
   };
 }
 
@@ -231,10 +236,13 @@ export function renderAgendaDetailModal(input = {}) {
   const activa = Boolean(cita && cita.estado !== "cancelada");
   const puedeGestionar = vm.admin && activa;
 
+  /* Sin cita cargada no hay nada que conservar: ahí sí manda el panel. */
+  const errorDeCarga = Boolean(vm.error) && !cita;
+
   let body = "";
   if (vm.loading) {
     body = renderModalState({ kind: "loading", title: "Cargando la cita", message: "Un momento." });
-  } else if (vm.error) {
+  } else if (errorDeCarga) {
     body = renderModalState({
       kind: "error",
       title: "No se ha podido abrir la cita",
@@ -249,10 +257,10 @@ export function renderAgendaDetailModal(input = {}) {
   } else if (!cita) {
     body = renderModalState({ kind: "empty", title: "No se ha encontrado la cita", message: "" });
   } else {
-    body = `${vm.editing ? renderEdit(vm) : renderRead(vm)}${renderCancelConfirm(vm)}`;
+    body = vm.editing ? renderEdit(vm) : renderRead(vm);
   }
 
-  const footer = !cita || vm.loading || vm.error
+  const footer = !cita || vm.loading || errorDeCarga
     ? ""
     : vm.editing
       ? `
@@ -268,10 +276,10 @@ export function renderAgendaDetailModal(input = {}) {
       : puedeGestionar
         ? `
         <div class="agenda-create-actions inc-create-actions">
-          <span class="inc-create-actions-note">Editar o cancelar avisa al usuario por correo.</span>
+          <span class="inc-create-actions-note">Editar o eliminar avisa al usuario por correo.</span>
           <span class="agenda-create-actions-group">
-            <button type="button" class="agenda-detail-danger" data-detail-action="${AGENDA_DETAIL_ACTIONS.CANCEL_CITA}" ${disabledAttrs(vm.saving || vm.cancelling)}>Cancelar cita</button>
-            <button type="button" class="inc-create-submit" data-detail-action="${AGENDA_DETAIL_ACTIONS.EDIT}" ${disabledAttrs(vm.saving || vm.cancelling)}>Editar</button>
+            <button type="button" class="agenda-detail-danger" data-detail-action="${AGENDA_DETAIL_ACTIONS.DELETE_CITA}" ${disabledAttrs(vm.saving)}>Eliminar cita</button>
+            <button type="button" class="inc-create-submit" data-detail-action="${AGENDA_DETAIL_ACTIONS.EDIT}" ${disabledAttrs(vm.saving)}>Editar</button>
           </span>
         </div>`
         : "";

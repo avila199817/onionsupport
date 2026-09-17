@@ -10,6 +10,7 @@ import { BOOLEAN_POLICIES, parseBoolean } from "../../core/booleans.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, currencyFormatter, dateFormatter } from "../../core/format.js";
 import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
+import { statusTone } from "../../core/status-tone.js";
 /* =========================================================
    Onion Support - Clientes Detail Template
    Archivo: /src/views/clientes/clientes.template.modal.js
@@ -2038,7 +2039,8 @@ function buildVm(
 
 function renderChip(
   label = "",
-  modifier = "neutral"
+  modifier = "neutral",
+  tone = ""
 ) {
   const safeModifier =
     normalizeClassModifier(
@@ -2047,7 +2049,8 @@ function renderChip(
     "neutral";
 
   return (
-    `<span class="clientes-modal-chip clientes-modal-chip--${attr(safeModifier)}">` +
+    `<span class="clientes-modal-chip clientes-modal-chip--${attr(safeModifier)}"` +
+    `${tone ? ` data-status-tone="${attr(tone)}"` : ""}>` +
     `${escapeHtml(label)}` +
     `</span>`
   );
@@ -3620,7 +3623,8 @@ export function renderClientesDetailModal(
 
             ${renderChip(
               statusLabel(status),
-              `status-${statusClass(status)}`
+              `status-${statusClass(status)}`,
+              statusTone(statusClass(status))
             )}
 
             ${renderChip(

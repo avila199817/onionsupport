@@ -49,6 +49,7 @@ import {
 import { isObject, safeObject, firstNonEmpty } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
 import { slugKey } from "../../core/slug-key.js";
+import { statusTone } from "../../core/status-tone.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 import { CURRENCY_POLICIES, DATE_PRESETS, currencyCode, currencyFormatter, dateFormatter } from "../../core/format.js";
 import { AMOUNT_POLICIES, parseAmount } from "../../core/amounts.js";
@@ -2392,9 +2393,13 @@ function renderHeaderActions(vm = {}) {
   `;
 }
 
+/* `tone` sólo lo pasan los chips de ESTADO. Prioridad y categoría no son
+   estados de dominio: comparten paleta pero no vocabulario, y se siguen
+   pintando por su clase. */
 function renderChip(
   label = "",
-  modifier = "neutral"
+  modifier = "neutral",
+  tone = ""
 ) {
   const safeLabel =
     cleanText(
@@ -2411,7 +2416,8 @@ function renderChip(
   return `
     <span
       class="incidencias-modal-chip ui-detail-modal-chip incidencias-modal-chip--${attr(safeModifier)} ui-detail-modal-chip--${attr(safeModifier)}"
-      title="${attr(safeLabel)}"
+      title="${attr(safeLabel)}"${tone ? `
+      data-status-tone="${attr(tone)}"` : ""}
     >${escapeHtml(safeLabel)}</span>
   `;
 }
@@ -4308,7 +4314,8 @@ export function renderIncidenciasDetailModal(
 
           ${renderChip(
             incidenciaStatusLabel(status),
-            `status-${statusClass(status)}`
+            `status-${statusClass(status)}`,
+            statusTone(status)
           )}
 
           ${renderChip(

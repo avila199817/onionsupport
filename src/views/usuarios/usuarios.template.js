@@ -32,6 +32,7 @@ import { slugKey } from "../../core/slug-key.js";
 import { coercedNumber } from "../../core/numbers.js";
 import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 import { DATE_PRESETS, dateFormatter, formatDecimal } from "../../core/format.js";
+import { statusTone } from "../../core/status-tone.js";
 
 
 const USUARIOS_TEMPLATE_VERSION =
@@ -248,7 +249,7 @@ function renderAvatar(item = {}) {
 }
 function renderStatusChip(item = {}) {
   const status = getStatus(item);
-  return `<span class="usuarios-chip usuarios-chip--${attr(status)}"><span class="usuarios-chip-dot" aria-hidden="true"></span><span>${escapeHtml(statusLabel(item))}</span></span>`;
+  return `<span class="usuarios-chip usuarios-chip--${attr(status)}" data-status-tone="${attr(statusTone(status))}"><span class="usuarios-chip-dot" aria-hidden="true"></span><span>${escapeHtml(statusLabel(item))}</span></span>`;
 }
 function renderRow(item = {}, state = {}) {
   const id = getId(item);

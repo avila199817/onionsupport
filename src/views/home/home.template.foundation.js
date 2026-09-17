@@ -136,16 +136,6 @@ export function classNames(...values) {
     .join(" ");
 }
 
-export function statusKey(value = "") {
-  const key = homeLabelKey(value);
-
-  if (["closed", "resolved", "solved", "paid"].includes(key)) return "success";
-  if (["pending", "unpaid", "pending_payment", "partial", "draft"].includes(key)) return "warning";
-  if (["overdue", "cancelled", "canceled"].includes(key)) return "error";
-  if (["open", "opened", "new", "in_progress", "progress", "processing", "issued"].includes(key)) return "info";
-  return "neutral";
-}
-
 /* Un IDENTIFICADOR no es una etiqueta. Home resume varios dominios y recibe dos
  * clases de valor: códigos del backend (`pending_payment`, `in_progress`) y texto
  * ya redactado (home.template.activity.js:255 admite `source.text`). Mezclarlos

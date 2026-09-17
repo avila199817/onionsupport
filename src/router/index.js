@@ -41,10 +41,23 @@ import {
 
 import * as Routes from "./routes.js";
 import RouteStyles from "./styles.js";
-import {
-  ensurePrivateRuntimeUI,
-  destroyPrivateRuntimeUI,
-} from "../features/private-runtime-ui/index.js";
+/*
+ * El chrome privado es, por contrato de su propio módulo, runtime que las rutas
+ * públicas no descargan. Un import estático lo metía en el arranque público:
+ * la puerta se carga bajo demanda y sólo tras el guard de una ruta privada.
+ * destroy() sigue sin provocar imports tardíos: si nunca se cargó no hay nada
+ * que limpiar, y si se cargó la referencia ya está resuelta.
+ */
+let PrivateRuntimeUIModule = null;
+
+async function loadPrivateRuntimeUI() {
+  if (!PrivateRuntimeUIModule) {
+    PrivateRuntimeUIModule = await import(
+      "../features/private-runtime-ui/index.js"
+    );
+  }
+  return PrivateRuntimeUIModule;
+}
 
 export const ROUTER_VERSION =
   "router.minimal.v16-private-runtime-after-guard";
@@ -2149,14 +2162,21 @@ async function syncPrivateRuntimeForRoute(
 ) {
   if (!route || route.public === true) {
     if (!isAuthenticated()) {
-      destroyPrivateRuntimeUI();
+      PrivateRuntimeUIModule?.destroyPrivateRuntimeUI?.();
     }
     return true;
   }
 
   if (!isAuthenticated()) return false;
 
-  return ensurePrivateRuntimeUI({
+  let privateRuntimeUI;
+  try {
+    privateRuntimeUI = await loadPrivateRuntimeUI();
+  } catch {
+    return false;
+  }
+
+  return privateRuntimeUI.ensurePrivateRuntimeUI({
     AppCore,
     Auth: getAuth(),
     Router,

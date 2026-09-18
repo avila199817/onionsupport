@@ -23,6 +23,7 @@
 ========================================================= */
 
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
   clickInPage, launchBrowser, openSpaSession, serveBuiltApp, syntheticWorld, untilTrue,
@@ -140,17 +141,30 @@ try {
           }
           reenvios.push({ id, method, body });
           await espera(140);
-          await respond({
-            ok: true,
-            success: true,
-            code: "ACTIVATION_LINK_RESENT",
-            message: "Se ha enviado un nuevo enlace de activación.",
-            userId: id,
-            email: "carlos@directorio.test",
-            expiresAt: "2026-09-19T00:00:00.000Z",
-            activationUrl: "https://activation.invalid/SECRET-QUE-NUNCA-DEBE-LLEGAR-AL-DOM",
-            mail: { sent: true, status: "sent" },
-          });
+          const delivery = body?.delivery === "manual" ? "manual" : "email";
+          await respond(delivery === "manual"
+            ? {
+                ok: true,
+                success: true,
+                code: "ACTIVATION_LINK_GENERATED_MANUAL",
+                message: "Se ha generado un nuevo enlace de activación para entrega manual.",
+                userId: id,
+                email: "carlos@directorio.test",
+                expiresAt: "2026-09-19T00:00:00.000Z",
+                activationUrl: "https://onionsupport.com/activate-account/SECRET-MANUAL-FIXTURE",
+                mail: { sent: false, status: "manual" },
+              }
+            : {
+                ok: true,
+                success: true,
+                code: "ACTIVATION_LINK_RESENT",
+                message: "Se ha enviado un nuevo enlace de activación.",
+                userId: id,
+                email: "carlos@directorio.test",
+                expiresAt: "2026-09-19T00:00:00.000Z",
+                activationUrl: "https://activation.invalid/SECRET-QUE-NUNCA-DEBE-LLEGAR-AL-DOM",
+                mail: { sent: true, status: "sent" },
+              });
         },
       }
     );
@@ -232,21 +246,53 @@ try {
       { arg: selectorReenvio, timeout: 10000, message: "El chip Pendiente no terminó el reenvío" });
 
     assert.equal(reenvios.length, 1, "Confirmar dispara exactamente un reenvío");
-    assert.deepEqual(reenvios[0], { id: "u-dir-2", method: "POST", body: {} },
-      "El comando usa POST /api/users/:id/resend-activation con body vacío");
+    assert.deepEqual(reenvios[0], { id: "u-dir-2", method: "POST", body: { delivery: "email" } },
+      "El modo automático usa POST /api/users/:id/resend-activation con delivery=email");
     assert.equal(await page.locator("[data-usuarios-resend-confirm-dialog='true']").count(), 0,
       "La confirmación se desmonta después de aceptar");
     assert.ok((await pantalla(page)).includes("Nuevo enlace de activación enviado a carlos@directorio.test."),
       "El administrador recibe confirmación visible de entrega");
     assert.equal((await pantalla(page)).includes("SECRET-QUE-NUNCA-DEBE-LLEGAR-AL-DOM"), false,
-      "activationUrl no cruza la frontera API ni aparece en el DOM");
+      "el modo email no filtra activationUrl al DOM aunque el backend lo incluyera");
+
+    /* 4b · El mismo Pendiente permite generar entrega manual y descarga TXT. */
+    await opener.click();
+    await page.waitForSelector("[data-usuarios-resend-confirm-dialog='true']", { timeout: 15000 });
+    const manual = page.locator("[data-usuarios-activation-delivery='manual']");
+    await manual.check();
+    assert.equal(await manual.isChecked(), true, "El admin puede elegir entrega manual");
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.locator("[data-usuarios-resend-confirm-action='confirm']").click();
+    const download = await downloadPromise;
+    await untilTrue(page, (sel) => document.querySelector(sel)?.getAttribute("aria-busy") === "false",
+      { arg: selectorReenvio, timeout: 10000, message: "El chip Pendiente no terminó la generación manual" });
+
+    assert.equal(reenvios.length, 2, "Manual dispara una segunda rotación explícita");
+    assert.deepEqual(reenvios[1], { id: "u-dir-2", method: "POST", body: { delivery: "manual" } },
+      "El modo manual usa el mismo endpoint con delivery=manual");
+    assert.equal(download.suggestedFilename(), "activacion-manual-u-dir-2.txt",
+      "La entrega manual descarga un TXT identificable");
+
+    const downloadPath = await download.path();
+    assert.ok(downloadPath, "Playwright debe materializar la plantilla descargada");
+    const manualText = await readFile(downloadPath, "utf8");
+    assert.ok(manualText.includes("Para: carlos@directorio.test"), "El TXT indica el destinatario");
+    assert.ok(manualText.includes("Asunto: Activación de tu cuenta · Onion Support"), "El TXT incluye el asunto");
+    assert.ok(manualText.includes("https://onionsupport.com/activate-account/SECRET-MANUAL-FIXTURE"),
+      "El TXT contiene el único enlace manual vigente");
+    assert.ok(manualText.includes("24 horas"), "El TXT explica la caducidad");
+    assert.ok((await pantalla(page)).includes("Se ha descargado la plantilla manual para carlos@directorio.test."),
+      "El administrador recibe confirmación visible de la descarga");
+    assert.equal((await pantalla(page)).includes("SECRET-MANUAL-FIXTURE"), false,
+      "El token manual no se pinta en el DOM; sólo viaja al fichero solicitado");
 
     await opener.click();
     await page.waitForSelector("[data-usuarios-resend-confirm-dialog='true']", { timeout: 15000 });
     await page.locator("[data-usuarios-resend-confirm-action='cancel']").click();
     await page.waitForSelector("[data-usuarios-resend-confirm-dialog='true']", { state: "detached", timeout: 5000 });
-    assert.equal(reenvios.length, 1, "Cancelar no dispara un segundo reenvío");
-    paso("4 · Pendiente → confirmación accesible → POST único → feedback, sin filtrar activationUrl");
+    assert.equal(reenvios.length, 2, "Cancelar no dispara otra rotación");
+    paso("4 · Pendiente → email automático o TXT manual → feedback, sin token en DOM");
 
     /* 5 · Orden: la vista declara su sentido y lo cambia. */
     const sentido = () => page.evaluate(() => document.querySelector("[data-usuarios-action='sort-toggle']")?.getAttribute("data-sort-order")

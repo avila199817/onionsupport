@@ -60,8 +60,9 @@ const BASELINE = Object.freeze({
   "src/views/incidencias": 171,
   "src/views/server": 127,
   // 160 -> 161 (2026-09-18): resendUsuarioActivationRequest. El listado de
-  // Usuarios necesita un único comando explícito para rotar y reenviar la
-  // activación pendiente sin exponer activationUrl ni duplicar el cliente HTTP.
+  // Usuarios necesita un único comando explícito para rotar una activación:
+  // email automático por defecto o disclosure efímero del activationUrl sólo
+  // cuando un admin solicita entrega manual, sin duplicar el cliente HTTP.
   "src/views/usuarios": 161,
   "src/views/whatsapp": 9,
 });

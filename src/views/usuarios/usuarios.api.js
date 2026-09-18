@@ -2,12 +2,13 @@
    Onion Support - Usuarios API
    Archivo: /src/views/usuarios/usuarios.api.js
 
-   PRODUCTIVO · BACKEND CONTRACT REAL · HTTP ÚNICO · V4
+   PRODUCTIVO · BACKEND CONTRACT REAL · HTTP ÚNICO · V5
 
    Backend productivo:
    - GET    /api/users
    - GET    /api/users/:id
    - POST   /api/users/create
+   - POST   /api/users/:id/resend-activation
    - PUT    /api/users/:id
    - PATCH  /api/users/:id
    - GET    /api/users/stats
@@ -52,7 +53,7 @@ import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 ========================================================= */
 
 export const USUARIOS_API_VERSION =
-  "usuarios.api.backend-contract.v4.canonical-user-state";
+  "usuarios.api.backend-contract.v5.activation-resend";
 
 export const USUARIOS_ENDPOINT = "/api/users";
 export const USUARIOS_CREATE_ENDPOINT = "/api/users/create";
@@ -67,6 +68,7 @@ export const USUARIOS_TIMEOUT = 15_000;
 export const USUARIOS_LIST_TIMEOUT = 20_000;
 export const USUARIOS_DETAIL_TIMEOUT = 18_000;
 export const USUARIOS_CREATE_TIMEOUT = 30_000;
+const USUARIOS_RESEND_ACTIVATION_TIMEOUT = 30_000;
 export const USUARIOS_UPDATE_TIMEOUT = 30_000;
 export const USUARIOS_DELETE_TIMEOUT = 30_000;
 
@@ -4666,6 +4668,113 @@ export async function createUsuarioRequest(
   return detail;
 }
 
+export async function resendUsuarioActivationRequest(
+  id = "",
+  options = {}
+) {
+  const userId =
+    normalizeUsuarioId(id);
+
+  const response =
+    await httpRequest(
+      "POST",
+      `${getUsuarioEndpoint(userId)}/resend-activation`,
+      {},
+      {
+        timeout:
+          finiteNumber(
+            options.timeout,
+            USUARIOS_RESEND_ACTIVATION_TIMEOUT
+          ),
+
+        source:
+          "views.usuarios.api.resend-activation",
+
+        signal:
+          options.signal,
+      }
+    );
+
+  if (
+    safeObject(response)?.ok === false ||
+    safeObject(response)?.success === false ||
+    safeObject(response)?.error === true
+  ) {
+    throw createResponseError(
+      response,
+      {
+        fallbackCode:
+          "USUARIO_ACTIVATION_RESEND_REJECTED",
+
+        fallbackMessage:
+          "El backend rechazó el reenvío de activación.",
+      }
+    );
+  }
+
+  const source =
+    safeObject(response);
+  const mail =
+    safeObject(source.mail);
+
+  /*
+    Frontera de seguridad: el backend puede incluir activationUrl únicamente
+    cuando el proveedor de correo falla. La vista de Usuarios nunca recibe ese
+    secreto; este DTO expone sólo el resultado operativo del envío.
+  */
+  return Object.freeze({
+    ok:
+      source.ok !== false,
+
+    success:
+      source.success !== false,
+
+    code:
+      cleanText(
+        source.code,
+        ""
+      ),
+
+    message:
+      cleanText(
+        source.message,
+        ""
+      ),
+
+    userId:
+      cleanText(
+        source.userId,
+        userId
+      ),
+
+    email:
+      cleanText(
+        source.email,
+        ""
+      ).toLowerCase(),
+
+    expiresAt:
+      firstNonEmpty(
+        source.expiresAt,
+        null
+      ),
+
+    mail:
+      Object.freeze({
+        sent:
+          mail.sent === true,
+
+        status:
+          cleanText(
+            mail.status,
+            mail.sent === true
+              ? "sent"
+              : "pending"
+          ),
+      }),
+  });
+}
+
 export async function updateUsuarioRequest(
   id = "",
   payload = {},
@@ -5462,6 +5571,9 @@ export function getUsuariosApiSnapshot() {
       create:
         "POST /api/users/create",
 
+      resendActivation:
+        "POST /api/users/:id/resend-activation",
+
       update:
         "PUT|PATCH /api/users/:id",
 
@@ -5525,6 +5637,9 @@ export function getUsuariosApiSnapshot() {
         true,
 
       activationUrlNotReturned:
+        true,
+
+      resendActivationUrlNotReturned:
         true,
 
       activationUrlNotPersisted:

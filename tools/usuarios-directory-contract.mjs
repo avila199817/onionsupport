@@ -73,10 +73,21 @@ function directorio({ search = "", status = "" } = {}) {
   });
 }
 
-async function abrir(browser, origin, responder) {
+async function abrir(browser, origin, responder, { onResend = null } = {}) {
   const sesion = await openSpaSession(browser, origin, {
     world: syntheticWorld(),
-    api: async ({ path, url, respond }) => {
+    api: async ({ route, method, path, url, respond }) => {
+      const reenvio = /^\/api\/users\/([^/]+)\/resend-activation$/u.exec(path);
+      if (reenvio) {
+        const id = decodeURIComponent(reenvio[1]);
+        if (typeof onResend === "function") {
+          await onResend({ id, route, method, respond });
+        } else {
+          await respond({ ok: false, code: "NOT_IMPLEMENTED" }, 501);
+        }
+        return true;
+      }
+
       /* El detalle lee su propia ficha: el endpoint controlado también la
          sirve, para que abrir un usuario no dependa del mundo por defecto. */
       const ficha = /^\/api\/users\/([^/]+)$/u.exec(path);
@@ -111,10 +122,38 @@ const browser = await launchBrowser();
 try {
   /* 1 · Arranque en frío: el directorio funcional, y nadie más. */
   {
-    const sesion = await abrir(browser, origin, async ({ url, respond }) => {
-      const items = directorio({ search: url.searchParams.get("search"), status: url.searchParams.get("status") });
-      await respond({ ok: true, items, total: items.length });
-    });
+    const reenvios = [];
+    const sesion = await abrir(
+      browser,
+      origin,
+      async ({ url, respond }) => {
+        const items = directorio({ search: url.searchParams.get("search"), status: url.searchParams.get("status") });
+        await respond({ ok: true, items, total: items.length });
+      },
+      {
+        onResend: async ({ id, route, method, respond }) => {
+          let body = null;
+          try {
+            body = route.request().postDataJSON();
+          } catch {
+            body = route.request().postData();
+          }
+          reenvios.push({ id, method, body });
+          await espera(140);
+          await respond({
+            ok: true,
+            success: true,
+            code: "ACTIVATION_LINK_RESENT",
+            message: "Se ha enviado un nuevo enlace de activación.",
+            userId: id,
+            email: "carlos@directorio.test",
+            expiresAt: "2026-09-19T00:00:00.000Z",
+            activationUrl: "https://activation.invalid/SECRET-QUE-NUNCA-DEBE-LLEGAR-AL-DOM",
+            mail: { sent: true, status: "sent" },
+          });
+        },
+      }
+    );
     const page = sesion.page;
     await page.goto(`${origin}${RUTA}/usuarios`, { waitUntil: "load" });
     await untilTrue(page, (sel) => document.querySelectorAll(sel).length > 0, { arg: FILA, timeout: 20000, message: "Usuarios no pintó ninguna fila en frío" });
@@ -163,7 +202,53 @@ try {
     await porEstado("Todos", ["u-dir-1", "u-dir-2", "u-dir-3"]);
     paso("3 · filtros de estado: bloqueados, activos y todos");
 
-    /* 4 · Orden: la vista declara su sentido y lo cambia. */
+    /* 4 · Pendiente es una acción explícita de reenvío; Activo/Bloqueado no. */
+    const selectorReenvio = `${FILA}[data-user-id='u-dir-2'] [data-usuarios-action='resend-activation']`;
+    assert.equal(await page.locator(selectorReenvio).count(), 1, "Pendiente expone un único botón de reenvío");
+    assert.equal(await page.locator(`${FILA}[data-user-id='u-dir-1'] [data-usuarios-action='resend-activation']`).count(), 0,
+      "Activo nunca se convierte en acción de reenvío");
+    assert.equal(await page.locator(`${FILA}[data-user-id='u-dir-3'] [data-usuarios-action='resend-activation']`).count(), 0,
+      "Bloqueado nunca se convierte en acción de reenvío");
+
+    const opener = page.locator(selectorReenvio);
+    await opener.click();
+    await page.waitForSelector("[data-usuarios-resend-confirm-dialog='true']", { timeout: 15000 });
+    assert.equal(reenvios.length, 0, "Abrir la confirmación todavía no escribe");
+    const confirmacion = await page.locator("[data-usuarios-resend-confirm-dialog='true']").evaluate((node) => ({
+      role: node.getAttribute("role"),
+      texto: (node.textContent || "").replace(/\s+/gu, " ").trim(),
+    }));
+    assert.equal(confirmacion.role, "alertdialog", "La confirmación usa el shell accesible de producto");
+    assert.ok(confirmacion.texto.includes("carlos@directorio.test"), "La confirmación dice a qué correo se reenviará");
+    assert.ok(confirmacion.texto.includes("24 horas"), "La confirmación explica la nueva caducidad");
+    assert.ok(/anterior dejará de ser válido/u.test(confirmacion.texto), "La confirmación explica la rotación del token");
+    assert.equal(await page.locator(DETALLE).count(), 0, "Pulsar Pendiente no abre por accidente el detalle de la fila");
+
+    const confirm = page.locator("[data-usuarios-resend-confirm-action='confirm']");
+    await confirm.click();
+    await untilTrue(page, (sel) => document.querySelector(sel)?.getAttribute("aria-busy") === "true",
+      { arg: selectorReenvio, timeout: 5000, message: "El chip Pendiente no anunció el envío en curso" });
+    await untilTrue(page, (sel) => document.querySelector(sel)?.getAttribute("aria-busy") === "false",
+      { arg: selectorReenvio, timeout: 10000, message: "El chip Pendiente no terminó el reenvío" });
+
+    assert.equal(reenvios.length, 1, "Confirmar dispara exactamente un reenvío");
+    assert.deepEqual(reenvios[0], { id: "u-dir-2", method: "POST", body: {} },
+      "El comando usa POST /api/users/:id/resend-activation con body vacío");
+    assert.equal(await page.locator("[data-usuarios-resend-confirm-dialog='true']").count(), 0,
+      "La confirmación se desmonta después de aceptar");
+    assert.ok((await pantalla(page)).includes("Nuevo enlace de activación enviado a carlos@directorio.test."),
+      "El administrador recibe confirmación visible de entrega");
+    assert.equal((await pantalla(page)).includes("SECRET-QUE-NUNCA-DEBE-LLEGAR-AL-DOM"), false,
+      "activationUrl no cruza la frontera API ni aparece en el DOM");
+
+    await opener.click();
+    await page.waitForSelector("[data-usuarios-resend-confirm-dialog='true']", { timeout: 15000 });
+    await page.locator("[data-usuarios-resend-confirm-action='cancel']").click();
+    await page.waitForSelector("[data-usuarios-resend-confirm-dialog='true']", { state: "detached", timeout: 5000 });
+    assert.equal(reenvios.length, 1, "Cancelar no dispara un segundo reenvío");
+    paso("4 · Pendiente → confirmación accesible → POST único → feedback, sin filtrar activationUrl");
+
+    /* 5 · Orden: la vista declara su sentido y lo cambia. */
     const sentido = () => page.evaluate(() => document.querySelector("[data-usuarios-action='sort-toggle']")?.getAttribute("data-sort-order")
       || document.querySelector("[data-usuarios-scope='true']")?.getAttribute("data-sort-order") || "");
     const antes = await sentido();
@@ -174,9 +259,9 @@ try {
     }, { arg: antes, timeout: 15000, message: "El orden no cambió al pulsar su control" });
     assert.notEqual(await sentido(), antes, "El control de orden cambia el sentido declarado");
     assert.equal((await filasDe(page)).length, 3, "Ordenar no pierde filas");
-    paso(`4 · orden: ${antes || "(sin declarar)"} → ${await sentido()}`);
+    paso(`5 · orden: ${antes || "(sin declarar)"} → ${await sentido()}`);
 
-    /* 5 · Abrir el usuario correcto. */
+    /* 6 · Abrir el usuario correcto. */
     await clickInPage(page, `${FILA}[data-user-id='u-dir-2'] [data-usuarios-action='detail'], ${FILA}[data-user-id='u-dir-2']`);
     await page.waitForSelector(DETALLE, { timeout: 15000 });
     const enDetalle = await page.evaluate((sel) => (document.querySelector(sel)?.textContent || "").replace(/\s+/gu, " "), DETALLE);
@@ -184,20 +269,20 @@ try {
     assert.equal(enDetalle.includes("Ana Directorio"), false, "El detalle no muestra otro usuario");
     await page.keyboard.press("Escape");
     await page.waitForSelector(DETALLE, { state: "detached", timeout: 15000 });
-    paso("5 · abre el usuario pulsado y lo cierra");
+    paso("6 · abre el usuario pulsado y lo cierra");
 
-    /* 6 · Salir de la ruta y volver, sin recargar el documento. */
+    /* 7 · Salir de la ruta y volver, sin recargar el documento. */
     await clickInPage(page, `a[href='${RUTA}/facturas']`);
     await page.waitForSelector("[data-factura-id]", { timeout: 15000 });
     await clickInPage(page, `a[href='${RUTA}/usuarios']`);
     await untilTrue(page, (sel) => document.querySelectorAll(sel).length === 3, { arg: FILA, timeout: 20000, message: "Al volver a Usuarios no reapareció el directorio" });
     assert.equal(sesion.loads.length, 1, `La sesión cargó el documento ${sesion.loads.length} veces`);
     assert.deepEqual(sesion.pageErrors, [], `Errores de página tras el regreso: ${JSON.stringify(sesion.pageErrors)}`);
-    paso("6 · salir y volver por el router, con 1 solo documento");
+    paso("7 · salir y volver por el router, con 1 solo documento");
     await page.close();
   }
 
-  /* 7 · Lista vacía legítima NO es un fallo de carga. */
+  /* 8 · Lista vacía legítima NO es un fallo de carga. */
   {
     const sesion = await abrir(browser, origin, async ({ respond }) => { await respond({ ok: true, items: [], total: 0 }); });
     const page = sesion.page;
@@ -206,11 +291,11 @@ try {
     const texto = await pantalla(page);
     assert.equal(/No se pudieron cargar los usuarios/u.test(texto), false, "Una lista vacía no se presenta como fallo de carga");
     assert.equal(await page.locator("button", { hasText: /Reintentar/u }).count(), 0, "Una lista vacía no ofrece reintentar");
-    paso("7 · vacío legítimo: su propio estado, sin «Reintentar»");
+    paso("8 · vacío legítimo: su propio estado, sin «Reintentar»");
     await page.close();
   }
 
-  /* 8 · Fallo de carga y reintento con el endpoint sano. */
+  /* 9 · Fallo de carga y reintento con el endpoint sano. */
   {
     let caido = true;
     const sesion = await abrir(browser, origin, async ({ url, respond }) => {
@@ -230,7 +315,7 @@ try {
     await untilTrue(page, (sel) => document.querySelectorAll(sel).length === 3, { arg: FILA, timeout: 20000, message: "El reintento no recuperó el directorio" });
     assert.equal(/No se pudieron cargar los usuarios/u.test(await pantalla(page)), false, "Tras reintentar no queda el estado de error");
     assert.equal(sesion.loads.length, 1, "El reintento no recarga el documento");
-    paso("8 · error controlado → «Reintentar» → directorio completo, sin recargar");
+    paso("9 · error controlado → «Reintentar» → directorio completo, sin recargar");
     await espera(120);
     await page.close();
   }

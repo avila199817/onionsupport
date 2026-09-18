@@ -16,8 +16,11 @@
 ========================================================= */
 
 import { cleanText } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 import { AppCore } from "../../core/index.js";
 import { onDomainChanged } from "../../core/domain-events.js";
+import { openModalConfirmation } from "../../features/entity-overlay/modal-confirmation.js";
+import { MODAL_SHELL_SELECTORS, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 
 import {
   renderUsuariosTableTemplate,
@@ -43,6 +46,7 @@ import {
   fetchUsuariosRequest as fetchUsuariosRequestApi,
   getUsuarioByIdRequest as getUsuarioByIdRequestApi,
   createUsuarioRequest as createUsuarioRequestApi,
+  resendUsuarioActivationRequest as resendUsuarioActivationRequestApi,
   updateUsuarioRequest as updateUsuarioRequestApi,
   deleteUsuarioRequest as deleteUsuarioRequestApi,
   fetchUsuariosStatsRequest,
@@ -84,7 +88,7 @@ const USUARIOS_MODULE_NAME = "usuarios";
 const USUARIOS_VIEW_NAME = "UsuariosView";
 const USUARIOS_CANONICAL_PATH = "/usuarios";
 const USUARIOS_INDEX_VERSION =
-  "usuarios.index.v14.session-order-silent-refresh";
+  "usuarios.index.v15.pending-activation-resend";
 const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
 const USUARIOS_INDEX_SOURCE = "views.usuarios.index";
 
@@ -118,6 +122,7 @@ const USUARIOS_GLOBAL_CONTROLLER_KEY = Symbol.for("onion.support.usuarios.active
 
 const ACTIONS = Object.freeze({
   DETAIL: USUARIOS_ACTIONS?.DETAIL || "detail",
+  RESEND_ACTIVATION: USUARIOS_ACTIONS?.RESEND_ACTIVATION || "resend-activation",
   CREATE: USUARIOS_ACTIONS?.CREATE || "create",
   REFRESH: USUARIOS_ACTIONS?.REFRESH || "refresh",
   RETRY: USUARIOS_ACTIONS?.RETRY || "retry",
@@ -132,6 +137,8 @@ const ACTIONS = Object.freeze({
 const ACTION_ALIASES = Object.freeze({
   detail: ACTIONS.DETAIL,
   open_user: ACTIONS.DETAIL,
+  resend_activation: ACTIONS.RESEND_ACTIVATION,
+  activation_resend: ACTIONS.RESEND_ACTIVATION,
   create: ACTIONS.CREATE,
   create_user: ACTIONS.CREATE,
   refresh: ACTIONS.REFRESH,
@@ -419,6 +426,131 @@ function downloadTextFile(content = "", filename = "usuarios.csv") {
   }
 }
 
+const USUARIOS_RESEND_CONFIRM_ROOT_ID =
+  "usuarios-resend-activation-confirm-root";
+
+let activeUsuarioActivationConfirm = null;
+
+function usuarioDisplayName(item = {}) {
+  return cleanText(
+    firstNonEmpty(
+      item.fullName,
+      item.displayName,
+      item.name,
+      item.nombre,
+      item.username,
+      item.email,
+      "Usuario"
+    ),
+    "Usuario"
+  );
+}
+
+function usuarioEmail(item = {}) {
+  return cleanText(
+    firstNonEmpty(
+      item.email,
+      item.emailLower,
+      item.mail,
+      ""
+    ),
+    ""
+  ).toLowerCase();
+}
+
+function renderUsuarioActivationConfirmation(root, { user } = {}) {
+  const name = usuarioDisplayName(user);
+  const email = usuarioEmail(user);
+  const titleId = "usuarios-resend-activation-confirm-title";
+  const descriptionId = "usuarios-resend-activation-confirm-description";
+
+  root.innerHTML = renderModalShell({
+    rootAttributes: {
+      "data-usuarios-resend-confirm-shell": "true",
+    },
+    overlayAttributes: {
+      "data-usuarios-resend-confirm-overlay": "true",
+    },
+    panelAttributes: {
+      "data-usuarios-resend-confirm-dialog": "true",
+    },
+    role: "alertdialog",
+    labelledBy: titleId,
+    describedBy: descriptionId,
+    size: "confirm",
+    height: "auto",
+    header: `<div class="usuarios-resend-confirm-heading">
+      <span class="usuarios-resend-confirm-eyebrow">Cuenta pendiente</span>
+      <h2 id="${titleId}">¿Reenviar enlace de activación?</h2>
+    </div>`,
+    bodyClass: "usuarios-resend-confirm-body",
+    body: `<span class="usuarios-resend-confirm-icon" aria-hidden="true">↻</span>
+      <div class="usuarios-resend-confirm-copy">
+        <p id="${descriptionId}">Se enviará un enlace nuevo a <strong>${escapeHtml(email || "su correo")}</strong>. El enlace anterior dejará de ser válido y el nuevo caducará en 24 horas.</p>
+        <div class="usuarios-resend-confirm-meta">
+          <span>${escapeHtml(name)}</span>
+          ${email ? `<span>${escapeHtml(email)}</span>` : ""}
+        </div>
+      </div>`,
+    footer: `<button type="button" class="usuarios-resend-confirm-btn usuarios-resend-confirm-btn--cancel" data-usuarios-resend-confirm-action="cancel">Cancelar</button>
+      <button type="button" class="usuarios-resend-confirm-btn usuarios-resend-confirm-btn--confirm" data-usuarios-resend-confirm-action="confirm">Volver a enviar</button>`,
+  });
+
+  return {
+    panel: root.querySelector(MODAL_SHELL_SELECTORS.panel),
+    cancel: root.querySelector("[data-usuarios-resend-confirm-action='cancel']"),
+    confirm: root.querySelector("[data-usuarios-resend-confirm-action='confirm']"),
+  };
+}
+
+function confirmUsuarioActivationResend({
+  user = {},
+  opener = null,
+  signal = undefined,
+} = {}) {
+  const userId = getUsuarioId(user);
+
+  if (activeUsuarioActivationConfirm) {
+    if (
+      activeUsuarioActivationConfirm.userId === userId &&
+      activeUsuarioActivationConfirm.signal === signal
+    ) {
+      return activeUsuarioActivationConfirm.promise;
+    }
+    return Promise.resolve(false);
+  }
+
+  const promise = openModalConfirmation({
+    host: {
+      id: USUARIOS_RESEND_CONFIRM_ROOT_ID,
+      attributes: {
+        "data-usuarios-resend-confirm-root": "true",
+      },
+    },
+    render: (root) =>
+      renderUsuarioActivationConfirmation(root, { user }),
+    opener,
+    signal,
+    bodyClasses: [
+      "usuarios-resend-confirm-open",
+    ],
+  });
+
+  activeUsuarioActivationConfirm = {
+    userId,
+    signal,
+    promise,
+  };
+
+  void promise.finally(() => {
+    if (activeUsuarioActivationConfirm?.promise === promise) {
+      activeUsuarioActivationConfirm = null;
+    }
+  });
+
+  return promise;
+}
+
 async function dispatchUsuarioDetail(id, opener = null, originHost = null) {
   if (!cleanText(id, "")) return false;
   const { EntityOverlay } = await import("../../features/entity-overlay/index.js");
@@ -463,6 +595,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   let creating = false;
   let createOpen = false;
   let openingUserId = "";
+  let resendingActivationUserId = "";
+  let resendConfirmationAbort = null;
   let error = "";
   let loadMoreError = "";
 
@@ -539,6 +673,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       exporting,
       creating,
       openingUserId,
+      resendingActivationUserId,
       error,
       loadMoreError,
       filter,
@@ -1294,6 +1429,132 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     if (!isFunction(submit)) throw new Error("USUARIOS_CREATE_MODAL_SUBMIT_UNAVAILABLE");
     return submit.call(UsuariosCreateModal, safeObject(payloadValue));
   }
+  async function resendActivation(userId = "", opener = null) {
+    const id = cleanText(userId, "");
+    if (
+      !id ||
+      destroyed ||
+      !routeActive() ||
+      !admin() ||
+      resendingActivationUserId
+    ) {
+      return false;
+    }
+
+    const user =
+      findUsuarioById(items, id) ||
+      getUsuarioByIdApiStore(id) ||
+      null;
+
+    if (!user) {
+      showToast(
+        "No se ha encontrado el usuario pendiente. Actualiza la lista y vuelve a intentarlo.",
+        "warning"
+      );
+      return false;
+    }
+
+    resendConfirmationAbort?.abort();
+    const confirmation = new AbortController();
+    resendConfirmationAbort = confirmation;
+
+    let confirmed = false;
+    try {
+      confirmed = await confirmUsuarioActivationResend({
+        user,
+        opener,
+        signal: confirmation.signal,
+      });
+    } finally {
+      if (resendConfirmationAbort === confirmation) {
+        resendConfirmationAbort = null;
+      }
+    }
+
+    if (
+      !confirmed ||
+      destroyed ||
+      !routeActive() ||
+      !admin()
+    ) {
+      return false;
+    }
+
+    resendingActivationUserId = id;
+    render();
+
+    try {
+      const result =
+        await resendUsuarioActivationRequestApi(
+          id,
+          {
+            signal:
+              context.signal,
+          }
+        );
+
+      const email =
+        cleanText(
+          result?.email,
+          usuarioEmail(user)
+        );
+
+      if (result?.mail?.sent === true) {
+        showToast(
+          email
+            ? `Nuevo enlace de activación enviado a ${email}.`
+            : "Nuevo enlace de activación enviado.",
+          "success"
+        );
+      } else {
+        showToast(
+          cleanText(
+            result?.message,
+            "Se ha generado un enlace nuevo, pero el correo no se ha podido entregar. Puedes volver a intentarlo."
+          ),
+          "warning"
+        );
+      }
+
+      return result;
+    } catch (resendError) {
+      const code = errorCode(resendError);
+
+      if (
+        code === "ACCOUNT_ALREADY_ACTIVE" ||
+        code === "ACTIVATION_STATE_CHANGED"
+      ) {
+        showToast(
+          code === "ACCOUNT_ALREADY_ACTIVE"
+            ? "La cuenta ya está activada. Se actualizará la lista."
+            : "El estado del usuario ha cambiado. Se actualizará la lista.",
+          "info"
+        );
+        void loadFirstPage({
+          silent: true,
+          preservePages: true,
+        });
+        return false;
+      }
+
+      showToast(
+        humanErrorText(
+          resendError,
+          "No se pudo volver a enviar el enlace de activación."
+        ),
+        "error"
+      );
+      return false;
+    } finally {
+      if (resendingActivationUserId === id) {
+        resendingActivationUserId = "";
+      }
+      if (!destroyed) {
+        render();
+      }
+    }
+  }
+
   async function exportCsv() {
     if (exporting || !items.length || destroyed) return false;
     exporting = true;
@@ -1332,6 +1593,11 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       case ACTIONS.DETAIL:
         event?.preventDefault?.();
         await openUsuario(userId, node);
+        return true;
+      case ACTIONS.RESEND_ACTIVATION:
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        await resendActivation(userId, node);
         return true;
       case ACTIONS.CREATE:
         event?.preventDefault?.();
@@ -1577,6 +1843,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     closeDetailModal,
     refreshUsuario,
     copyUsuarioId,
+    resendActivation,
     openCreate,
     closeCreate,
     submitCreateUsuario,
@@ -1675,6 +1942,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         refreshing,
         exporting,
         creating,
+        resendingActivation: Boolean(resendingActivationUserId),
         count: items.length,
         totalKnown,
         totalCount,
@@ -1699,6 +1967,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
           detailRefreshRaceProtected: true,
           loadMoreTaskIdentityProtected: true,
           modalDestroyCleanup: true,
+          activationResendConfirmation: true,
+          activationResendSingleFlight: true,
           duplicateMountProtected: true,
           routeCommitNonBlocking: true,
           csvLoadedRowsOnly: true,
@@ -1719,6 +1989,9 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       detailEpoch += 1;
       detailRefreshEpoch += 1;
       abortDetail();
+      resendConfirmationAbort?.abort();
+      resendConfirmationAbort = null;
+      resendingActivationUserId = "";
       context.signal?.removeEventListener("abort", controller.destroy);
       if (detailModalOpen) closeDetailModal({ notify: false, restoreFocus: false });
       detailModalOpen = false;

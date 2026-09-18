@@ -90,20 +90,7 @@ ok(statusTone("azafran_del_futuro") === "neutral", "un estado desconocido no pue
    devuelve.
 ========================================================= */
 
-const chipTone = (html, chipClass) => {
-  const tags = String(html || "").match(/<(?:span|button)\\b[^>]*>/gu) || [];
-  const chip = tags.find((tag) => {
-    const className = /class="([^"]*)"/u.exec(tag)?.[1] || "";
-    return (
-      className.split(/\\s+/u).includes(chipClass) &&
-      tag.includes(`${STATUS_TONE_ATTRIBUTE}="`)
-    );
-  });
-  assert.ok(chip, `no se encontró ningún chip "${chipClass}" con ${STATUS_TONE_ATTRIBUTE} en el HTML renderizado`);
-  const tone = /data-status-tone="([^"]*)"/u.exec(chip);
-  assert.ok(tone, `el chip no declara ${STATUS_TONE_ATTRIBUTE}: ${chip}`);
-  return tone[1];
-};
+const chipTone = (html, chipClass) => {\n  const tags = String(html || "").match(/<(?:span|button)\b[^>]*>/gu) || [];\n  const chip = tags.find((tag) => {\n    const className = /class="([^"]*)"/u.exec(tag)?.[1] || "";\n    return (\n      className.split(/\s+/u).includes(chipClass) &&\n      tag.includes(`${STATUS_TONE_ATTRIBUTE}="`)\n    );\n  });\n  assert.ok(chip, `no se encontró ningún chip "${chipClass}" con ${STATUS_TONE_ATTRIBUTE} en el HTML renderizado`);\n  const tone = /data-status-tone="([^"]*)"/u.exec(chip);\n  assert.ok(tone, `el chip no declara ${STATUS_TONE_ATTRIBUTE}: ${chip}`);\n  return tone[1];\n};
 
 const incidencias = await import("../src/views/incidencias/incidencias.template.js");
 const facturas = await import("../src/views/facturas/facturas.template.js");

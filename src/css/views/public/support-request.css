@@ -89,6 +89,7 @@
   display: grid;
   align-content: start;
   gap: 14px;
+  min-inline-size: 0;
   min-block-size: 630px;
   padding: clamp(8px, 1.1vw, 16px);
   overflow: visible;
@@ -103,7 +104,7 @@
   color: #7de7ff;
   background: rgb(15 139 211 / .07);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .035);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .13em;
   text-transform: uppercase;
@@ -207,7 +208,7 @@
 
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .04);
 
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .08em;
 }
@@ -262,7 +263,7 @@
   z-index: 2;
   display: grid;
   justify-items: center;
-  inline-size: clamp(220px, 22vw, 320px);
+  inline-size: clamp(220px, 20vw, 300px);
   margin: 0;
   pointer-events: none;
 }
@@ -307,6 +308,9 @@
   object-position: center bottom;
   filter: drop-shadow(0 30px 42px rgb(0 0 0 / .42)) drop-shadow(0 0 28px rgb(13 126 255 / .08));
   transform: translateZ(0);
+  /* El recorte horizontal de la fotografía se funde con el fondo en lugar de terminar en una línea recta. */
+  mask-image: linear-gradient(to bottom, #000 78%, transparent 99%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent 99%);
 }
 
 .public-home .public-support-person-card {
@@ -336,7 +340,7 @@
 
 .public-home .public-support-person-card span {
   color: #55dfff;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.25;
 }
@@ -416,7 +420,7 @@
   gap: 8px;
   margin-block-end: 6px;
   color: #54ddff;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: .14em;
   text-transform: uppercase;
@@ -459,7 +463,7 @@
 
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .035);
 
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .035em;
   white-space: nowrap;
@@ -703,6 +707,10 @@
   color: #9aacc2;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.public-home .public-support-field-meta small {
+  font-size: inherit;
 }
 
 .public-home .public-support-field-meta [data-public-support-counter] {
@@ -994,7 +1002,7 @@
 
 .public-home .public-support-account-email {
   color: var(--public-home-text-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 760;
   line-height: 1.2;
 }
@@ -1008,6 +1016,17 @@
   .public-home .public-support-layout {
     grid-template-columns: minmax(0, .70fr) minmax(500px, 1.30fr);
     gap: 26px;
+  }
+
+  /* Piso/CP y Ciudad/Provincia en dos filas equilibradas: el CP nunca recorta su placeholder. */
+  .public-home .public-support-field[data-public-support-field="addressLine2"],
+  .public-home .public-support-field[data-public-support-field="postalCode"] {
+    grid-column: span 6;
+  }
+
+  .public-home .public-support-field[data-public-support-field="city"],
+  .public-home .public-support-field[data-public-support-field="province"] {
+    grid-column: span 6;
   }
 
   .public-home .public-support-intro h2 {

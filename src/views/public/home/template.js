@@ -1,5 +1,10 @@
 import { PUBLIC_SITE } from "../../../core/public-site.js";
 import { PUBLIC_SERVICES } from "../../../core/public-site.js";
+import {
+  PUBLIC_FAQS,
+  PUBLIC_METHOD_STEPS,
+  PUBLIC_TRUST_ITEMS,
+} from "../../../core/public-content.js";
 import { renderPublicLegalFooter } from "../../../core/public-legal.js";
 import { escapeHtml } from "../../../core/escape-html.js";
 
@@ -80,11 +85,8 @@ const NAV_ITEMS = [
   { label: "FAQ", href: "#faq" },
 ];
 
-const TRUST_ITEMS = [
-  { icon: "bolt", label: "Trato directo" },
-  { icon: "shield", label: "Presupuesto previo" },
-  { icon: "invoice", label: "Servicio con factura" },
-];
+const TRUST_ITEMS = PUBLIC_TRUST_ITEMS;
+const METHOD_STEPS = PUBLIC_METHOD_STEPS;
 
 // Routes and service names come from the shared public catalog. Home supplies
 // only the presentation and symptom-led summaries used to choose a service.
@@ -121,24 +123,6 @@ const SERVICE_PRESENTATION = [
   },
 ];
 
-const METHOD_STEPS = [
-  {
-    icon: "invoice",
-    title: "Cuéntame qué ocurre",
-    text: "Envía el modelo del equipo, los síntomas y desde cuándo falla. Revisaré tu solicitud y te contactaré para concretar el diagnóstico.",
-  },
-  {
-    icon: "shield",
-    title: "Conoce tus opciones",
-    text: "Te explico el problema, la solución propuesta y el presupuesto. Decides cómo continuar antes de la reparación.",
-  },
-  {
-    icon: "check",
-    title: "Recibe la solución",
-    text: "Realizo el trabajo acordado y compruebo el resultado. Con factura y una explicación clara de la intervención.",
-  },
-];
-
 const PRICE_CARDS = [
   {
     eyebrow: "El punto de partida",
@@ -161,36 +145,7 @@ const PRICE_CARDS = [
   },
 ];
 
-const FAQS = [
-  {
-    question: "¿Atendéis en toda España?",
-    answer: `${PUBLIC_SITE.coverage} Cuéntame qué ocurre y dónde estás para valorar la modalidad de asistencia adecuada.`,
-  },
-  {
-    question: "¿Cómo solicito un diagnóstico?",
-    answer: "Pulsa en Abrir incidencia y completa el formulario con tus datos y el problema del equipo. Revisaré tu solicitud y te contactaré para concretar el siguiente paso. También puedes escribirme por WhatsApp.",
-  },
-  {
-    question: "¿Hay presupuesto antes de reparar?",
-    answer: "Sí. El coste depende de la avería, el trabajo y los componentes necesarios. Te explicaré las opciones y el presupuesto para que decidas antes de la reparación.",
-  },
-  {
-    question: "¿Emites factura?",
-    answer: "Sí. Emitimos factura por los servicios prestados a particulares, autónomos y empresas.",
-  },
-  {
-    question: "¿Qué datos conviene enviar?",
-    answer: "Modelo del equipo, qué ocurre, desde cuándo pasa, mensajes de error y nivel de urgencia.",
-  },
-  {
-    question: "¿Necesito crear una cuenta antes?",
-    answer: "No necesitas iniciar sesión para enviar la solicitud. Si es tu primera vez, recibirás un enlace seguro por correo para activar tu acceso. Si ya tienes cuenta, podrás consultar tus incidencias desde tu panel.",
-  },
-  {
-    question: "¿Qué debo hacer antes de entregar el equipo?",
-    answer: "Siempre que sea posible, prepara una copia de seguridad actualizada de tus archivos. Una avería de almacenamiento puede impedir recuperar los datos. No envíes contraseñas ni información sensible en el formulario.",
-  },
-];
+const FAQS = PUBLIC_FAQS;
 
 function renderLogo() {
   const logoFallback = safeAssetSrc(PUBLIC_AUTH_LOGO, PUBLIC_AUTH_LOGO);

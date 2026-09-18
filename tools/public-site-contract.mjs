@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
 import { PUBLIC_SITE, PUBLIC_PAGES, PUBLIC_SERVICES, pageMetadata, publicPageSchema } from "../src/core/public-site.js";
 import { synchronize, renderNoScriptSummary, materializeDocument } from "./sync-public-site.mjs";
+import { renderPublicLegalFooter } from "../src/core/public-legal.js";
+import { getNotFoundTemplate } from "../src/views/public/not-found/template.js";
+import { getRouteStyleHrefs } from "../src/router/styles.js";
 
 await synchronize({ check: true });
 const preload = await readFile(new URL("../src/preboot/public-home-preload.js", import.meta.url), "utf8");
@@ -59,6 +62,9 @@ for (const entry of PUBLIC_PAGES) {
       for (const service of PUBLIC_SERVICES.filter((item) => item.path !== entry.path)) {
         assert.ok(html.includes(`href="${service.path}"`), `${entry.path}: discoverable ${service.path}`);
       }
+      assert.ok(html.includes('<a class="seo-button seo-button--primary seo-header-cta" href="/#incidencia">Abrir incidencia</a>'), `${entry.path}: the header carries the primary intake CTA`);
+      assert.ok(html.includes('<link rel="stylesheet" href="/src/css/tokens/public.css">'), `${entry.path}: shares the public design tokens`);
+      assert.ok(html.includes('<ol class="seo-method-grid">') && html.includes('<details class="seo-faq-item">'), `${entry.path}: explains the method and answers questions`);
     }
   }
   assert.doesNotMatch(head.match(/<title>(.*?)<\/title>/)?.[1] || "", /Sant Vicenç|Barcelona/);
@@ -81,9 +87,23 @@ assert.doesNotMatch(initial, /data-public-noscript-summary/, "alternative conten
 assert.match(initial, /id="view-container"[^>]*>\s*<\/div>/, "preserve the empty boot container");
 assert.doesNotMatch(home, /<h1\b/i, "the canonical H1 still belongs to the mounted Home");
 
+// The shared footer lists the catalog with literal anchors (the renderer is a pure template): keep them in sync.
+const footer = renderPublicLegalFooter();
+const footerServices = [...footer.matchAll(/<li><a href="(\/[a-z-]+)">([^<]+)<\/a><\/li>/g)].map((match) => [match[1], match[2]]);
+assert.deepEqual(footerServices, PUBLIC_SERVICES.map((service) => [service.path, service.label]), "footer service links must mirror the public catalog");
+assert.doesNotMatch(footer, /href="\/login/, "the footer never links to /login");
+const notFound = getNotFoundTemplate();
+assert.match(notFound, /<h1[^>]*>\s*Página no encontrada\s*<\/h1>/, "404 template has one primary heading");
+for (const service of PUBLIC_SERVICES) assert.ok(notFound.includes(`href="${service.path}"`), `404 template links ${service.path}`);
+assert.ok(notFound.includes('href="/#incidencia"') && notFound.includes('href="/login"'), "404 template recovers to intake and access");
+assert.deepEqual(getRouteStyleHrefs("not-found"), ["/src/css/tokens/public.css", "/src/css/views/public/legal-footer.css", "/src/css/auth/login.css"], "404 fallback dresses like the access screens");
+for (const route of ["public-home", "login", "password-request", "password-reset", "activate-account"]) {
+  assert.equal(getRouteStyleHrefs(route)[0], "/src/css/tokens/public.css", `${route}: public tokens load first`);
+}
+
 const robots = await readFile(new URL("../robots.txt", import.meta.url), "utf8");
 assert.doesNotMatch(robots, /Disallow:\s*\/login/);
 const sitemap = await readFile(new URL("../sitemap.xml", import.meta.url), "utf8");
 assert.doesNotMatch(sitemap, /\/login/);
 assert.deepEqual([...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]), PUBLIC_PAGES.filter((page) => page.indexable).map((page) => PUBLIC_SITE.origin + page.path), "sitemap contains exactly the canonical public URLs");
-console.log("Public site contract: PASS · generated documents · one metadata owner · canonical services · crawlable noindex login · preserved legal address · Maps identity · generated no-script home · empty boot container · contact and sitemap links");
+console.log("Public site contract: PASS · generated documents · one metadata owner · canonical services · crawlable noindex login · preserved legal address · Maps identity · generated no-script home · empty boot container · contact and sitemap links · shared tokens · footer catalog · 404 fallback");

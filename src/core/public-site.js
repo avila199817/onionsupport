@@ -15,6 +15,9 @@ export const PUBLIC_SITE = Object.freeze({
   phoneTel: "+34629946615",
   ownerName: "Cristian Ávila",
   image: "/src/media/img/Cristian_Avila_480.webp",
+  imageType: "image/webp",
+  imageWidth: 480,
+  imageHeight: 600,
   logo: "/src/media/img/favicon_black_circle_128.webp",
   address: Object.freeze({
     "@type": "PostalAddress",
@@ -74,7 +77,7 @@ export function publicPageSchema(page) {
   ];
   if (page.path !== "/") graph.push(
     { "@type": "BreadcrumbList", "@id": `${page.canonical}#breadcrumb`, itemListElement: [{ "@type": "ListItem", position: 1, name: PUBLIC_SITE.name, item: home }, { "@type": "ListItem", position: 2, name: page.label, item: page.canonical }] },
-    { "@type": "Service", "@id": `${page.canonical}#service`, name: page.label, description: `${page.description} ${PUBLIC_SITE.coverage}`, url: page.canonical, provider: { "@id": `${home}#business` } },
+    { "@type": "Service", "@id": `${page.canonical}#service`, name: page.label, serviceType: page.label, description: `${page.description} ${PUBLIC_SITE.coverage}`, url: page.canonical, provider: { "@id": `${home}#business` }, areaServed: { "@type": "Country", name: "España" } },
   );
   return { "@context": "https://schema.org", "@graph": graph };
 }
@@ -87,6 +90,9 @@ export function pageMetaEntries(page) {
     ["property", "og:site_name", PUBLIC_SITE.name], ["property", "og:title", page.title],
     ["property", "og:description", page.description], ["property", "og:url", page.canonical],
     ["property", "og:image", PUBLIC_SITE.origin + PUBLIC_SITE.image],
+    ["property", "og:image:type", PUBLIC_SITE.imageType],
+    ["property", "og:image:width", String(PUBLIC_SITE.imageWidth)],
+    ["property", "og:image:height", String(PUBLIC_SITE.imageHeight)],
     ["property", "og:image:alt", `${PUBLIC_SITE.ownerName}, técnico informático de ${PUBLIC_SITE.name}`],
     ["name", "twitter:card", "summary"], ["name", "twitter:title", page.title],
     ["name", "twitter:description", page.description],

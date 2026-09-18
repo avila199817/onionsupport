@@ -4485,7 +4485,22 @@ async function renderRoute(
   }
 }
 
-function renderNotFound(
+/*
+  Una URL desconocida es un 404 público: la tarjeta de acceso sin formulario,
+  con el catálogo de servicios y la incidencia a un clic. Sólo la sesión
+  autenticada conserva el fallback mínimo dentro del App Chrome, porque ahí
+  la navegación lateral ya ofrece la salida. Azure sirve index.html con
+  estado 404 (responseOverrides), así que el documento nunca es un soft-404.
+*/
+const PUBLIC_NOT_FOUND_ROUTE =
+  Object.freeze({
+    name: "not-found",
+    viewKey: "not-found",
+    title: "Página no encontrada",
+    public: true,
+  });
+
+async function renderNotFound(
   match = {},
   options = {},
   seq = renderSeq,
@@ -4505,13 +4520,20 @@ function renderNotFound(
     };
   }
 
+  const publicVisitor =
+    !isAuthenticated();
+
+  const route =
+    publicVisitor
+      ? PUBLIC_NOT_FOUND_ROUTE
+      : null;
+
   const state =
     beginTransition(
       {
         ...match,
 
-        route:
-          null,
+        route,
 
         canonicalPath:
           match.canonicalPath ||
@@ -4544,8 +4566,7 @@ function renderNotFound(
     createRouteHost(
       {
         ...match,
-        route:
-          null,
+        route,
       },
       state
     );
@@ -4554,11 +4575,31 @@ function renderNotFound(
     nextHost
   );
 
-  renderFallback(
-    "Ruta no encontrada",
-    "La vista solicitada no existe.",
-    nextHost
-  );
+  let publicTemplate =
+    "";
+
+  if (publicVisitor) {
+    try {
+      await prepareRouteStylesForTransition(
+        route,
+        transition
+      );
+
+      const module =
+        await import(
+          "../views/public/not-found/template.js"
+        );
+
+      publicTemplate =
+        String(
+          module.getNotFoundTemplate?.() ||
+          ""
+        );
+    } catch {
+      publicTemplate =
+        "";
+    }
+  }
 
   if (
     transition &&
@@ -4570,6 +4611,12 @@ function renderNotFound(
       nextHost
     );
 
+    if (publicVisitor) {
+      rollbackRouteStylesForTransition(
+        route
+      );
+    }
+
     return {
       ok: false,
       skipped: true,
@@ -4578,12 +4625,22 @@ function renderNotFound(
     };
   }
 
+  if (publicTemplate) {
+    nextHost.innerHTML =
+      publicTemplate;
+  } else {
+    renderFallback(
+      "Página no encontrada",
+      "La dirección solicitada no existe o ha cambiado.",
+      nextHost
+    );
+  }
+
   const committed =
     commitRouteHost(
       nextHost,
       {
-        route:
-          null,
+        route,
 
         nextView:
           null,
@@ -4610,9 +4667,15 @@ function renderNotFound(
     };
   }
 
-  clearRouteStylesForFallback(
-    "not-found"
-  );
+  if (publicVisitor) {
+    commitRouteStylesForTransition(
+      route
+    );
+  } else {
+    clearRouteStylesForFallback(
+      "not-found"
+    );
+  }
 
   return {
     ok: true,
@@ -4900,18 +4963,12 @@ async function executeRender(
     if (
       match.blocked
     ) {
-      return isAuthenticated()
-        ? renderNotFound(
-            match,
-            options,
-            seq,
-            transition
-          )
-        : redirectTo(
-            LOGIN_PATH,
-            options,
-            "blocked-login"
-          );
+      return renderNotFound(
+        match,
+        options,
+        seq,
+        transition
+      );
     }
 
     const authWaitStartedAt =
@@ -4950,18 +5007,12 @@ async function executeRender(
     if (
       !match.route
     ) {
-      return isAuthenticated()
-        ? renderNotFound(
-            match,
-            options,
-            seq,
-            transition
-          )
-        : redirectTo(
-            LOGIN_PATH,
-            options,
-            "not-found-login"
-          );
+      return renderNotFound(
+        match,
+        options,
+        seq,
+        transition
+      );
     }
 
     const guardStartedAt =

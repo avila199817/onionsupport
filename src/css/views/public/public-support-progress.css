@@ -117,7 +117,7 @@ body.public-support-submission-active {
 .public-support-submit-overlay-kicker {
   margin: 0;
   color: #69e5ff;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 950;
   letter-spacing: .15em;
   text-transform: uppercase;
@@ -185,22 +185,24 @@ body.public-support-submission-active {
     transform-origin: left center;
   }
 
+  /* «Abre tu incidencia ahora.» en dos líneas: la primera nunca puede exceder
+     el ancho del viewport, así que el bloque envuelve en lugar de forzar
+     columnas max-content que inflaban toda la sección. */
   .public-home .public-support-intro h2.public-support-title {
-    display: grid;
-    grid-template-columns: max-content max-content;
+    display: block;
     max-inline-size: 100%;
-    column-gap: .12em;
-    row-gap: 0;
-    font-size: clamp(31px, 9.8vw, 50px);
-    white-space: nowrap;
+    min-inline-size: 0;
+    font-size: clamp(30px, 9.2vw, 50px);
+    white-space: normal;
+    text-wrap: balance;
   }
 
   .public-home .public-support-intro h2.public-support-title > span {
-    display: block;
+    display: inline;
   }
 
   .public-home .public-support-intro h2.public-support-title > .public-support-title-accent {
-    grid-column: 1 / -1;
+    display: block;
   }
 }
 

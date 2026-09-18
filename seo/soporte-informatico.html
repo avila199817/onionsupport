@@ -3,8 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="application-name" content="Onion Support">
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta name="theme-color" content="#030712">
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#0a0c11" data-onion-theme-color="true">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" data-onion-theme-color-light="true">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a0c11" data-onion-theme-color-dark="true">
   <!-- public-site-v3: generated metadata -->
   <title>Soporte informático remoto y mantenimiento | Onion Support</title>
   <meta name="description" content="Soporte informático para particulares, autónomos y empresas. Asistencia remota, configuración, mantenimiento y solución de incidencias técnicas.">
@@ -18,6 +23,9 @@
   <meta property="og:description" content="Soporte informático para particulares, autónomos y empresas. Asistencia remota, configuración, mantenimiento y solución de incidencias técnicas.">
   <meta property="og:url" content="https://onionsupport.com/soporte-informatico">
   <meta property="og:image" content="https://onionsupport.com/src/media/img/Cristian_Avila_480.webp">
+  <meta property="og:image:type" content="image/webp">
+  <meta property="og:image:width" content="480">
+  <meta property="og:image:height" content="600">
   <meta property="og:image:alt" content="Cristian Ávila, técnico informático de Onion Support">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Soporte informático remoto y mantenimiento | Onion Support">
@@ -110,10 +118,15 @@
       "@type": "Service",
       "@id": "https://onionsupport.com/soporte-informatico#service",
       "name": "Soporte informático",
+      "serviceType": "Soporte informático",
       "description": "Soporte informático para particulares, autónomos y empresas. Asistencia remota, configuración, mantenimiento y solución de incidencias técnicas. Asistencia remota en España. La atención presencial se acuerda según el servicio y la ubicación.",
       "url": "https://onionsupport.com/soporte-informatico",
       "provider": {
         "@id": "https://onionsupport.com/#business"
+      },
+      "areaServed": {
+        "@type": "Country",
+        "name": "España"
       }
     }
   ]
@@ -121,7 +134,9 @@
   </script>
   <!-- /public-site-v3 -->
   <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="manifest" href="/site.webmanifest">
   <script src="/src/preboot/theme.js"></script>
+  <link rel="stylesheet" href="/src/css/tokens/public.css">
   <link rel="stylesheet" href="/src/css/seo/public-service.css">
   <link rel="stylesheet" href="/src/css/views/public/legal-footer.css">
   <script type="module" src="/src/analytics/google-tag.js"></script>
@@ -129,7 +144,7 @@
 <body>
   <a class="seo-skip-link" href="#contenido">Saltar al contenido</a>
   <header class="seo-header"><div class="seo-shell seo-header-inner">
-    <a class="seo-brand" href="/" aria-label="Onion Support, inicio"><img src="/src/media/img/favicon_black_circle_128.webp" alt="" width="44" height="44"><span class="seo-brand-name">ONION <strong>SUPPORT</strong></span></a>
+    <a class="seo-brand" href="/" aria-label="Onion Support, inicio"><span class="seo-brand-mark" aria-hidden="true"><img src="/src/media/img/favicon_black_circle_128.webp" alt="" width="34" height="34"></span><span class="seo-brand-name">ONION<strong>SUPPORT</strong></span></a>
     <nav class="seo-nav" aria-label="Navegación principal">
       <details class="seo-service-menu">
         <summary>Servicios <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4 6 4 4 4-4"></path></svg></summary>
@@ -144,6 +159,7 @@
       <a href="#contacto">Contacto</a>
       <a class="seo-nav-access" href="/login">Iniciar sesión</a>
     </nav>
+    <a class="seo-button seo-button--primary seo-header-cta" href="/#incidencia">Abrir incidencia</a>
   </div></header>
   <main class="seo-shell" id="contenido" tabindex="-1">
     <nav class="seo-breadcrumb" aria-label="Ruta de navegación"><a href="/">Inicio</a><span aria-hidden="true">/</span><span aria-current="page">Soporte informático</span></nav>
@@ -152,10 +168,11 @@
       <h1>Soporte y mantenimiento informático para seguir adelante</h1>
       <p class="seo-lead">Asistencia remota en España para particulares, autónomos y empresas. Revisamos equipos, programas, cuentas y periféricos para encontrar la causa de cada incidencia y aplicar una solución adecuada al caso.</p>
       <div class="seo-actions">
-        <a class="seo-button seo-button--primary" href="/#incidencia">Solicitar soporte <span aria-hidden="true">→</span></a>
+        <a class="seo-button seo-button--primary" href="/#incidencia">Abrir incidencia <span aria-hidden="true">→</span></a>
         <a class="seo-button seo-button--secondary" href="https://wa.me/34629946615?text=Hola%20Cristian%2C%20vengo%20desde%20https%3A%2F%2Fonionsupport.com%2Fsoporte-informatico.%20Quiero%20consultar%20el%20servicio%20de%20soporte%20inform%C3%A1tico." target="_blank" rel="noopener noreferrer">Consultar por WhatsApp <span aria-hidden="true">↗</span></a>
       </div>
       <p class="seo-coverage">Asistencia remota en España. La atención presencial se acuerda según el servicio y la ubicación.</p>
+      <ul class="seo-trust" aria-label="Ventajas principales"><li><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.25 2.75 5.75 13h5L10.75 21.25 18.25 10h-5l.25-7.25Z"></path></svg>Trato directo</li><li><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.75 19.25 6v5.5c0 4.42-2.95 7.28-7.25 8.75-4.3-1.47-7.25-4.33-7.25-8.75V6L12 3.75Z"></path><path d="m8.75 12 2.15 2.15 4.35-4.65"></path></svg>Presupuesto previo</li><li><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.25 3.75h9.5v16.5l-2-1.2-2.75 1.2-2.75-1.2-2 1.2V3.75Z"></path><path d="M9.25 8h5.5"></path><path d="M9.25 11.75h5.5"></path><path d="M9.25 15.5h3"></path></svg>Servicio con factura</li></ul>
     </div><aside class="seo-card" aria-labelledby="resumen-servicio">
       <span class="seo-service-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17v-2a10 10 0 0 1 20 0v2M6 16H4v8h5v-8H6ZM26 16h2v8h-5v-8h3ZM26 24v1a3 3 0 0 1-3 3h-7"></path></svg></span>
       <p class="seo-card-kicker">El servicio, de un vistazo</p>
@@ -173,12 +190,31 @@
       <section><span class="seo-section-number" aria-hidden="true">06</span><h3>Antes de intervenir</h3><p>Confirmamos contigo el alcance, la modalidad de atención y el presupuesto. La atención presencial se acuerda según el servicio y la ubicación.</p></section>
       </div>
     </section>
-    <section class="seo-contact" aria-labelledby="contacto"><div><p class="seo-eyebrow">El siguiente paso</p><h2 id="contacto">Cuéntame qué está fallando.</h2><p>Estos detalles ayudan a orientar la primera revisión:</p><ul class="seo-contact-preparation"><li>El equipo, programa o dispositivo que está dando problemas.</li><li>Qué intentabas hacer y el mensaje de error, si lo hay.</li><li>Desde cuándo ocurre y si el equipo puede conectarse a Internet.</li></ul><p>Antes de intervenir, confirmamos el alcance, la modalidad de atención y el presupuesto.</p><div class="seo-contact-details"><a href="tel:+34629946615">629 946 615</a><a href="mailto:cristian@onionsupport.com">cristian@onionsupport.com</a></div></div><a class="seo-button seo-button--primary" href="/#incidencia">Explicar mi incidencia <span aria-hidden="true">→</span></a></section>
+    <section class="seo-method" aria-labelledby="metodo">
+      <div class="seo-section-heading"><p class="seo-eyebrow">Cómo trabajamos</p><h2 id="metodo">Sabes qué pasa. Tú decides.</h2></div>
+      <ol class="seo-method-grid">
+        <li><span class="seo-section-number" aria-hidden="true">01</span><h3>Cuéntame qué ocurre</h3><p>Envía el modelo del equipo, los síntomas y desde cuándo falla. Revisaré tu solicitud y te contactaré para concretar el diagnóstico.</p></li>
+        <li><span class="seo-section-number" aria-hidden="true">02</span><h3>Conoce tus opciones</h3><p>Te explico el problema, la solución propuesta y el presupuesto. Decides cómo continuar antes de la reparación.</p></li>
+        <li><span class="seo-section-number" aria-hidden="true">03</span><h3>Recibe la solución</h3><p>Realizo el trabajo acordado y compruebo el resultado. Con factura y una explicación clara de la intervención.</p></li>
+      </ol>
+    </section>
+    <section class="seo-contact" aria-labelledby="contacto"><div><p class="seo-eyebrow">El siguiente paso</p><h2 id="contacto">Cuéntame qué está fallando.</h2><p>Estos detalles ayudan a orientar la primera revisión:</p><ul class="seo-contact-preparation"><li>El equipo, programa o dispositivo que está dando problemas.</li><li>Qué intentabas hacer y el mensaje de error, si lo hay.</li><li>Desde cuándo ocurre y si el equipo puede conectarse a Internet.</li></ul><p>Antes de intervenir, confirmamos el alcance, la modalidad de atención y el presupuesto.</p><div class="seo-contact-details"><a href="tel:+34629946615">629 946 615</a><a href="mailto:cristian@onionsupport.com">cristian@onionsupport.com</a></div></div><a class="seo-button seo-button--primary" href="/#incidencia">Abrir incidencia <span aria-hidden="true">→</span></a></section>
+    <section class="seo-faq" aria-labelledby="faq">
+      <div class="seo-section-heading"><p class="seo-eyebrow">Preguntas frecuentes</p><h2 id="faq">Antes de empezar.</h2></div>
+      <div class="seo-faq-list">
+        <details class="seo-faq-item"><summary>¿El soporte es remoto o presencial?</summary><p>La asistencia es remota en toda España, contigo delante del equipo y con tu autorización en cada paso. La atención presencial se acuerda según el servicio y la ubicación.</p></details>
+        <details class="seo-faq-item"><summary>¿Qué necesito para una sesión remota?</summary><p>Conexión a Internet en el equipo afectado y poder estar delante de él durante la sesión. Te indico los pasos y ves en pantalla todo lo que se hace.</p></details>
+        <details class="seo-faq-item"><summary>¿Atendéis programas y cuentas, no solo averías?</summary><p>Sí. La configuración de programas, correo, cuentas, navegadores y periféricos forma parte del soporte. Si el problema es de uso y no de avería, también te lo explico.</p></details>
+        <details class="seo-faq-item"><summary>¿Atendéis en toda España?</summary><p>Asistencia remota en España. La atención presencial se acuerda según el servicio y la ubicación. Cuéntame qué ocurre y dónde estás para valorar la modalidad de asistencia adecuada.</p></details>
+        <details class="seo-faq-item"><summary>¿Hay presupuesto antes de reparar?</summary><p>Sí. El coste depende de la avería, el trabajo y los componentes necesarios. Te explicaré las opciones y el presupuesto para que decidas antes de la reparación.</p></details>
+        <details class="seo-faq-item"><summary>¿Emites factura?</summary><p>Sí. Emitimos factura por los servicios prestados a particulares, autónomos y empresas.</p></details>
+      </div>
+    </section>
     <section class="seo-links" aria-labelledby="otros-servicios"><div class="seo-section-heading"><p class="seo-eyebrow">También puedo ayudarte con</p><h2 id="otros-servicios">Otros servicios</h2></div><div class="seo-link-grid">
-        <a href="/reparacion-ordenadores"><span>Reparación de ordenadores</span><span aria-hidden="true">↗</span></a>
-        <a href="/redes-wifi"><span>WiFi y redes</span><span aria-hidden="true">↗</span></a>
-        <a href="/impresoras"><span>Impresoras</span><span aria-hidden="true">↗</span></a>
-        <a href="/soporte-empresas"><span>Soporte para empresas</span><span aria-hidden="true">↗</span></a>
+        <a href="/reparacion-ordenadores"><span>Reparación de ordenadores</span><span aria-hidden="true">→</span></a>
+        <a href="/redes-wifi"><span>WiFi y redes</span><span aria-hidden="true">→</span></a>
+        <a href="/impresoras"><span>Impresoras</span><span aria-hidden="true">→</span></a>
+        <a href="/soporte-empresas"><span>Soporte para empresas</span><span aria-hidden="true">→</span></a>
     </div>
     </section>
   </main>
@@ -190,6 +226,16 @@
             <p>Servicio técnico informático para particulares y empresas.</p>
             <p>Cristian Ávila Luque · Profesional autónomo<br>NIF 20568568J</p>
             <address>C/ Rafael de Casanova, 54, 1.º 3.ª, 08295 Sant Vicenç de Castellet (Barcelona)</address>
+          </div>
+          <div>
+            <p class="public-legal-footer__label">Servicios</p>
+            <ul class="public-legal-footer__services">
+              <li><a href="/reparacion-ordenadores">Reparación de ordenadores</a></li>
+              <li><a href="/soporte-informatico">Soporte informático</a></li>
+              <li><a href="/redes-wifi">WiFi y redes</a></li>
+              <li><a href="/impresoras">Impresoras</a></li>
+              <li><a href="/soporte-empresas">Soporte para empresas</a></li>
+            </ul>
           </div>
           <div>
             <p class="public-legal-footer__label">Atención al cliente</p>

@@ -1,0 +1,189 @@
+/* =========================================================
+   ONION SUPPORT — PUBLIC DESIGN TOKENS
+   Archivo: /src/css/tokens/public.css
+
+   ÚNICA AUTORIDAD DE PALETA, TIPOGRAFÍA, RADIOS Y SOMBRAS PÚBLICAS
+
+   Consumidores:
+   - páginas estáticas de servicio (seo/*.html) → <link> directo;
+   - Home pública, acceso, recuperación y activación → manifest de ruta;
+   - pie legal, consentimiento de Google y fallback sin JavaScript → var()
+     con el mismo valor como fallback, para no depender del orden de carga.
+
+   Reglas:
+   - Sólo custom properties: sin layout, sin componentes, sin @import.
+   - Dark es la base de marca; light se activa por tema efectivo
+     (preboot/theme.js) o por preferencia del sistema sin JavaScript.
+   - Los nombres --public-* no colisionan con los tokens graphite privados.
+========================================================= */
+
+@layer tokens {
+
+:root {
+  --public-font-sans:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+
+  /* Canvas y superficies */
+  --public-canvas: #030712;
+  --public-canvas-2: #07111f;
+  --public-surface: #0a1526;
+  --public-surface-2: #101f33;
+  --public-surface-glass: rgb(8 18 34 / .82);
+  --public-header: rgb(3 7 18 / .88);
+
+  /* Texto */
+  --public-text: #eaf4ff;
+  --public-text-strong: #ffffff;
+  --public-text-soft: #b8c8dd;
+  --public-text-muted: #9aaac0;
+  --public-text-on-accent: #ffffff;
+
+  /* Marca */
+  --public-accent: #1394ff;
+  --public-accent-2: #34d4ff;
+  --public-accent-3: #0b61ff;
+  --public-accent-text: #55baff;
+  --public-accent-soft: rgb(19 148 255 / .11);
+  --public-success: #25d366;
+  --public-danger: #ff5c75;
+
+  /* Bordes y sombras */
+  --public-border: rgb(255 255 255 / .12);
+  --public-border-strong: rgb(75 184 255 / .40);
+  --public-shadow: 0 22px 64px rgb(0 0 0 / .30);
+  --public-shadow-soft: 0 12px 32px rgb(0 0 0 / .16);
+
+  /* Geometría compartida */
+  --public-radius-sm: 12px;
+  --public-radius-md: 16px;
+  --public-radius-lg: 24px;
+  --public-radius-xl: 30px;
+  --public-radius-pill: 999px;
+  --public-control-height: 52px;
+  --public-shell-max: 1280px;
+  --public-gutter: clamp(20px, 4vw, 56px);
+
+  /* Botón primario: el mismo azul en Home, servicios, acceso y consentimiento */
+  --public-button-primary-bg: linear-gradient(120deg, #1394ff, #0b61ff);
+  --public-button-primary-shadow: 0 14px 34px rgb(19 148 255 / .26);
+  --public-focus: var(--public-accent-2);
+}
+
+html:is([data-theme="light"], .theme-light) {
+  --public-canvas: #f4f7fb;
+  --public-canvas-2: #edf3f9;
+  --public-surface: #ffffff;
+  --public-surface-2: #edf3f9;
+  --public-surface-glass: rgb(255 255 255 / .82);
+  --public-header: rgb(255 255 255 / .92);
+
+  --public-text: #142338;
+  --public-text-strong: #081423;
+  --public-text-soft: #52667c;
+  --public-text-muted: #5f7289;
+
+  --public-accent: #0964d5;
+  --public-accent-2: #0873c7;
+  --public-accent-3: #0755cc;
+  --public-accent-text: #075fa8;
+  --public-accent-soft: rgb(19 148 255 / .08);
+  --public-danger: #b42342;
+
+  --public-border: rgb(18 57 94 / .12);
+  --public-border-strong: rgb(19 148 255 / .34);
+  --public-shadow: 0 18px 52px rgb(31 67 103 / .10);
+  --public-shadow-soft: 0 10px 28px rgb(31 67 103 / .08);
+
+  --public-button-primary-bg: linear-gradient(120deg, #086edb, #0755cc);
+  --public-button-primary-shadow: 0 10px 24px rgb(9 100 213 / .16);
+  --public-focus: #0964d5;
+}
+
+/* Sin JavaScript no hay data-theme: sigue la preferencia del sistema. */
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]):not(.theme-dark) {
+    --public-canvas: #f4f7fb;
+    --public-canvas-2: #edf3f9;
+    --public-surface: #ffffff;
+    --public-surface-2: #edf3f9;
+    --public-surface-glass: rgb(255 255 255 / .82);
+    --public-header: rgb(255 255 255 / .92);
+
+    --public-text: #142338;
+    --public-text-strong: #081423;
+    --public-text-soft: #52667c;
+    --public-text-muted: #5f7289;
+
+    --public-accent: #0964d5;
+    --public-accent-2: #0873c7;
+    --public-accent-3: #0755cc;
+    --public-accent-text: #075fa8;
+    --public-accent-soft: rgb(19 148 255 / .08);
+    --public-danger: #b42342;
+
+    --public-border: rgb(18 57 94 / .12);
+    --public-border-strong: rgb(19 148 255 / .34);
+    --public-shadow: 0 18px 52px rgb(31 67 103 / .10);
+    --public-shadow-soft: 0 10px 28px rgb(31 67 103 / .08);
+
+    --public-button-primary-bg: linear-gradient(120deg, #086edb, #0755cc);
+    --public-button-primary-shadow: 0 10px 24px rgb(9 100 213 / .16);
+    --public-focus: #0964d5;
+  }
+}
+
+@media (forced-colors: active) {
+  :root,
+  html:is([data-theme="light"], .theme-light) {
+    --public-canvas: Canvas;
+    --public-canvas-2: Canvas;
+    --public-surface: Canvas;
+    --public-surface-2: Canvas;
+    --public-surface-glass: Canvas;
+    --public-header: Canvas;
+    --public-text: CanvasText;
+    --public-text-strong: CanvasText;
+    --public-text-soft: CanvasText;
+    --public-text-muted: CanvasText;
+    --public-text-on-accent: ButtonText;
+    --public-accent: LinkText;
+    --public-accent-2: LinkText;
+    --public-accent-3: LinkText;
+    --public-accent-text: LinkText;
+    --public-accent-soft: Canvas;
+    --public-border: CanvasText;
+    --public-border-strong: CanvasText;
+    --public-shadow: none;
+    --public-shadow-soft: none;
+    --public-button-primary-bg: ButtonFace;
+    --public-button-primary-shadow: none;
+    --public-focus: Highlight;
+  }
+}
+
+@media print {
+  :root,
+  html:is([data-theme="light"], .theme-light) {
+    --public-canvas: #ffffff;
+    --public-canvas-2: #ffffff;
+    --public-surface: #ffffff;
+    --public-surface-2: #ffffff;
+    --public-text: #000000;
+    --public-text-strong: #000000;
+    --public-text-soft: #222222;
+    --public-text-muted: #333333;
+    --public-shadow: none;
+    --public-shadow-soft: none;
+  }
+}
+
+}

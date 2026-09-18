@@ -14,6 +14,7 @@ const BASE_AUTH_CSS =
 const PORTAL_LAYOUT_CSS =
   "/src/css/auth/login.portal-layout.css";
 const PUBLIC_LEGAL_CSS = "/src/css/views/public/legal-footer.css";
+const PUBLIC_TOKENS_CSS = "/src/css/tokens/public.css";
 
 const layoutCss =
   read("src/css/auth/login.portal-layout.css");
@@ -76,11 +77,12 @@ assert.equal(
 assert.deepEqual(
   getRouteStyleHrefs("login"),
   [
+    PUBLIC_TOKENS_CSS,
     PUBLIC_LEGAL_CSS,
     BASE_AUTH_CSS,
     PORTAL_LAYOUT_CSS,
   ],
-  "Login debe cargar base visual y geometría portal en ese orden"
+  "Login debe cargar tokens públicos, base visual y geometría portal en ese orden"
 );
 
 for (const siblingRoute of [
@@ -90,7 +92,7 @@ for (const siblingRoute of [
 ]) {
   assert.deepEqual(
     getRouteStyleHrefs(siblingRoute),
-    [PUBLIC_LEGAL_CSS, BASE_AUTH_CSS],
+    [PUBLIC_TOKENS_CSS, PUBLIC_LEGAL_CSS, BASE_AUTH_CSS],
     `${siblingRoute} no debe heredar la composición exclusiva del login`
   );
 }

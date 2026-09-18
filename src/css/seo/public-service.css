@@ -1,59 +1,19 @@
 @charset "UTF-8";
 
-/* Standalone public service composition. Theme follows the shared preboot
-   preference, with a system fallback when JavaScript is unavailable. */
+/* =========================================================
+   ONION SUPPORT — PUBLIC SERVICE PAGES
+   Archivo: /src/css/seo/public-service.css
+
+   Composición de las cinco páginas estáticas de servicio. La paleta, la
+   tipografía, los radios y las sombras vienen de /src/css/tokens/public.css,
+   la misma autoridad que usan Home, acceso, pie legal y consentimiento.
+   Aquí sólo vive la geometría de la página.
+========================================================= */
+
 :root {
-  color-scheme: light;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --seo-bg: #f4f7fb;
-  --seo-surface: #ffffff;
-  --seo-surface-soft: #edf3f9;
-  --seo-header: rgb(255 255 255 / .94);
-  --seo-text: #142338;
-  --seo-text-strong: #081423;
-  --seo-text-soft: #52667c;
-  --seo-accent: #0964d5;
-  --seo-accent-soft: rgb(19 148 255 / .08);
-  --seo-border: rgb(18 57 94 / .14);
-  --seo-border-strong: rgb(19 148 255 / .30);
-  --seo-shadow: 0 24px 68px rgb(31 67 103 / .10);
-  --seo-gutter: clamp(20px, 4vw, 56px);
-  background: var(--seo-bg);
-  color: var(--seo-text);
-}
-
-html[data-theme="dark"] {
-  color-scheme: dark;
-  --seo-bg: #030712;
-  --seo-surface: #0a1526;
-  --seo-surface-soft: #101f33;
-  --seo-header: rgb(3 7 18 / .94);
-  --seo-text: #eaf4ff;
-  --seo-text-strong: #ffffff;
-  --seo-text-soft: #b8c8dd;
-  --seo-accent: #55baff;
-  --seo-accent-soft: rgb(19 148 255 / .11);
-  --seo-border: rgb(184 200 221 / .17);
-  --seo-border-strong: rgb(75 184 255 / .36);
-  --seo-shadow: 0 24px 68px rgb(0 0 0 / .24);
-}
-
-@media (prefers-color-scheme: dark) {
-  html:not([data-theme]) {
-    color-scheme: dark;
-    --seo-bg: #030712;
-    --seo-surface: #0a1526;
-    --seo-surface-soft: #101f33;
-    --seo-header: rgb(3 7 18 / .94);
-    --seo-text: #eaf4ff;
-    --seo-text-strong: #ffffff;
-    --seo-text-soft: #b8c8dd;
-    --seo-accent: #55baff;
-    --seo-accent-soft: rgb(19 148 255 / .11);
-    --seo-border: rgb(184 200 221 / .17);
-    --seo-border-strong: rgb(75 184 255 / .36);
-    --seo-shadow: 0 24px 68px rgb(0 0 0 / .24);
-  }
+  font-family: var(--public-font-sans, ui-sans-serif, system-ui, sans-serif);
+  background: var(--public-canvas);
+  color: var(--public-text);
 }
 
 *,
@@ -72,7 +32,9 @@ body {
   min-block-size: 100vh;
   min-block-size: 100dvh;
   margin: 0;
-  background: radial-gradient(ellipse at 85% 12%, var(--seo-accent-soft), transparent 36rem), var(--seo-bg);
+  background:
+    radial-gradient(ellipse at 85% 12%, var(--public-accent-soft), transparent 36rem),
+    var(--public-canvas);
   line-height: 1.65;
 }
 
@@ -86,7 +48,7 @@ p {
 h1,
 h2,
 h3 {
-  color: var(--seo-text-strong);
+  color: var(--public-text-strong);
   text-wrap: balance;
 }
 
@@ -96,24 +58,25 @@ a {
 }
 
 a,
-button {
+button,
+summary {
   touch-action: manipulation;
 }
 
 :focus-visible {
-  outline: 3px solid var(--seo-accent);
+  outline: 3px solid var(--public-focus);
   outline-offset: 4px;
 }
 
 ::selection {
   color: #ffffff;
-  background: #0964d5;
+  background: var(--public-accent);
 }
 
 .seo-shell {
-  inline-size: min(100%, 1280px);
+  inline-size: min(100%, var(--public-shell-max));
   margin-inline: auto;
-  padding-inline: max(var(--seo-gutter), env(safe-area-inset-left)) max(var(--seo-gutter), env(safe-area-inset-right));
+  padding-inline: max(var(--public-gutter), env(safe-area-inset-left)) max(var(--public-gutter), env(safe-area-inset-right));
 }
 
 .seo-skip-link {
@@ -122,9 +85,9 @@ button {
   inset-inline-start: 16px;
   z-index: 100;
   padding: 12px 18px;
-  border-radius: 10px;
-  color: var(--seo-text-strong);
-  background: var(--seo-surface);
+  border-radius: var(--public-radius-sm);
+  color: var(--public-text-strong);
+  background: var(--public-surface);
   transform: translateY(-160%);
 }
 
@@ -132,13 +95,16 @@ button {
   transform: none;
 }
 
-/* A compact, fully visible navigation at every width. */
+/* =========================================================
+   HEADER · marca, servicios, contacto, acceso y CTA
+========================================================= */
+
 .seo-header {
   position: sticky;
   inset-block-start: 0;
   z-index: 30;
-  border-block-end: 1px solid var(--seo-border);
-  background: var(--seo-header);
+  border-block-end: 1px solid var(--public-border);
+  background: var(--public-header);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
@@ -157,33 +123,55 @@ button {
   align-items: center;
   gap: 11px;
   flex-shrink: 0;
-  color: var(--seo-text-strong);
+  color: var(--public-text-strong);
   text-decoration: none;
 }
 
-.seo-brand img {
-  display: block;
+/* La misma marca que Home y acceso: tesela azul con el emblema encima. */
+.seo-brand-mark {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 44px;
   inline-size: 44px;
   block-size: 44px;
-  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / .16);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 30% 18%, rgb(255 255 255 / .36), transparent 32%),
+    linear-gradient(135deg, var(--public-accent), var(--public-accent-3));
+  box-shadow:
+    0 12px 28px rgb(19 148 255 / .24),
+    inset 0 1px 0 rgb(255 255 255 / .22);
+}
+
+.seo-brand-mark img {
+  display: block;
+  inline-size: 32px;
+  block-size: 32px;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 12px rgb(0 0 0 / .25));
 }
 
 .seo-brand-name {
-  font-size: 19px;
+  display: inline-flex;
+  align-items: baseline;
+  font-size: 20px;
   font-weight: 800;
   letter-spacing: -.045em;
   white-space: nowrap;
 }
 
 .seo-brand-name strong {
-  color: var(--seo-accent);
-  font-weight: 650;
+  color: var(--public-accent-text);
+  font-weight: 800;
 }
 
 .seo-nav {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-inline-size: 0;
   font-size: 14px;
   font-weight: 650;
@@ -197,7 +185,7 @@ button {
   min-block-size: 44px;
   padding-inline: 14px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--public-radius-sm);
   text-decoration: none;
 }
 
@@ -218,8 +206,8 @@ button {
 }
 
 .seo-service-menu[open] summary {
-  border-color: var(--seo-border-strong);
-  background: var(--seo-accent-soft);
+  border-color: var(--public-border-strong);
+  background: var(--public-accent-soft);
 }
 
 .seo-service-menu[open] summary svg {
@@ -229,14 +217,14 @@ button {
 .seo-service-options {
   position: absolute;
   inset-block-start: calc(100% + 8px);
-  inset-inline-end: var(--seo-gutter);
+  inset-inline-end: var(--public-gutter);
   inline-size: min(340px, calc(100vw - 40px));
   margin: 0;
   padding: 8px;
-  border: 1px solid var(--seo-border);
-  border-radius: 14px;
-  background: var(--seo-surface);
-  box-shadow: var(--seo-shadow);
+  border: 1px solid var(--public-border);
+  border-radius: var(--public-radius-md);
+  background: var(--public-surface);
+  box-shadow: var(--public-shadow);
   list-style: none;
 }
 
@@ -248,14 +236,21 @@ button {
 }
 
 .seo-service-options a[aria-current="page"] {
-  color: var(--seo-accent);
-  border-color: var(--seo-border-strong);
-  background: var(--seo-accent-soft);
+  color: var(--public-accent-text);
+  border-color: var(--public-border-strong);
+  background: var(--public-accent-soft);
 }
 
 .seo-nav .seo-nav-access {
-  border-color: var(--seo-border);
-  background: var(--seo-surface);
+  border-color: var(--public-border);
+  background: var(--public-surface);
+}
+
+.seo-header-cta {
+  flex-shrink: 0;
+  min-block-size: 46px;
+  padding: 0 20px;
+  font-size: 14px;
 }
 
 .seo-breadcrumb {
@@ -264,7 +259,7 @@ button {
   gap: 10px;
   align-items: center;
   padding-block: 24px 0;
-  color: var(--seo-text-soft);
+  color: var(--public-text-soft);
   font-size: 13px;
 }
 
@@ -274,7 +269,10 @@ button {
   min-block-size: 36px;
 }
 
-/* The heading and summary remain readable on tablet, without fixed heights. */
+/* =========================================================
+   HERO
+========================================================= */
+
 .seo-hero {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, .8fr);
@@ -290,11 +288,11 @@ button {
 
 .seo-eyebrow {
   margin-block-end: 16px;
-  color: var(--seo-accent);
-  font-size: 11px;
+  color: var(--public-accent-text);
+  font-size: 12px;
   font-weight: 750;
   line-height: 1.5;
-  letter-spacing: .1em;
+  letter-spacing: .08em;
   text-transform: uppercase;
 }
 
@@ -302,16 +300,16 @@ h1 {
   max-inline-size: 17ch;
   margin-block-end: 0;
   font-size: clamp(2.65rem, 4.6vw, 4.4rem);
-  font-weight: 780;
+  font-weight: 800;
   line-height: 1.06;
-  letter-spacing: -.052em;
+  letter-spacing: -.045em;
   overflow-wrap: break-word;
 }
 
 .seo-lead {
   max-inline-size: 58ch;
   margin-block: 24px 0;
-  color: var(--seo-text-soft);
+  color: var(--public-text-soft);
   font-size: clamp(16px, 1.35vw, 18px);
   line-height: 1.75;
   text-wrap: pretty;
@@ -324,49 +322,85 @@ h1 {
   margin-block-start: 30px;
 }
 
+/* Los mismos botones que Home y acceso: primario azul, secundario en superficie. */
 .seo-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  min-block-size: 52px;
-  padding: 13px 20px;
+  gap: 14px;
+  min-block-size: var(--public-control-height);
+  padding: 12px 22px;
   border: 1px solid transparent;
-  border-radius: 12px;
-  font-size: 14px;
+  border-radius: var(--public-radius-md);
+  font-size: 15px;
   font-weight: 700;
   line-height: 1.4;
   text-decoration: none;
-  transition: background .18s ease, border-color .18s ease, transform .18s ease;
+  transition: background .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease;
 }
 
 .seo-button--primary {
-  color: #ffffff;
-  background: linear-gradient(120deg, #086edb, #0755cc);
-  box-shadow: 0 10px 24px rgb(9 100 213 / .16);
+  color: var(--public-text-on-accent);
+  background: var(--public-button-primary-bg);
+  box-shadow: var(--public-button-primary-shadow);
 }
 
 .seo-button--secondary {
-  color: var(--seo-text-strong);
-  border-color: var(--seo-border);
-  background: var(--seo-surface);
+  color: var(--public-text-strong);
+  border-color: var(--public-border);
+  background: var(--public-surface);
 }
 
 .seo-coverage {
   max-inline-size: 56ch;
   margin-block: 22px 0;
-  color: var(--seo-text-soft);
+  color: var(--public-text-soft);
   font-size: 13px;
   line-height: 1.6;
+}
+
+.seo-trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin: 22px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--public-text);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.seo-trust li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.seo-trust svg {
+  inline-size: 30px;
+  block-size: 30px;
+  padding: 6px;
+  border: 1px solid var(--public-border-strong);
+  border-radius: 10px;
+  color: var(--public-accent-text);
+  background: var(--public-accent-soft);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .seo-card {
   position: relative;
   padding: clamp(26px, 3vw, 36px);
-  border: 1px solid var(--seo-border-strong);
-  border-radius: 24px;
-  background: radial-gradient(ellipse at 100% 0, var(--seo-accent-soft), transparent 80%), var(--seo-surface);
-  box-shadow: var(--seo-shadow);
+  border: 1px solid var(--public-border-strong);
+  border-radius: var(--public-radius-lg);
+  background:
+    radial-gradient(ellipse at 100% 0, var(--public-accent-soft), transparent 80%),
+    var(--public-surface);
+  box-shadow: var(--public-shadow);
 }
 
 .seo-service-icon {
@@ -375,10 +409,10 @@ h1 {
   inline-size: 60px;
   block-size: 60px;
   margin-block-end: 30px;
-  border: 1px solid var(--seo-border-strong);
-  border-radius: 17px;
-  color: var(--seo-accent);
-  background: var(--seo-accent-soft);
+  border: 1px solid var(--public-border-strong);
+  border-radius: var(--public-radius-md);
+  color: var(--public-accent-text);
+  background: var(--public-accent-soft);
 }
 
 .seo-service-icon svg {
@@ -388,14 +422,14 @@ h1 {
 
 .seo-card-kicker {
   margin-block-end: 10px;
-  color: var(--seo-text-soft);
+  color: var(--public-text-soft);
   font-size: 12px;
 }
 
 .seo-card h2 {
   margin-block-end: 24px;
   font-size: clamp(26px, 2.5vw, 34px);
-  font-weight: 740;
+  font-weight: 800;
   letter-spacing: -.035em;
   line-height: 1.18;
 }
@@ -405,9 +439,9 @@ h1 {
   gap: 14px;
   margin: 0;
   padding: 24px 0 0;
-  border-block-start: 1px solid var(--seo-border);
+  border-block-start: 1px solid var(--public-border);
   list-style: none;
-  color: var(--seo-text-soft);
+  color: var(--public-text-soft);
   font-size: 14px;
 }
 
@@ -419,13 +453,19 @@ h1 {
 }
 
 .seo-card li > span {
-  color: var(--seo-accent);
+  color: var(--public-accent-text);
   font-weight: 750;
 }
 
-.seo-detail {
+/* =========================================================
+   SECCIONES · detalle, método, contacto, FAQ, relacionados
+========================================================= */
+
+.seo-detail,
+.seo-method,
+.seo-faq {
   padding-block: 44px 72px;
-  border-block-start: 1px solid var(--seo-border);
+  border-block-start: 1px solid var(--public-border);
 }
 
 .seo-section-heading {
@@ -440,47 +480,64 @@ h1 {
 .seo-contact h2 {
   margin-block-end: 0;
   font-size: clamp(28px, 3vw, 40px);
-  font-weight: 730;
+  font-weight: 800;
   letter-spacing: -.04em;
   line-height: 1.18;
   text-wrap: pretty;
 }
 
-.seo-content {
+.seo-content,
+.seo-method-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
 }
 
-.seo-content section {
+.seo-method-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.seo-content section,
+.seo-method-grid li {
   padding: clamp(24px, 2.5vw, 32px);
-  border: 1px solid var(--seo-border);
-  border-radius: 18px;
-  background: var(--seo-surface);
+  border: 1px solid var(--public-border);
+  border-radius: var(--public-radius-lg);
+  background: var(--public-surface);
+  box-shadow: var(--public-shadow-soft);
+}
+
+/* Un número impar de tarjetas no deja huérfana la última. */
+.seo-content > section:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
 
 .seo-section-number {
   display: block;
   margin-block-end: 24px;
-  color: var(--seo-accent);
+  color: var(--public-accent-text);
   font-size: 12px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
-.seo-content h3 {
+.seo-content h3,
+.seo-method-grid h3 {
   max-inline-size: 30ch;
   margin-block-end: 12px;
   font-size: 21px;
-  font-weight: 720;
+  font-weight: 750;
   line-height: 1.3;
   letter-spacing: -.025em;
   text-wrap: pretty;
 }
 
-.seo-content p {
+.seo-content p,
+.seo-method-grid p {
   margin-block-end: 0;
-  color: var(--seo-text-soft);
+  color: var(--public-text-soft);
   font-size: 15px;
   line-height: 1.8;
   text-wrap: pretty;
@@ -492,15 +549,15 @@ h1 {
   align-items: center;
   gap: 32px;
   padding: clamp(28px, 4vw, 48px);
-  border: 1px solid var(--seo-border-strong);
-  border-radius: 22px;
-  background: var(--seo-accent-soft);
+  border: 1px solid var(--public-border-strong);
+  border-radius: var(--public-radius-lg);
+  background: var(--public-accent-soft);
 }
 
 .seo-contact p:not(.seo-eyebrow) {
   max-inline-size: 58ch;
   margin-block: 16px 0;
-  color: var(--seo-text-soft);
+  color: var(--public-text-soft);
   font-size: 15px;
 }
 
@@ -518,13 +575,13 @@ h1 {
   max-inline-size: 58ch;
   margin-block: 16px 0;
   padding-inline-start: 20px;
-  color: var(--seo-text-soft);
+  color: var(--public-text-soft);
   font-size: 15px;
   line-height: 1.7;
 }
 
 .seo-contact-preparation li::marker {
-  color: var(--seo-accent);
+  color: var(--public-accent-text);
 }
 
 .seo-contact-details a {
@@ -534,8 +591,66 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.seo-faq-list {
+  display: grid;
+  gap: 12px;
+  max-inline-size: 860px;
+}
+
+.seo-faq-item {
+  border: 1px solid var(--public-border);
+  border-radius: var(--public-radius-md);
+  background: var(--public-surface);
+}
+
+.seo-faq-item summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-block-size: 56px;
+  padding: 14px 20px;
+  color: var(--public-text-strong);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.4;
+  cursor: pointer;
+  list-style: none;
+}
+
+.seo-faq-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.seo-faq-item summary::after {
+  content: "+";
+  flex-shrink: 0;
+  inline-size: 28px;
+  block-size: 28px;
+  border: 1px solid var(--public-border-strong);
+  border-radius: 50%;
+  color: var(--public-accent-text);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 26px;
+  text-align: center;
+}
+
+.seo-faq-item[open] summary::after {
+  content: "−";
+}
+
+.seo-faq-item p {
+  margin: 0;
+  padding: 0 20px 18px;
+  color: var(--public-text-soft);
+  font-size: 15px;
+  line-height: 1.75;
+  text-wrap: pretty;
+}
+
 .seo-links {
-  padding-block: 72px 80px;
+  padding-block: 0 80px;
 }
 
 .seo-link-grid {
@@ -551,9 +666,9 @@ h1 {
   gap: 16px;
   min-block-size: 64px;
   padding: 16px 20px;
-  border: 1px solid var(--seo-border);
-  border-radius: 12px;
-  background: var(--seo-surface);
+  border: 1px solid var(--public-border);
+  border-radius: var(--public-radius-md);
+  background: var(--public-surface);
   font-size: 15px;
   font-weight: 650;
   line-height: 1.5;
@@ -561,7 +676,7 @@ h1 {
 }
 
 .seo-link-grid a > span:last-child {
-  color: var(--seo-accent);
+  color: var(--public-accent-text);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -569,13 +684,27 @@ h1 {
   .seo-service-menu summary:hover,
   .seo-link-grid a:hover,
   .seo-button--secondary:hover {
-    border-color: var(--seo-border-strong);
-    background: var(--seo-accent-soft);
+    border-color: var(--public-border-strong);
+    background: var(--public-accent-soft);
   }
 
   .seo-button--primary:hover {
-    background: #074fb8;
     transform: translateY(-1px);
+    filter: brightness(1.05);
+  }
+
+  .seo-faq-item summary:hover {
+    color: var(--public-accent-text);
+  }
+}
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+
+@media (max-width: 1100px) {
+  .seo-method-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -601,29 +730,42 @@ h1 {
     scroll-padding-block-start: 150px;
   }
 
+  /* Dos filas: marca + CTA primero; servicios, contacto y acceso debajo. */
   .seo-header-inner {
     flex-wrap: wrap;
-    justify-content: center;
-    gap: 8px;
+    justify-content: space-between;
+    gap: 10px 12px;
+    min-block-size: 0;
     padding-block: max(12px, env(safe-area-inset-top)) 10px;
   }
 
-  .seo-brand {
-    justify-content: center;
-    inline-size: 100%;
+  .seo-brand-mark {
+    flex-basis: 40px;
+    inline-size: 40px;
+    block-size: 40px;
+    border-radius: 14px;
   }
 
-  .seo-brand img {
-    inline-size: 36px;
-    block-size: 36px;
+  .seo-brand-mark img {
+    inline-size: 29px;
+    block-size: 29px;
   }
 
   .seo-brand-name {
     font-size: 17px;
   }
 
+  .seo-header-cta {
+    order: 1;
+    min-block-size: 44px;
+    padding: 0 16px;
+    font-size: 13px;
+  }
+
   .seo-nav {
-    justify-content: center;
+    order: 2;
+    flex-wrap: wrap;
+    justify-content: flex-start;
     gap: 4px;
     inline-size: 100%;
     font-size: 13px;
@@ -631,7 +773,14 @@ h1 {
 
   .seo-nav a,
   .seo-service-menu summary {
+    min-block-size: 40px;
     padding-inline: 12px;
+    white-space: nowrap;
+  }
+
+  .seo-service-options {
+    inset-inline-end: auto;
+    inset-inline-start: var(--public-gutter);
   }
 
   .seo-hero {
@@ -643,7 +792,7 @@ h1 {
   h1 {
     max-inline-size: 19ch;
     font-size: clamp(36px, 8.8vw, 52px);
-    letter-spacing: -.045em;
+    letter-spacing: -.04em;
   }
 
   .seo-card {
@@ -658,23 +807,58 @@ h1 {
     font-size: 28px;
   }
 
-  .seo-content {
+  .seo-content,
+  .seo-method-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .seo-detail {
+  .seo-detail,
+  .seo-method,
+  .seo-faq {
     padding-block: 36px 48px;
   }
 
   .seo-links {
-    padding-block: 48px;
+    padding-block: 0 48px;
   }
 }
 
 @media (max-width: 480px) {
+  /* Marca y CTA caben en la primera fila; la navegación ocupa la segunda. */
+  .seo-brand {
+    gap: 8px;
+  }
+
+  .seo-brand-mark {
+    flex-basis: 36px;
+    inline-size: 36px;
+    block-size: 36px;
+    border-radius: 12px;
+  }
+
+  .seo-brand-mark img {
+    inline-size: 26px;
+    block-size: 26px;
+  }
+
+  .seo-brand-name {
+    font-size: 15px;
+  }
+
+  .seo-header-cta {
+    min-block-size: 40px;
+    padding: 0 14px;
+    font-size: 13px;
+  }
+
+  .seo-nav {
+    gap: 2px;
+  }
+
   .seo-nav a,
   .seo-service-menu summary {
-    padding-inline: 10px;
+    padding-inline: 9px;
+    font-size: 13px;
   }
 
   .seo-actions,
@@ -696,6 +880,29 @@ h1 {
   }
 }
 
+@media (max-width: 400px) {
+  .seo-brand-mark {
+    flex-basis: 34px;
+    inline-size: 34px;
+    block-size: 34px;
+  }
+
+  .seo-brand-mark img {
+    inline-size: 24px;
+    block-size: 24px;
+  }
+
+  .seo-brand-name {
+    font-size: 14px;
+  }
+
+  .seo-header-cta {
+    min-block-size: 38px;
+    padding: 0 12px;
+    font-size: 12.5px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -704,61 +911,51 @@ h1 {
   .seo-button {
     transition: none;
   }
+
+  .seo-button--primary:hover {
+    transform: none;
+  }
 }
 
 @media (forced-colors: active) {
-  :root,
-  html[data-theme],
-  html:not([data-theme]) {
-    --seo-bg: Canvas;
-    --seo-surface: Canvas;
-    --seo-surface-soft: Canvas;
-    --seo-header: Canvas;
-    --seo-text: CanvasText;
-    --seo-text-strong: CanvasText;
-    --seo-text-soft: CanvasText;
-    --seo-accent: LinkText;
-    --seo-accent-soft: Canvas;
-    --seo-border: CanvasText;
-    --seo-border-strong: CanvasText;
-    --seo-shadow: none;
-  }
-
   .seo-button--primary {
     color: ButtonText;
     border-color: ButtonText;
     background: ButtonFace;
     box-shadow: none;
   }
+
+  .seo-trust svg,
+  .seo-faq-item summary::after {
+    border-color: CanvasText;
+    color: CanvasText;
+  }
 }
 
 @media print {
   .seo-header,
   .seo-skip-link,
-  .seo-actions {
+  .seo-actions,
+  .seo-nav-cta {
     display: none;
   }
 
-  :root,
-  html[data-theme],
-  html:not([data-theme]) {
-    --seo-bg: #ffffff;
-    --seo-surface: #ffffff;
-    --seo-text: #000000;
-    --seo-text-strong: #000000;
-    --seo-text-soft: #222222;
-    --seo-shadow: none;
-  }
-
   .seo-hero,
-  .seo-content {
+  .seo-content,
+  .seo-method-grid {
     display: block;
   }
 
   .seo-card,
   .seo-content section,
-  .seo-contact {
+  .seo-method-grid li,
+  .seo-contact,
+  .seo-faq-item {
     break-inside: avoid;
     margin-block-end: 20px;
+  }
+
+  .seo-faq-item p {
+    display: block;
   }
 }

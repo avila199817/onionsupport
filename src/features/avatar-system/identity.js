@@ -367,10 +367,10 @@ export function avatarColorKeyFromIdentity(input = {}) {
    INITIALS · ONE CANONICAL RULE
 
    Fluent Persona keeps the first initial only when a name has four or more
-   tokens, which turned «Mohamed Yakhlef el Allali» into «M». Onion uses the
-   first token and the LAST token of the cleaned display name: «MA», «NL»,
-   «JG», «PS» for «PAVI RIF, S.L.». A single token keeps one initial; empty
-   or unsupported text keeps the product fallback.
+   tokens, which turned «Marta Ruiz de la Torre» into «M». Onion uses the
+   first token and the LAST token of the cleaned display name: «MT», «AG» for
+   «Ana Pérez Gómez», «ES» for «Empresa Ejemplo, S.L.». A single token keeps
+   one initial; empty or unsupported text keeps the product fallback.
 ========================================================= */
 
 const UNWANTED_ENCLOSURES_REGEX =

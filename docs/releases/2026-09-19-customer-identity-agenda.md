@@ -2,7 +2,7 @@
 
 ## Problema
 
-- **Una sola inicial en clientes nuevos.** No era un problema de datos: la regla de iniciales copiaba a Fluent Persona, que con cuatro o más tokens conserva sólo la primera letra. «Mohamed Yakhlef el Allali» → «M», «Nicolas del Castillo Luque» → «N», mientras «Jesús Ávila Granados» (tres tokens) → «JG». Los registros antiguos parecían correctos porque casi todos tienen dos o tres tokens.
+- **Una sola inicial en clientes nuevos.** No era un problema de datos: la regla de iniciales copiaba a Fluent Persona, que con cuatro o más tokens conserva sólo la primera letra. «Marta Ruiz de la Torre» → «M», «Pablo Sanz de Castro» → «P», mientras «Ana Pérez Gómez» (tres tokens) → «AG». Los registros antiguos parecían correctos porque casi todos tienen dos o tres tokens.
 - **Nombre antiguo en la Agenda.** La cita guarda `destinatarioNombre` al crearse y el backend proyectaba esa copia en listado y detalle; el frontend la pintaba como identidad actual. Renombrar al cliente no tocaba la copia.
 - **Un día con citas no se seleccionaba desde la rejilla principal.** La lista de citas (`.agenda-day-events`) ocupa el resto de la casilla y recibía los clics de su zona vacía; como no es una acción, nada respondía. La superficie de selección quedaba debajo.
 - **Avatares sin nombre completo.** Sólo una plantilla escribía `title`; el resto de avatares (iniciales o foto) no exponía el nombre canónico.
@@ -11,7 +11,7 @@
 
 ### Una regla de iniciales
 
-`avatarInitials` (`src/features/avatar-system/identity.js`, `avatar-identity.v6-first-last-initials`): primera inicial + inicial del **último** token del nombre limpio; un solo token conserva una letra; entrada vacía o no representable conserva el respaldo del producto («ON»). La limpieza previa sigue quitando paréntesis, puntuación, guiones y apóstrofos, así que «PAVI RIF, S.L.» → «PS» y «Jean-Luc O'Brien» → «JO».
+`avatarInitials` (`src/features/avatar-system/identity.js`, `avatar-identity.v6-first-last-initials`): primera inicial + inicial del **último** token del nombre limpio; un solo token conserva una letra; entrada vacía o no representable conserva el respaldo del producto («ON»). La limpieza previa sigue quitando paréntesis, puntuación, guiones y apóstrofos, así que «Empresa Ejemplo, S.L.» → «ES» y «Jean-Luc O'Brien» → «JO».
 
 Los consumidores que preferían un campo `initials` precalculado por otro sistema (barra lateral, viewmodel de Home) derivan ahora de la autoridad. El backend alinea sus dos ayudantes (sesión y factura) a la misma regla; la copia guardada en una factura sigue mandando porque es un documento histórico.
 

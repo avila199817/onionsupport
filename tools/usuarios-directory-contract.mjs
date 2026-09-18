@@ -151,7 +151,7 @@ try {
                 userId: id,
                 email: "carlos@directorio.test",
                 expiresAt: "2026-09-19T00:00:00.000Z",
-                activationUrl: "https://www.onionsupport.com/activate-account/SECRET-MANUAL-FIXTURE",
+                activationUrl: "https://onionsupport.com/activate-account/SECRET-MANUAL-FIXTURE",
                 mail: { sent: false, status: "manual" },
               }
             : {
@@ -279,7 +279,7 @@ try {
     const manualText = await readFile(downloadPath, "utf8");
     assert.ok(manualText.includes("Para: carlos@directorio.test"), "El TXT indica el destinatario");
     assert.ok(manualText.includes("Asunto: Activación de tu cuenta · Onion Support"), "El TXT incluye el asunto");
-    assert.ok(manualText.includes("https://www.onionsupport.com/activate-account/SECRET-MANUAL-FIXTURE"),
+    assert.ok(manualText.includes("https://onionsupport.com/activate-account/SECRET-MANUAL-FIXTURE"),
       "El TXT contiene el único enlace manual vigente");
     assert.ok(manualText.includes("24 horas"), "El TXT explica la caducidad");
     assert.ok((await pantalla(page)).includes("Se ha descargado la plantilla manual para carlos@directorio.test."),

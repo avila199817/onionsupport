@@ -16,7 +16,7 @@ import {
 assert.match(AVATAR_SYSTEM_VERSION, /deterministic-identity-authority/);
 assert.equal(
   AVATAR_IDENTITY_VERSION,
-  "avatar-identity.v5-user-id-first"
+  "avatar-identity.v6-first-last-initials"
 );
 assert.equal(AVATAR_TONE_COUNT, 20);
 

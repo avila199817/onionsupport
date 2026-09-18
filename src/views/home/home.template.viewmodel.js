@@ -152,7 +152,9 @@ export function buildVm(input = {}) {
       ...user,
       name: displayName,
       displayName,
-      initials: cleanText(user.initials, initialsFrom(displayName)),
+      /* Las iniciales nacen del nombre canónico, nunca de un campo
+         precalculado por otro sistema. */
+      initials: initialsFrom(displayName),
       avatarUrl: safeImageSrc(
         firstNonEmpty(
           user.avatarUrl,

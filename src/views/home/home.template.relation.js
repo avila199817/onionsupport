@@ -488,7 +488,8 @@ export function renderHomeEntityRelation(relation = null) {
     username: relation.username,
   });
   const tone = Number(relation.tone ?? presentation.tone) >>> 0;
-  const initials = cleanText(relation.initials, presentation.initials);
+  /* Las iniciales salen siempre de la autoridad compartida, nunca de una copia. */
+  const initials = presentation.initials;
   const fingerprint = cleanText(relation.fingerprint, presentation.fingerprint);
   const colorKey = cleanText(relation.colorKey, presentation.colorKey);
   const identityEmail = normalizedEmail(

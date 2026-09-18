@@ -640,7 +640,7 @@ function createUserAvatar(
     avatar,
     span(
       CLASSES.userAvatarFallback,
-      currentUser?.initials || "ON",
+      avatarInitials(currentUser),
       { "data-sidebar-avatar-fallback": "true" }
     )
   );

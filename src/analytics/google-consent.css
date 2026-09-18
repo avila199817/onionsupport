@@ -1,61 +1,31 @@
-:root {
-  --onion-consent-bg: #ffffff;
-  --onion-consent-surface: #f6f7f9;
-  --onion-consent-text: #111827;
-  --onion-consent-muted: #4b5563;
-  --onion-consent-border: rgba(17, 24, 39, 0.16);
-  --onion-consent-action: #111827;
-  --onion-consent-action-text: #ffffff;
-  --onion-consent-focus: #2563eb;
-  --onion-consent-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --onion-consent-bg: #101318;
-    --onion-consent-surface: #171b22;
-    --onion-consent-text: #f8fafc;
-    --onion-consent-muted: #cbd5e1;
-    --onion-consent-border: rgba(248, 250, 252, 0.18);
-    --onion-consent-action: #f8fafc;
-    --onion-consent-action-text: #101318;
-    --onion-consent-shadow: 0 24px 70px rgba(0, 0, 0, 0.52);
-  }
-}
-
-html[data-theme="light"] {
-  --onion-consent-bg: #ffffff;
-  --onion-consent-surface: #f6f7f9;
-  --onion-consent-text: #111827;
-  --onion-consent-muted: #4b5563;
-  --onion-consent-border: rgba(17, 24, 39, 0.16);
-  --onion-consent-action: #111827;
-  --onion-consent-action-text: #ffffff;
-  --onion-consent-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
-}
-
-html[data-theme="dark"] {
-  --onion-consent-bg: #101318;
-  --onion-consent-surface: #171b22;
-  --onion-consent-text: #f8fafc;
-  --onion-consent-muted: #cbd5e1;
-  --onion-consent-border: rgba(248, 250, 252, 0.18);
-  --onion-consent-action: #f8fafc;
-  --onion-consent-action-text: #101318;
-  --onion-consent-shadow: 0 24px 70px rgba(0, 0, 0, 0.52);
-}
-
+/* Consent UI for the public Google tag. Paleta y tipografía vienen de
+   /src/css/tokens/public.css; los fallbacks repiten el valor de marca para
+   las rutas donde esa hoja todavía no se ha aplicado. */
 .onion-google-consent,
 .onion-google-consent * {
   box-sizing: border-box;
 }
 
 .onion-google-consent {
+  --onion-consent-bg: var(--public-surface, #0a1526);
+  --onion-consent-surface: var(--public-surface-2, #101f33);
+  --onion-consent-text: var(--public-text-strong, #ffffff);
+  --onion-consent-muted: var(--public-text-soft, #b8c8dd);
+  --onion-consent-border: var(--public-border, rgb(255 255 255 / .12));
+  --onion-consent-border-strong: var(--public-border-strong, rgb(75 184 255 / .40));
+  --onion-consent-action: var(--public-button-primary-bg, linear-gradient(120deg, #1394ff, #0b61ff));
+  --onion-consent-action-text: var(--public-text-on-accent, #ffffff);
+  --onion-consent-accent: var(--public-accent, #1394ff);
+  --onion-consent-focus: var(--public-focus, #34d4ff);
+  --onion-consent-shadow: var(--public-shadow, 0 22px 64px rgb(0 0 0 / .30));
+  --onion-consent-radius: var(--public-radius-lg, 24px);
+  --onion-consent-control-radius: var(--public-radius-md, 16px);
   position: relative;
   z-index: 2147483000;
   color: var(--onion-consent-text);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
+  font-family: var(--public-font-sans, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  /* Base propia: la SPA escala su raíz por densidad y el banner debe medir lo mismo en toda superficie pública. */
+  font-size: 16px;
   line-height: 1.5;
 }
 
@@ -81,9 +51,9 @@ html[data-theme="dark"] {
   align-items: center;
   width: min(1120px, calc(100vw - 32px));
   margin-inline: auto;
-  padding: 20px;
-  border: 1px solid var(--onion-consent-border);
-  border-radius: 18px;
+  padding: 20px 22px;
+  border: 1px solid var(--onion-consent-border-strong);
+  border-radius: var(--onion-consent-radius);
   background: var(--onion-consent-bg);
   box-shadow: var(--onion-consent-shadow);
 }
@@ -94,24 +64,26 @@ html[data-theme="dark"] {
 
 .onion-google-consent__eyebrow {
   margin: 0 0 4px;
-  color: var(--onion-consent-muted);
-  font-size: 0.76rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
+  color: var(--public-accent-text, #55baff);
+  font-size: .74em;
+  font-weight: 750;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .onion-google-consent h2 {
   margin: 0;
   color: var(--onion-consent-text);
-  font-size: clamp(1.05rem, 2vw, 1.32rem);
+  font-size: clamp(1.05em, 2vw, 1.3em);
+  font-weight: 800;
+  letter-spacing: -.02em;
   line-height: 1.2;
 }
 
 .onion-google-consent p {
   margin: 8px 0 0;
   color: var(--onion-consent-muted);
-  font-size: 0.92rem;
+  font-size: .92em;
 }
 
 .onion-google-consent__actions,
@@ -127,34 +99,38 @@ html[data-theme="dark"] {
 .onion-google-consent__close {
   min-height: 44px;
   border: 1px solid var(--onion-consent-border);
-  border-radius: 12px;
+  border-radius: var(--onion-consent-control-radius);
+  color: var(--onion-consent-text);
+  background: var(--onion-consent-surface);
   cursor: pointer;
   transition:
     transform 150ms ease,
     box-shadow 150ms ease,
+    border-color 150ms ease,
     background-color 150ms ease;
 }
 
 .onion-google-consent__button {
-  padding: 10px 16px;
-  font-weight: 760;
+  padding: 10px 18px;
+  font-weight: 700;
   white-space: nowrap;
 }
 
 .onion-google-consent__button--decision {
-  border-color: var(--onion-consent-action);
+  border-color: transparent;
   background: var(--onion-consent-action);
   color: var(--onion-consent-action-text);
+  box-shadow: var(--public-button-primary-shadow, 0 14px 34px rgb(19 148 255 / .26));
 }
 
 .onion-google-consent__button--settings {
-  background: var(--onion-consent-surface);
-  color: var(--onion-consent-text);
+  background: transparent;
 }
 
 .onion-google-consent__button:hover,
 .onion-google-consent__preferences:hover,
 .onion-google-consent__close:hover {
+  border-color: var(--onion-consent-border-strong);
   transform: translateY(-1px);
 }
 
@@ -164,7 +140,7 @@ html[data-theme="dark"] {
 .onion-google-consent input:focus-visible,
 .onion-google-consent summary:focus-visible,
 .onion-google-consent a:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--onion-consent-focus) 70%, transparent);
+  outline: 3px solid var(--onion-consent-focus);
   outline-offset: 3px;
 }
 
@@ -173,18 +149,25 @@ html[data-theme="dark"] {
   left: max(14px, env(safe-area-inset-left));
   bottom: max(14px, env(safe-area-inset-bottom));
   min-width: 72px;
-  padding: 9px 13px;
+  padding: 9px 14px;
   background: var(--onion-consent-bg);
   color: var(--onion-consent-text);
-  font-size: 0.82rem;
-  font-weight: 780;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.16);
+  font-size: .82em;
+  font-weight: 700;
+  box-shadow: var(--public-shadow-soft, 0 12px 32px rgb(0 0 0 / .16));
+}
+
+/* While the fixed pill is shown, the shared footer reserves its height so the
+   last row (legal note + "Configurar cookies") is never covered at the end of
+   the page. Browsers without :has() keep today's layout. */
+body:has(.onion-google-consent__preferences:not([hidden])) .public-legal-footer__inner {
+  padding-block-end: calc(28px + 44px + max(14px, env(safe-area-inset-bottom)));
 }
 
 .onion-google-consent__backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(3, 7, 18, 0.62);
+  background: rgb(3 7 18 / .62);
   backdrop-filter: blur(4px);
 }
 
@@ -196,8 +179,8 @@ html[data-theme="dark"] {
   max-height: min(760px, calc(100dvh - 32px));
   overflow: auto;
   padding: 22px;
-  border: 1px solid var(--onion-consent-border);
-  border-radius: 18px;
+  border: 1px solid var(--onion-consent-border-strong);
+  border-radius: var(--onion-consent-radius);
   background: var(--onion-consent-bg);
   box-shadow: var(--onion-consent-shadow);
   transform: translate(-50%, -50%);
@@ -215,9 +198,7 @@ html[data-theme="dark"] {
   flex: 0 0 44px;
   place-items: center;
   padding: 0;
-  background: var(--onion-consent-surface);
-  color: var(--onion-consent-text);
-  font-size: 1.65rem;
+  font-size: 1.65em;
   line-height: 1;
 }
 
@@ -234,7 +215,7 @@ html[data-theme="dark"] {
   align-items: center;
   padding: 14px;
   border: 1px solid var(--onion-consent-border);
-  border-radius: 14px;
+  border-radius: var(--onion-consent-control-radius);
   background: var(--onion-consent-surface);
   cursor: pointer;
 }
@@ -251,26 +232,26 @@ html[data-theme="dark"] {
 .onion-google-consent__option small {
   margin-top: 3px;
   color: var(--onion-consent-muted);
-  font-size: 0.84rem;
+  font-size: .84em;
 }
 
 .onion-google-consent__option input {
   width: 22px;
   height: 22px;
-  accent-color: var(--onion-consent-action);
+  accent-color: var(--onion-consent-accent);
 }
 
 .onion-google-consent__details {
   margin-top: 16px;
   border: 1px solid var(--onion-consent-border);
-  border-radius: 14px;
+  border-radius: var(--onion-consent-control-radius);
   background: var(--onion-consent-surface);
 }
 
 .onion-google-consent__details summary {
   padding: 13px 14px;
   color: var(--onion-consent-text);
-  font-weight: 760;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -278,9 +259,10 @@ html[data-theme="dark"] {
   padding: 0 14px 14px;
 }
 
-.onion-google-consent__details a {
+.onion-google-consent__details a,
+.onion-google-consent p a {
   color: var(--onion-consent-text);
-  font-weight: 720;
+  font-weight: 700;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
@@ -341,5 +323,14 @@ html[data-theme="dark"] {
   .onion-google-consent__preferences:hover,
   .onion-google-consent__close:hover {
     transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .onion-google-consent__button--decision {
+    border-color: ButtonText;
+    color: ButtonText;
+    background: ButtonFace;
+    box-shadow: none;
   }
 }

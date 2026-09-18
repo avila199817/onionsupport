@@ -92,27 +92,29 @@ body.public-home-no-scroll .main-content {
    2. PUBLIC AUTH SHELL OVERRIDES
 ========================================================= */
 
+/* Los valores de marca viven en /src/css/tokens/public.css; los alias
+   --public-home-* conservan su nombre y llevan el mismo valor de fallback. */
 .public-auth-shell--home {
-  --public-home-bg: #030712;
-  --public-home-bg-2: #07111f;
+  --public-home-bg: var(--public-canvas, #030712);
+  --public-home-bg-2: var(--public-canvas-2, #07111f);
   --public-home-surface: rgb(8 18 34 / .78);
   --public-home-surface-strong: rgb(9 22 42 / .92);
   --public-home-card: rgb(9 20 38 / .76);
   --public-home-card-hover: rgb(13 30 56 / .90);
 
-  --public-home-text: #eaf4ff;
-  --public-home-text-strong: #ffffff;
-  --public-home-text-soft: #b8c8dd;
-  --public-home-text-muted: #9aaac0;
+  --public-home-text: var(--public-text, #eaf4ff);
+  --public-home-text-strong: var(--public-text-strong, #ffffff);
+  --public-home-text-soft: var(--public-text-soft, #b8c8dd);
+  --public-home-text-muted: var(--public-text-muted, #9aaac0);
 
-  --public-home-accent: #1394ff;
-  --public-home-accent-2: #34d4ff;
-  --public-home-accent-3: #0b61ff;
-  --public-home-success: #25d366;
-  --public-home-danger: #ff5c75;
+  --public-home-accent: var(--public-accent, #1394ff);
+  --public-home-accent-2: var(--public-accent-2, #34d4ff);
+  --public-home-accent-3: var(--public-accent-3, #0b61ff);
+  --public-home-success: var(--public-success, #25d366);
+  --public-home-danger: var(--public-danger, #ff5c75);
 
-  --public-home-border: rgb(255 255 255 / .12);
-  --public-home-border-strong: rgb(75 184 255 / .40);
+  --public-home-border: var(--public-border, rgb(255 255 255 / .12));
+  --public-home-border-strong: var(--public-border-strong, rgb(75 184 255 / .40));
   --public-home-shadow:
     0 22px 64px rgb(0 0 0 / .30),
     0 8px 28px rgb(19 148 255 / .06);
@@ -185,14 +187,7 @@ body.public-home-no-scroll .main-content {
   overflow-x: clip;
   overflow-y: visible;
   color: var(--public-home-text);
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  font-family: var(--public-font-sans, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
   background:
     radial-gradient(
       circle at var(--public-home-pointer-x, 74%) var(--public-home-pointer-y, 18%),
@@ -1111,7 +1106,7 @@ body.public-home-no-scroll .main-content {
 .public-home-button {
   min-block-size: 56px;
   padding-inline: 24px;
-  border-radius: 17px;
+  border-radius: var(--public-radius-md, 16px);
   font-size: 15px;
 }
 
@@ -1292,7 +1287,7 @@ body.public-home-no-scroll .main-content {
 
 .public-home-profile-top-label {
   color: var(--public-home-text-soft);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1.4;
 }
@@ -1304,7 +1299,7 @@ body.public-home-no-scroll .main-content {
   overflow: hidden;
   color: #ffffff;
 
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 750;
   letter-spacing: .1em;
   text-overflow: ellipsis;
@@ -1414,7 +1409,7 @@ body.public-home-no-scroll .main-content {
 
   color: var(--public-home-accent-2);
 
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .095em;
   line-height: 1.1;
@@ -1441,9 +1436,8 @@ body.public-home-no-scroll .main-content {
 .public-home-command-copy h2 span {
   display: block;
   max-inline-size: 100%;
-  overflow: hidden;
-  text-overflow: clip;
-  white-space: nowrap;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
 }
 
 .public-home-command-copy p:not(.public-home-profile-eyebrow) {
@@ -1483,7 +1477,7 @@ body.public-home-no-scroll .main-content {
   color: var(--public-home-text);
   background: rgb(19 148 255 / .09);
 
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1532,7 +1526,7 @@ body.public-home-no-scroll .main-content {
 
   color: var(--public-home-accent-2);
 
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .055em;
   line-height: 1.1;
@@ -1639,7 +1633,7 @@ body.public-home-no-scroll .main-content {
 
   color: var(--public-home-text-soft);
 
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1990,7 +1984,6 @@ a.public-home-service-card:hover,
 
 .public-home-price-card--featured h3 {
   max-inline-size: 15ch;
-  font-size: clamp(28px, 2.75vw, 36px);
   line-height: 1.14;
 }
 
@@ -2889,7 +2882,7 @@ a.public-home-service-card:hover,
   }
 
   .public-home-command-copy h2 {
-    font-size: clamp(34px, 12vw, 48px);
+    font-size: clamp(28px, 9.4vw, 48px);
   }
 
   .public-home-command-checklist li {

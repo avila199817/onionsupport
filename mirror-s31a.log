@@ -1,4 +1,0 @@
-bash: s31a-mirror/.github/ci/validate_spa_contracts.sh: No such file or directory
-ci validate_spa_contracts.sh exit=127
-bash: s31a-mirror/.github/ci/validate_static_release.sh: No such file or directory
-ci validate_static_release.sh exit=127

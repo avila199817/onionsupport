@@ -14,6 +14,20 @@ export default {
       "Sistema, drivers y estabilidad",
       "Presupuesto previo y factura disponible"
     ],
+    "faqs": [
+      {
+        "question": "¿Reparáis portátiles y ordenadores de sobremesa?",
+        "answer": "Sí. Se revisan equipos de sobremesa y portátiles, de uso doméstico y profesional. Indica marca y modelo si los conoces para orientar mejor la primera revisión."
+      },
+      {
+        "question": "¿Merece la pena reparar un ordenador antiguo?",
+        "answer": "Depende del fallo y del equipo. Si todavía tiene margen, una mejora de SSD o RAM suele compensar; si la reparación no sale a cuenta, te lo explico antes de avanzar y decides con el presupuesto delante."
+      },
+      {
+        "question": "¿Se pierden los datos durante la reparación?",
+        "answer": "Se trabaja para conservarlos, pero una avería de almacenamiento puede impedir recuperarlos. Antes de entregar el equipo, prepara una copia de seguridad actualizada siempre que sea posible."
+      }
+    ],
     "sections": [
       {
         "heading": "Qué problemas se revisan",
@@ -42,6 +56,20 @@ export default {
       "USB, WiFi y red local",
       "Escáner e impresión compartida",
       "Diagnóstico de colas y conectividad"
+    ],
+    "faqs": [
+      {
+        "question": "¿Instaláis impresoras por WiFi y en red?",
+        "answer": "Sí. Se configura la conexión por USB, WiFi o cable de red, el descubrimiento en cada equipo y la impresión compartida cuando hay varios dispositivos."
+      },
+      {
+        "question": "Imprime desde un equipo pero no desde otro, ¿qué pasa?",
+        "answer": "Suele ser configuración, red o permisos, no la impresora. Se revisa el recorrido completo en cada equipo en lugar de reinstalar a ciegas."
+      },
+      {
+        "question": "¿El escáner de una multifunción también entra en el servicio?",
+        "answer": "Sí. Impresión, escaneado y utilidades del fabricante se prueban por separado para localizar en qué punto se rompe el flujo."
+      }
     ],
     "sections": [
       {
@@ -76,6 +104,20 @@ export default {
       "Programas, cuentas y periféricos",
       "Particulares, autónomos y pequeños negocios",
       "Atención directa y presupuesto previo"
+    ],
+    "faqs": [
+      {
+        "question": "¿El soporte es remoto o presencial?",
+        "answer": "La asistencia es remota en toda España, contigo delante del equipo y con tu autorización en cada paso. La atención presencial se acuerda según el servicio y la ubicación."
+      },
+      {
+        "question": "¿Qué necesito para una sesión remota?",
+        "answer": "Conexión a Internet en el equipo afectado y poder estar delante de él durante la sesión. Te indico los pasos y ves en pantalla todo lo que se hace."
+      },
+      {
+        "question": "¿Atendéis programas y cuentas, no solo averías?",
+        "answer": "Sí. La configuración de programas, correo, cuentas, navegadores y periféricos forma parte del soporte. Si el problema es de uso y no de avería, también te lo explico."
+      }
     ],
     "sections": [
       {
@@ -114,6 +156,20 @@ export default {
       "Dispositivos y periféricos de red",
       "Pequeños entornos domésticos y profesionales"
     ],
+    "faqs": [
+      {
+        "question": "¿Hace falta comprar un router o repetidor nuevo?",
+        "answer": "No siempre. Primero se localiza dónde está el problema: acceso a Internet, router, ubicación, interferencias o un dispositivo concreto. Solo se propone hardware nuevo cuando el diagnóstico lo justifica."
+      },
+      {
+        "question": "¿Podéis revisar la red de forma remota?",
+        "answer": "Muchos problemas de configuración y cobertura se diagnostican de forma remota con tu ayuda. Cuando hace falta medir sobre el terreno o cablear, la atención presencial se acuerda según la ubicación."
+      },
+      {
+        "question": "¿También revisáis la red de un pequeño negocio?",
+        "answer": "Sí. Para autónomos y pequeños negocios se prioriza la continuidad: acceso fiable, una estructura comprensible y poder diagnosticar rápido si vuelve a fallar."
+      }
+    ],
     "sections": [
       {
         "heading": "Problemas de cobertura",
@@ -146,6 +202,20 @@ export default {
       "WiFi, red e impresoras",
       "Incidencias y mantenimiento",
       "Presupuesto previo y factura"
+    ],
+    "faqs": [
+      {
+        "question": "¿Ofrecéis mantenimiento continuado para empresas?",
+        "answer": "Sí. Se acuerda un alcance según tus equipos, tu red y tu forma de trabajar, con presupuesto previo. Actualizaciones, almacenamiento y puntos básicos de seguridad se revisan cuando aportan valor."
+      },
+      {
+        "question": "¿Cómo se prioriza una incidencia que bloquea el trabajo?",
+        "answer": "Según el impacto real: qué tarea está bloqueada, cuántas personas afecta y desde cuándo. El objetivo es recuperar el servicio y dejar claro qué se ha hecho."
+      },
+      {
+        "question": "¿Emitís factura a nombre de la empresa?",
+        "answer": "Sí. Los servicios se facturan a la empresa o al autónomo, con presupuesto o parte de trabajo aceptado previamente."
+      }
     ],
     "sections": [
       {

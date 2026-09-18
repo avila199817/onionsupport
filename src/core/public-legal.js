@@ -34,6 +34,16 @@ export function renderPublicLegalFooter({ className = "" } = {}) {
             <address>${escape(PUBLIC_LEGAL.address)}</address>
           </div>
           <div>
+            <p class="public-legal-footer__label">Servicios</p>
+            <ul class="public-legal-footer__services">
+              <li><a href="/reparacion-ordenadores">Reparación de ordenadores</a></li>
+              <li><a href="/soporte-informatico">Soporte informático</a></li>
+              <li><a href="/redes-wifi">WiFi y redes</a></li>
+              <li><a href="/impresoras">Impresoras</a></li>
+              <li><a href="/soporte-empresas">Soporte para empresas</a></li>
+            </ul>
+          </div>
+          <div>
             <p class="public-legal-footer__label">Atención al cliente</p>
             <p>${supportLink()}<br><a href="tel:${PUBLIC_LEGAL.phoneHref}">${PUBLIC_LEGAL.phone}</a></p>
             <a href="/#incidencia">Solicitar asistencia</a>

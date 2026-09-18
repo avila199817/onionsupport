@@ -392,7 +392,7 @@ export function getPasswordResetTemplate(options = {}) {
   const title = isConfirm ? "Nueva contraseña" : "Recuperar acceso";
   const subtitle = isConfirm
     ? "Define una nueva contraseña para tu cuenta."
-    : "Pon tu correo.";
+    : "Escribe el correo de tu cuenta y te enviaremos un enlace para recuperar el acceso.";
   const submitLabel = isConfirm ? "Cambiar contraseña" : "Enviar enlace";
   const loadingLabel = isConfirm ? "Guardando contraseña…" : "Enviando enlace…";
 

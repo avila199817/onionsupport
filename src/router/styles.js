@@ -70,8 +70,17 @@ const MEDIA_INACTIVE =
    Apunta directamente a los CSS existentes.
 ========================================================= */
 
+/*
+  Toda superficie pública comparte primero los tokens públicos
+  (/src/css/tokens/public.css): la misma paleta, tipografía y geometría que
+  cargan las páginas estáticas de servicio, el pie legal y el consentimiento.
+*/
+const PUBLIC_TOKENS_CSS =
+  "/src/css/tokens/public.css";
+
 const STYLE_MANIFEST = Object.freeze({
   "public-home": Object.freeze([
+    PUBLIC_TOKENS_CSS,
     "/src/css/views/public/legal-footer.css",
     "/src/css/views/public/index.css",
     "/src/css/views/public/support-request.css",
@@ -80,22 +89,33 @@ const STYLE_MANIFEST = Object.freeze({
   ]),
 
   login: Object.freeze([
+    PUBLIC_TOKENS_CSS,
     "/src/css/views/public/legal-footer.css",
     "/src/css/auth/login.css",
     "/src/css/auth/login.portal-layout.css",
   ]),
 
   "password-request": Object.freeze([
+    PUBLIC_TOKENS_CSS,
     "/src/css/views/public/legal-footer.css",
     "/src/css/auth/login.css",
   ]),
 
   "password-reset": Object.freeze([
+    PUBLIC_TOKENS_CSS,
     "/src/css/views/public/legal-footer.css",
     "/src/css/auth/login.css",
   ]),
 
   "activate-account": Object.freeze([
+    PUBLIC_TOKENS_CSS,
+    "/src/css/views/public/legal-footer.css",
+    "/src/css/auth/login.css",
+  ]),
+
+  /* Fallback público 404: la tarjeta de acceso sin formulario. */
+  "not-found": Object.freeze([
+    PUBLIC_TOKENS_CSS,
     "/src/css/views/public/legal-footer.css",
     "/src/css/auth/login.css",
   ]),

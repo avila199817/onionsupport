@@ -26,18 +26,24 @@
    COMPONENTES PRIVADOS
    El shell modal es la única fuente estructural de los diálogos privados;
    cualquier vista puede abrir un detalle, así que viaja con el área privada.
+   Los iconos de aplicación sólo los consume el Sidebar (sidebar.icons.css):
+   sus data URI no forman parte del CSS público.
 ========================================================= */
 
+@import url("./components/app-icons.css") layer(components);
 @import url("./components/detail-modal.css") layer(components);
 
 /* =========================================================
    COMPOSICIONES PRIVADAS
+   DataList recompone los listados privados en teléfono; ninguna ruta pública
+   monta tablas, así que la composición viaja detrás del guard.
 ========================================================= */
 
 @import url("./compositions/private-admin-parity.css") layer(compositions);
 @import url("./compositions/private-fullview-routes.css") layer(compositions);
 @import url("./compositions/private-admin-interactions.css") layer(compositions);
 @import url("./compositions/private-create-modal.css") layer(compositions);
+@import url("./compositions/mobile-datalist.css") layer(compositions);
 @import url("./compositions/private-amounts.css") layer(compositions);
 
 /* =========================================================

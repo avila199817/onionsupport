@@ -99,6 +99,10 @@ Sidebar es persistente/colapsable. Sidebar, Topbar, main y tablehead consumen el
 
 Las hojas de `src/css/views/**` no se importan desde `app.css`: el Router las prepara, activa y desactiva como parte del commit de cada ruta.
 
+### Tokens públicos
+
+`src/css/tokens/public.css` (capa `tokens`) es la autoridad de color, tipografía, radios, sombras y anchos del área pública: variables `--public-*` con tema oscuro por defecto, tema claro (`data-theme="light"`, `.theme-light` o preferencia del sistema sin tema explícito), `forced-colors` e impresión. El Router la carga como primer estilo de ruta en `public-home`, `login`, `password-request`, `password-reset`, `activate-account` y `not-found`; las páginas de servicio la enlazan en el `<head>`. Los shells públicos (`.public-auth-shell`, `.public-auth-shell--home`, `.seo-*`), el consentimiento (`google-consent.css`) y el pie legal (`legal-footer.css`) consumen esas variables con un valor literal de respaldo y no redefinen paletas propias. `variables.css` y `light.css` siguen siendo la autoridad del área privada; ninguna hoja privada lee `--public-*`.
+
 ## Responsive como composición
 
 A `900px`:

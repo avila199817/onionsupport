@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PUBLIC_SITE, PUBLIC_PAGES, PUBLIC_SERVICES, pageMetadata, pageMetaEntries, publicPageSchema } from "../src/core/public-site.js";
 import { renderPublicLegalFooter } from "../src/core/public-legal.js";
+import { PUBLIC_FAQS, PUBLIC_METHOD_STEPS, PUBLIC_TRUST_ITEMS } from "../src/core/public-content.js";
 import content from "./public-service-content.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
@@ -81,18 +82,36 @@ export function renderService(page) {
     "/impresoras": '<path d="M9 11V4h14v7M9 24H4V12h24v12h-5M9 19h14v9H9zM23 15h1"></path>',
     "/soporte-empresas": '<rect x="3" y="10" width="26" height="18" rx="3"></rect><path d="M11 10V5h10v5M3 18a34 34 0 0 0 26 0M16 17v5"></path>',
   };
-  const relatedLinks = PUBLIC_SERVICES.filter((item) => item.path !== page.path).map((item) => `<a href="${item.path}"><span>${escape(item.label)}</span><span aria-hidden="true">↗</span></a>`).join("\n        ");
+  const trustIcons = {
+    bolt: '<path d="M13.25 2.75 5.75 13h5L10.75 21.25 18.25 10h-5l.25-7.25Z"></path>',
+    shield: '<path d="M12 3.75 19.25 6v5.5c0 4.42-2.95 7.28-7.25 8.75-4.3-1.47-7.25-4.33-7.25-8.75V6L12 3.75Z"></path><path d="m8.75 12 2.15 2.15 4.35-4.65"></path>',
+    invoice: '<path d="M7.25 3.75h9.5v16.5l-2-1.2-2.75 1.2-2.75-1.2-2 1.2V3.75Z"></path><path d="M9.25 8h5.5"></path><path d="M9.25 11.75h5.5"></path><path d="M9.25 15.5h3"></path>',
+  };
+  const number = (index) => String(index + 1).padStart(2, "0");
+  const relatedLinks = PUBLIC_SERVICES.filter((item) => item.path !== page.path).map((item) => `<a href="${item.path}"><span>${escape(item.label)}</span><span aria-hidden="true">→</span></a>`).join("\n        ");
   const serviceNavigation = PUBLIC_SERVICES.map((item) => `<li><a href="${escape(item.path)}"${item.path === page.path ? ' aria-current="page"' : ""}>${escape(item.label)}</a></li>`).join("\n          ");
+  const trust = PUBLIC_TRUST_ITEMS.map((item) => `<li><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${trustIcons[item.icon]}</svg>${escape(item.label)}</li>`).join("");
+  const method = PUBLIC_METHOD_STEPS.map((step, index) => `<li><span class="seo-section-number" aria-hidden="true">${number(index)}</span><h3>${escape(step.title)}</h3><p>${escape(step.text)}</p></li>`).join("\n        ");
+  // Service questions first; the shared answers on coverage, budget and invoicing close the list.
+  const sharedFaqs = PUBLIC_FAQS.filter((faq) => /toda España|presupuesto antes|Emites factura/.test(faq.question) && !details.faqs.some((own) => own.question.toLowerCase().includes("factura") && faq.question.includes("factura")));
+  const faqs = [...details.faqs, ...sharedFaqs].map((faq) => `<details class="seo-faq-item"><summary>${escape(faq.question)}</summary><p>${escape(faq.answer)}</p></details>`).join("\n        ");
   return `<!doctype html>
 <html lang="es" dir="ltr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="application-name" content="${escape(PUBLIC_SITE.name)}">
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta name="theme-color" content="#030712">
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#0a0c11" data-onion-theme-color="true">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" data-onion-theme-color-light="true">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a0c11" data-onion-theme-color-dark="true">
   ${renderMetadata(page)}
   <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="manifest" href="/site.webmanifest">
   <script src="/src/preboot/theme.js"></script>
+  <link rel="stylesheet" href="/src/css/tokens/public.css">
   <link rel="stylesheet" href="/src/css/seo/public-service.css">
   <link rel="stylesheet" href="/src/css/views/public/legal-footer.css">
   <script type="module" src="/src/analytics/google-tag.js"></script>
@@ -100,7 +119,7 @@ export function renderService(page) {
 <body>
   <a class="seo-skip-link" href="#contenido">Saltar al contenido</a>
   <header class="seo-header"><div class="seo-shell seo-header-inner">
-    <a class="seo-brand" href="/" aria-label="Onion Support, inicio"><img src="${PUBLIC_SITE.logo}" alt="" width="44" height="44"><span class="seo-brand-name">ONION <strong>SUPPORT</strong></span></a>
+    <a class="seo-brand" href="/" aria-label="Onion Support, inicio"><span class="seo-brand-mark" aria-hidden="true"><img src="${PUBLIC_SITE.logo}" alt="" width="34" height="34"></span><span class="seo-brand-name">ONION<strong>SUPPORT</strong></span></a>
     <nav class="seo-nav" aria-label="Navegación principal">
       <details class="seo-service-menu">
         <summary>Servicios <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4 6 4 4 4-4"></path></svg></summary>
@@ -111,6 +130,7 @@ export function renderService(page) {
       <a href="#contacto">Contacto</a>
       <a class="seo-nav-access" href="/login">Iniciar sesión</a>
     </nav>
+    <a class="seo-button seo-button--primary seo-header-cta" href="/#incidencia">Abrir incidencia</a>
   </div></header>
   <main class="seo-shell" id="contenido" tabindex="-1">
     <nav class="seo-breadcrumb" aria-label="Ruta de navegación"><a href="/">Inicio</a><span aria-hidden="true">/</span><span aria-current="page">${escape(page.label)}</span></nav>
@@ -119,10 +139,11 @@ export function renderService(page) {
       <h1>${escape(details.heading)}</h1>
       <p class="seo-lead">${escape(details.lead)}</p>
       <div class="seo-actions">
-        <a class="seo-button seo-button--primary" href="/#incidencia">Solicitar soporte <span aria-hidden="true">→</span></a>
+        <a class="seo-button seo-button--primary" href="/#incidencia">Abrir incidencia <span aria-hidden="true">→</span></a>
         <a class="seo-button seo-button--secondary" href="${escape(whatsapp)}" target="_blank" rel="noopener noreferrer">Consultar por WhatsApp <span aria-hidden="true">↗</span></a>
       </div>
       <p class="seo-coverage">${escape(PUBLIC_SITE.coverage)}</p>
+      <ul class="seo-trust" aria-label="Ventajas principales">${trust}</ul>
     </div><aside class="seo-card" aria-labelledby="resumen-servicio">
       <span class="seo-service-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${serviceIcons[page.path]}</svg></span>
       <p class="seo-card-kicker">El servicio, de un vistazo</p>
@@ -132,11 +153,23 @@ export function renderService(page) {
     <section class="seo-detail" aria-labelledby="detalle-servicio">
       <div class="seo-section-heading"><p class="seo-eyebrow">En qué puedo ayudarte</p><h2 id="detalle-servicio">Una solución adaptada al problema.</h2></div>
       <div class="seo-content">
-      ${details.sections.map((section, index) => `<section><span class="seo-section-number" aria-hidden="true">${String(index + 1).padStart(2, "0")}</span><h3>${escape(section.heading)}</h3><p>${escape(section.body)}</p></section>`).join("\n      ")}
-      <section><span class="seo-section-number" aria-hidden="true">${String(details.sections.length + 1).padStart(2, "0")}</span><h3>Antes de intervenir</h3><p>Confirmamos contigo el alcance, la modalidad de atención y el presupuesto. La atención presencial se acuerda según el servicio y la ubicación.</p></section>
+      ${details.sections.map((section, index) => `<section><span class="seo-section-number" aria-hidden="true">${number(index)}</span><h3>${escape(section.heading)}</h3><p>${escape(section.body)}</p></section>`).join("\n      ")}
+      <section><span class="seo-section-number" aria-hidden="true">${number(details.sections.length)}</span><h3>Antes de intervenir</h3><p>Confirmamos contigo el alcance, la modalidad de atención y el presupuesto. La atención presencial se acuerda según el servicio y la ubicación.</p></section>
       </div>
     </section>
-    <section class="seo-contact" aria-labelledby="contacto"><div><p class="seo-eyebrow">El siguiente paso</p><h2 id="contacto">Cuéntame qué está fallando.</h2><p>Estos detalles ayudan a orientar la primera revisión:</p><ul class="seo-contact-preparation">${details.preparation.map((item) => `<li>${escape(item)}</li>`).join("")}</ul><p>Antes de intervenir, confirmamos el alcance, la modalidad de atención y el presupuesto.</p><div class="seo-contact-details"><a href="tel:${PUBLIC_SITE.phoneTel}">${PUBLIC_SITE.phoneDisplay}</a><a href="mailto:${PUBLIC_SITE.email}">${PUBLIC_SITE.email}</a></div></div><a class="seo-button seo-button--primary" href="/#incidencia">Explicar mi incidencia <span aria-hidden="true">→</span></a></section>
+    <section class="seo-method" aria-labelledby="metodo">
+      <div class="seo-section-heading"><p class="seo-eyebrow">Cómo trabajamos</p><h2 id="metodo">Sabes qué pasa. Tú decides.</h2></div>
+      <ol class="seo-method-grid">
+        ${method}
+      </ol>
+    </section>
+    <section class="seo-contact" aria-labelledby="contacto"><div><p class="seo-eyebrow">El siguiente paso</p><h2 id="contacto">Cuéntame qué está fallando.</h2><p>Estos detalles ayudan a orientar la primera revisión:</p><ul class="seo-contact-preparation">${details.preparation.map((item) => `<li>${escape(item)}</li>`).join("")}</ul><p>Antes de intervenir, confirmamos el alcance, la modalidad de atención y el presupuesto.</p><div class="seo-contact-details"><a href="tel:${PUBLIC_SITE.phoneTel}">${PUBLIC_SITE.phoneDisplay}</a><a href="mailto:${PUBLIC_SITE.email}">${PUBLIC_SITE.email}</a></div></div><a class="seo-button seo-button--primary" href="/#incidencia">Abrir incidencia <span aria-hidden="true">→</span></a></section>
+    <section class="seo-faq" aria-labelledby="faq">
+      <div class="seo-section-heading"><p class="seo-eyebrow">Preguntas frecuentes</p><h2 id="faq">Antes de empezar.</h2></div>
+      <div class="seo-faq-list">
+        ${faqs}
+      </div>
+    </section>
     <section class="seo-links" aria-labelledby="otros-servicios"><div class="seo-section-heading"><p class="seo-eyebrow">También puedo ayudarte con</p><h2 id="otros-servicios">Otros servicios</h2></div><div class="seo-link-grid">
         ${relatedLinks}
     </div>

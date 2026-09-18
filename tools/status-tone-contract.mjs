@@ -91,10 +91,17 @@ ok(statusTone("azafran_del_futuro") === "neutral", "un estado desconocido no pue
 ========================================================= */
 
 const chipTone = (html, chipClass) => {
-  const chip = new RegExp(`<(?:span|button) class="${chipClass}(?:\\s[^"]*)?"[^>]*>`).exec(html);
-  assert.ok(chip, `no se encontró ningún chip "${chipClass}" en el HTML renderizado`);
-  const tone = /data-status-tone="([^"]*)"/.exec(chip[0]);
-  assert.ok(tone, `el chip no declara ${STATUS_TONE_ATTRIBUTE}: ${chip[0]}`);
+  const tags = String(html || "").match(/<(?:span|button)\\b[^>]*>/gu) || [];
+  const chip = tags.find((tag) => {
+    const className = /class="([^"]*)"/u.exec(tag)?.[1] || "";
+    return (
+      className.split(/\\s+/u).includes(chipClass) &&
+      tag.includes(`${STATUS_TONE_ATTRIBUTE}="`)
+    );
+  });
+  assert.ok(chip, `no se encontró ningún chip "${chipClass}" con ${STATUS_TONE_ATTRIBUTE} en el HTML renderizado`);
+  const tone = /data-status-tone="([^"]*)"/u.exec(chip);
+  assert.ok(tone, `el chip no declara ${STATUS_TONE_ATTRIBUTE}: ${chip}`);
   return tone[1];
 };
 

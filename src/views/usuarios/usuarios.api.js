@@ -53,7 +53,7 @@ import { TIMESTAMP_POLICIES, toTimestamp } from "../../core/dates.js";
 ========================================================= */
 
 export const USUARIOS_API_VERSION =
-  "usuarios.api.backend-contract.v5.activation-resend";
+  "usuarios.api.backend-contract.v6.activation-delivery";
 
 export const USUARIOS_ENDPOINT = "/api/users";
 export const USUARIOS_CREATE_ENDPOINT = "/api/users/create";
@@ -4675,11 +4675,31 @@ export async function resendUsuarioActivationRequest(
   const userId =
     normalizeUsuarioId(id);
 
+  const delivery =
+    cleanText(
+      options.delivery,
+      "email"
+    ).toLowerCase();
+
+  if (
+    !["email", "manual"].includes(
+      delivery
+    )
+  ) {
+    throw createContractError(
+      "USUARIO_ACTIVATION_DELIVERY_INVALID",
+      "La activación sólo permite entrega automática por email o entrega manual.",
+      400
+    );
+  }
+
   const response =
     await httpRequest(
       "POST",
       `${getUsuarioEndpoint(userId)}/resend-activation`,
-      {},
+      {
+        delivery,
+      },
       {
         timeout:
           finiteNumber(
@@ -4707,7 +4727,7 @@ export async function resendUsuarioActivationRequest(
           "USUARIO_ACTIVATION_RESEND_REJECTED",
 
         fallbackMessage:
-          "El backend rechazó el reenvío de activación.",
+          "El backend rechazó la renovación de activación.",
       }
     );
   }
@@ -4716,11 +4736,32 @@ export async function resendUsuarioActivationRequest(
     safeObject(response);
   const mail =
     safeObject(source.mail);
+  const activationUrl =
+    delivery === "manual"
+      ? cleanText(
+          source.activationUrl,
+          ""
+        )
+      : "";
+
+  if (
+    delivery === "manual" &&
+    !/^https:\/\/www\.onionsupport\.com\/activate-account\/[^/?#\s]+$/i.test(
+      activationUrl
+    )
+  ) {
+    throw createContractError(
+      "USUARIO_ACTIVATION_MANUAL_URL_INVALID",
+      "El backend no devolvió un enlace manual de activación válido.",
+      502
+    );
+  }
 
   /*
-    Frontera de seguridad: el backend puede incluir activationUrl únicamente
-    cuando el proveedor de correo falla. La vista de Usuarios nunca recibe ese
-    secreto; este DTO expone sólo el resultado operativo del envío.
+    Frontera de seguridad:
+    - email: la vista nunca recibe activationUrl;
+    - manual: el admin pidió explícitamente el secreto para entregarlo por su
+      propio canal. Se mantiene sólo en esta respuesta efímera y no se persiste.
   */
   return Object.freeze({
     ok:
@@ -4759,6 +4800,14 @@ export async function resendUsuarioActivationRequest(
         null
       ),
 
+    delivery,
+
+    ...(delivery === "manual"
+      ? {
+          activationUrl,
+        }
+      : {}),
+
     mail:
       Object.freeze({
         sent:
@@ -4767,9 +4816,11 @@ export async function resendUsuarioActivationRequest(
         status:
           cleanText(
             mail.status,
-            mail.sent === true
-              ? "sent"
-              : "pending"
+            delivery === "manual"
+              ? "manual"
+              : mail.sent === true
+                ? "sent"
+                : "pending"
           ),
       }),
   });

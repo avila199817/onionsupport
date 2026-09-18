@@ -78,8 +78,29 @@ try {
   });
   await page.waitForFunction(() => host.dataset.avatarInitials === "AL");
   assert.equal(await page.evaluate(() => host.dataset.avatarAuthority), "global");
+  /* Contrato global de título: el avatar expone el nombre completo canónico. */
+  assert.equal(await page.evaluate(() => host.getAttribute("title")), "Ana López", "every identity avatar carries its full canonical name as title");
+  assert.equal(await page.evaluate(() => host.dataset.avatarTitle), "identity");
+  await page.evaluate(() => { host.dataset.avatarName = "Mohamed Yakhlef el Allali"; });
+  await page.waitForFunction(() => host.dataset.avatarInitials === "MA");
+  assert.equal(await page.evaluate(() => host.getAttribute("title")), "Mohamed Yakhlef el Allali", "a rename updates the title with the initials");
+  await runOnPage(page, async () => {
+    window.explicit = makeHost("Nicolas del Castillo Luque");
+    explicit.setAttribute("title", "Técnico: Nicolas del Castillo Luque");
+    window.photo = makeHost("PAVI RIF, S.L.");
+    photo.insertAdjacentHTML("afterbegin", '<img data-avatar-image="true" src="/transparent.svg" alt="">');
+    window.anonymous = makeHost("");
+    anonymous.dataset.avatarEmail = "only@example.test";
+  });
+  await page.waitForFunction(() => explicit.dataset.avatarInitials === "NL" && photo.dataset.avatarInitials === "PS" && anonymous.dataset.avatarState);
+  assert.equal(await page.evaluate(() => explicit.getAttribute("title")), "Técnico: Nicolas del Castillo Luque", "an explicit template title is respected");
+  assert.equal(await page.evaluate(() => explicit.hasAttribute("data-avatar-title")), false);
+  await page.waitForFunction(() => photo.dataset.avatarState === "image");
+  assert.equal(await page.evaluate(() => photo.getAttribute("title")), "PAVI RIF, S.L.", "photo avatars carry the same title contract as initials avatars");
+  assert.equal(await page.evaluate(() => anonymous.hasAttribute("title")), false, "an email alias is never exposed as a title");
   await page.evaluate(() => { host.dataset.avatarName = "Beatriz Moreno"; });
   await page.waitForFunction(() => host.dataset.avatarInitials === "BM");
+  assert.equal(await page.evaluate(() => host.getAttribute("title")), "Beatriz Moreno");
   assert.equal(await page.evaluate(() => host.dataset.avatarTone), String(await page.evaluate(() => avatars.resolveAvatarPresentation({ name: "Beatriz Moreno" }).tone)));
   const nameIdentity = await page.evaluate(() => host.dataset.avatarIdentity);
   await page.evaluate(() => { host.dataset.avatarUserId = "fixture-beatriz"; });
@@ -204,7 +225,8 @@ try {
     for (const image of footer.querySelectorAll("img")) image.loading = "eager";
   });
   await page.waitForFunction(() => sidebarHost.dataset.avatarState === "error");
-  assert.equal(await page.evaluate(() => sidebarHost.dataset.avatarInitials), "M", "Sidebar must use canonical initials before image completion");
+  assert.equal(await page.evaluate(() => sidebarHost.dataset.avatarInitials), "MO", "Sidebar must use canonical initials before image completion");
+  assert.equal(await page.evaluate(() => sidebarHost.getAttribute("title")), "Maria del Carmen Ortiz", "Sidebar avatar exposes the full canonical name");
   assert.equal(await page.evaluate(() => sidebarHost.querySelector("img").getAttribute("src")), "/missing-sidebar.svg", "Sidebar must retain the source for canonical error/recovery tracking");
   await page.evaluate(() => { sidebarHost.querySelector("img").src = "/transparent.svg"; });
   await page.waitForFunction(() => sidebarHost.dataset.avatarState === "image");

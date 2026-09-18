@@ -55,7 +55,7 @@ function includesAll(source, values, label) {
 
 assert.equal(
   AVATAR_IDENTITY_VERSION,
-  "avatar-identity.v5-user-id-first"
+  "avatar-identity.v6-first-last-initials"
 );
 assert.equal(AVATAR_TONE_COUNT, 20);
 assert.equal(AVATAR_COLOR_SPACE, 20);
@@ -184,6 +184,44 @@ assert.equal(carlosPlain.colorKey, "violet");
 assert.equal(carlosPlain.color, "#8764B8");
 assert.equal(carlosPlain.initials, "CG");
 assert.equal(carlosAccent.initials, "CG");
+
+/*
+  Una sola regla de iniciales para todo el producto: primera inicial + inicial
+  del ÚLTIMO token del nombre limpio. Cubre nombres con dos, tres y cuatro o
+  más tokens (donde Fluent Persona dejaba una sola letra), empresas con
+  puntuación, Unicode, espacios sobrantes, guiones y apóstrofos.
+*/
+const canonicalInitials = [
+  ["Javier Harandou", "JH"],
+  ["Jesús Ávila Granados", "JG"],
+  ["Loïc Piña Richard", "LR"],
+  ["Carlos Yepes Garcia", "CG"],
+  ["Mohamed Yakhlef el Allali", "MA"],
+  ["Nicolas del Castillo Luque", "NL"],
+  ["Alex Ávila Artero", "AA"],
+  ["Etelvina Ferreiro Rodriguez", "ER"],
+  ["Pol Cabeza Sillero", "PS"],
+  ["PAVI RIF, S.L.", "PS"],
+  ["Madonna", "M"],
+  ["  Ñoño   Núñez  ", "ÑN"],
+  ["Jean-Luc O'Brien", "JO"],
+  ["Ana\u0301 Lo\u0301pez", "AL"],
+  ["María José de la Fuente-Ortiz", "MF"],
+  ["Maria del Carmen Ortiz", "MO"],
+];
+for (const [name, initials] of canonicalInitials) {
+  assert.equal(avatarInitials(name), initials, `iniciales canónicas para ${JSON.stringify(name)}`);
+  assert.equal(resolveAvatarPresentation({ userId: "same-person", name }).initials, initials, "la presentación usa la misma regla");
+  assert.equal(avatarInitials({ displayName: name }), initials, "cualquier alias de nombre produce las mismas iniciales");
+}
+for (const empty of ["", "   ", null, undefined, {}, "+34 600 000 000", "()"]) {
+  assert.equal(avatarInitials(empty), "ON", `entrada vacía o inválida conserva el fallback del producto: ${JSON.stringify(empty)}`);
+}
+assert.equal(
+  avatarInitials({ firstName: "Mohamed", lastName: "Yakhlef el Allali" }),
+  "MA",
+  "un registro partido en nombre y apellidos produce las mismas iniciales que su nombre completo"
+);
 
 /* Nombre sin identidad estable conserva comportamiento Persona legacy. */
 const microsoftSamples = [

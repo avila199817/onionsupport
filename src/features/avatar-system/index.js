@@ -605,7 +605,12 @@ function nameFromNode(node = null) {
   if (datasetName) return datasetName;
 
   for (const value of [
-    node.getAttribute?.("title"),
+    /* Un título escrito por el propio runtime no es una fuente de nombre:
+       si lo fuera, un host que aprende su nombre del contexto (fila, ficha)
+       quedaría anclado al primer nombre y no seguiría un cambio. */
+    node.getAttribute?.("data-avatar-title") === "identity"
+      ? ""
+      : node.getAttribute?.("title"),
     node.getAttribute?.("aria-label"),
   ]) {
     const name = humanNameFromText(value || "");
@@ -805,6 +810,35 @@ function resolveHostIdentity(host = null) {
   return candidate;
 }
 
+/*
+  Contrato global de título: cada avatar que representa a una persona o
+  empresa expone su nombre completo canónico en `title`, tenga iniciales o
+  foto. El runtime sólo escribe títulos que él mismo posee (marcados con
+  `data-avatar-title="identity"`) o hosts sin título, así que un título
+  explícito de la plantilla se respeta y un cambio de nombre se propaga.
+  Un alias técnico (correo) no es un nombre: no se expone como título.
+*/
+function applyIdentityTitle(host = null, presentation = {}) {
+  if (!isElement(host)) return false;
+
+  const fullName = cleanText(presentation?.name, "");
+  const ownsTitle = host.getAttribute("data-avatar-title") === "identity";
+
+  if (!fullName || fullName.includes("@")) {
+    if (ownsTitle) {
+      removeAttribute(host, "title");
+      removeAttribute(host, "data-avatar-title");
+    }
+    return false;
+  }
+
+  if (!ownsTitle && host.hasAttribute("title")) return false;
+
+  setAttribute(host, "title", fullName);
+  setAttribute(host, "data-avatar-title", "identity");
+  return true;
+}
+
 function applyIdentityPresentation(host = null) {
   if (!isElement(host) || isOptedOut(host)) return null;
 
@@ -817,6 +851,7 @@ function applyIdentityPresentation(host = null) {
   setAttribute(host, "data-avatar-identity", presentation.fingerprint);
   setAttribute(host, "data-avatar-tone", String(presentation.tone));
   setAttribute(host, "data-avatar-initials", presentation.initials);
+  applyIdentityTitle(host, presentation);
 
   if (
     previousTone !== null &&

@@ -20,7 +20,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { isObject } from "../../core/objects.js";
 
 export const AVATAR_IDENTITY_VERSION =
-  "avatar-identity.v5-user-id-first";
+  "avatar-identity.v6-first-last-initials";
 
 /* Fluent UI v8 Persona colors: exact order/hex. */
 export const MICROSOFT_PERSONA_COLORS = Object.freeze([
@@ -364,7 +364,13 @@ export function avatarColorKeyFromIdentity(input = {}) {
 }
 
 /* =========================================================
-   MICROSOFT FLUENT UI PERSONA INITIALS
+   INITIALS · ONE CANONICAL RULE
+
+   Fluent Persona keeps the first initial only when a name has four or more
+   tokens, which turned «Marta Ruiz de la Torre» into «M». Onion uses the
+   first token and the LAST token of the cleaned display name: «MT», «AG» for
+   «Ana Pérez Gómez», «ES» for «Empresa Ejemplo, S.L.». A single token keeps
+   one initial; empty or unsupported text keeps the product fallback.
 ========================================================= */
 
 const UNWANTED_ENCLOSURES_REGEX =
@@ -406,20 +412,16 @@ export function avatarInitials(value = "") {
     return "ON";
   }
 
-  const splits = displayName.split(" ");
-  let initials = "";
+  const tokens = displayName.split(" ").filter(Boolean);
+  if (!tokens.length) return "ON";
 
-  if (splits.length === 2) {
-    initials += splits[0].charAt(0).toUpperCase();
-    initials += splits[1].charAt(0).toUpperCase();
-  } else if (splits.length === 3) {
-    initials += splits[0].charAt(0).toUpperCase();
-    initials += splits[2].charAt(0).toUpperCase();
-  } else if (splits.length !== 0) {
-    initials += splits[0].charAt(0).toUpperCase();
-  }
+  const first = tokens[0].charAt(0).toUpperCase();
+  const last =
+    tokens.length > 1
+      ? tokens[tokens.length - 1].charAt(0).toUpperCase()
+      : "";
 
-  return initials || "ON";
+  return `${first}${last}` || "ON";
 }
 
 export function avatarIdentityFingerprint(input = {}) {

@@ -1298,6 +1298,146 @@ try {
     await page.close();
   }
 
+  /* 24 · UN DÍA CON CITAS SE SELECCIONA DESDE LA REJILLA PRINCIPAL */
+  {
+    const seeded = ["09:15", "10:30", "12:00", "16:45"].map((horaLocal, index) => ({
+      id: `CITA-SEL-000${index + 1}`,
+      userId: "usr-ana",
+      destinatarioNombre: "Ana Pérez",
+      fechaLocal: ANCHOR,
+      horaLocal,
+      lugar: "Oficina de Sant Vicenç",
+      nota: "",
+      estado: "programada",
+      version: 1,
+    }));
+
+    const { page, api } = await openAgenda(browser, { citas: seeded });
+    const cell = page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"]`);
+    await cell.locator(".agenda-day-event").first().waitFor({ state: "visible" });
+    assert.equal(await cell.getAttribute("aria-selected"), "false", "el día con citas empieza sin seleccionar");
+
+    /* Un clic real (ratón, sin forzar) en el hueco entre citas y borde inferior
+       de la casilla: la lista de citas no se lo queda. */
+    const box = await cell.boundingBox();
+    const eventsBox = await cell.locator(".agenda-day-events").boundingBox();
+    await page.mouse.click(eventsBox.x + eventsBox.width - 3, box.y + box.height - 3);
+    await page.waitForFunction(
+      (key) => document.querySelector(`[data-agenda-cell="true"][data-agenda-date="${key}"]`)?.getAttribute("aria-selected") === "true",
+      ANCHOR
+    );
+    assert.equal(await page.locator("#agenda-detail-modal").count(), 0, "seleccionar el día no abre ninguna cita");
+    assert.equal(api.state.calls.detail || 0, 0, "y no pide ningún detalle");
+
+    /* La mini y la rejilla principal son UNA sola fecha seleccionada. */
+    const miniSelected = await page.locator(`.agenda-mini-day[data-agenda-date="${ANCHOR}"]`).getAttribute("aria-selected");
+    assert.equal(miniSelected, "true", "la mini refleja la selección hecha en la rejilla principal");
+    const inspector = await page.locator("[data-agenda-inspector]").textContent();
+    assert.match(inspector, /09:15/u, "el inspector del día muestra las citas del día seleccionado");
+
+    /* La cita sigue abriéndose con su propio clic y no altera la selección. */
+    await cell.locator(".agenda-day-event").first().click();
+    await openedDetail(page);
+    assert.equal(await cell.getAttribute("aria-selected"), "true");
+    await page.keyboard.press("Escape");
+    await page.locator("#agenda-detail-modal").waitFor({ state: "detached" });
+
+    /* Cuatro citas: la cuarta queda tras «+1 más», que también selecciona. */
+    /* Un vecino del mismo mes: cambiar de mes desde la mini es otro camino
+       (ya cubierto) y retiraría la casilla del ancla de la rejilla principal. */
+    const neighbour = page.locator(`.agenda-mini-day:not(.is-outside):not([data-agenda-date="${ANCHOR}"])`).first();
+    const neighbourKey = await neighbour.getAttribute("data-agenda-date");
+    await neighbour.click();
+    await page.waitForFunction(
+      (key) => document.querySelector(`[data-agenda-cell="true"][data-agenda-date="${key}"]`)?.getAttribute("aria-selected") === "true",
+      neighbourKey
+    );
+    assert.equal(await cell.getAttribute("aria-selected"), "false", "la mini mueve la selección de la rejilla principal");
+    await cell.locator(".agenda-day-more").click();
+    await page.waitForFunction(
+      (key) => document.querySelector(`[data-agenda-cell="true"][data-agenda-date="${key}"]`)?.getAttribute("aria-selected") === "true",
+      ANCHOR
+    );
+    assert.equal(await page.locator(`.agenda-mini-day[data-agenda-date="${ANCHOR}"]`).getAttribute("aria-selected"), "true");
+
+    ok("24 · un día con citas se selecciona desde la rejilla principal; mini y principal comparten la fecha; la cita sigue abriéndose");
+    await page.close();
+  }
+
+  /* 25 · TECLADO: LA SUPERFICIE DEL DÍA CON CITAS SIGUE SIENDO ALCANZABLE */
+  {
+    const seeded = [{
+      id: "CITA-KEY-0001",
+      userId: "usr-ana",
+      destinatarioNombre: "Ana Pérez",
+      fechaLocal: ANCHOR,
+      horaLocal: "09:15",
+      lugar: "Oficina de Sant Vicenç",
+      nota: "",
+      estado: "programada",
+      version: 1,
+    }];
+    const { page } = await openAgenda(browser, { citas: seeded });
+    const cell = page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"]`);
+    await cell.locator(".agenda-day-event").first().waitFor({ state: "visible" });
+    await cell.locator(".agenda-day-surface").focus();
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(
+      (key) => document.querySelector(`[data-agenda-cell="true"][data-agenda-date="${key}"]`)?.getAttribute("aria-selected") === "true",
+      ANCHOR
+    );
+    const surfaceStyle = await cell.locator(".agenda-day-surface").evaluate((node) => getComputedStyle(node).cursor);
+    assert.equal(surfaceStyle, "pointer", "la superficie del día ofrece cursor de acción");
+    const eventsPointer = await cell.locator(".agenda-day-events").evaluate((node) => getComputedStyle(node).pointerEvents);
+    const chipPointer = await cell.locator(".agenda-day-event").first().evaluate((node) => getComputedStyle(node).pointerEvents);
+    assert.deepEqual({ eventsPointer, chipPointer }, { eventsPointer: "none", chipPointer: "auto" },
+      "la lista no captura clics; sus botones sí");
+    ok("25 · con teclado, Enter sobre la superficie selecciona el día aunque tenga citas; la lista no bloquea el puntero");
+    await page.close();
+  }
+
+  /* 26 · IDENTIDAD VIGENTE: UN CLIENTE RENOMBRADO NO SIGUE APARECIENDO CON EL NOMBRE ANTIGUO */
+  {
+    const seeded = [{
+      id: "CITA-NAME-0001",
+      userId: "usr-ana",
+      destinatarioNombre: "Ismael Ejemplo",
+      fechaLocal: ANCHOR,
+      horaLocal: "11:00",
+      lugar: "Oficina de Sant Vicenç",
+      nota: "",
+      estado: "programada",
+      version: 1,
+    }];
+    const { page, api } = await openAgenda(browser, { citas: seeded });
+    const cell = page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"]`);
+    await cell.locator(".agenda-day-event").first().waitFor({ state: "visible" });
+    assert.match(await cell.locator(".agenda-day-event-text").first().textContent(), /Ismael Ejemplo/u);
+
+    /* El cliente se renombra en otra vista (Clientes): la Agenda se desmonta,
+       y al volver relee el intervalo. El backend proyecta el nombre vigente
+       del usuario; el frontend no conserva ninguna copia propia entre
+       montajes (la caché del intervalo muere con la vista). */
+    api.state.citas[0].destinatarioNombre = "Moha Ejemplo";
+    await page.evaluate(() => window.__unmount());
+    await page.evaluate(() => { document.getElementById("view").innerHTML = ""; });
+    await page.evaluate(() => window.__mount("admin"));
+    await page.waitForFunction(() => window.__controller?.getSnapshot?.().canCreate === true);
+    await gotoAnchorMonth(page);
+    await page.waitForFunction(() => document.querySelector(".agenda-day-event-text")?.textContent?.includes("Moha Ejemplo"));
+    assert.equal(await page.evaluate(() => document.body.textContent.includes("Ismael Ejemplo")), false,
+      "ningún resto del nombre antiguo en las superficies de identidad actual");
+    assert.match(await cell.locator(".agenda-day-event").first().getAttribute("title"), /Moha Ejemplo/u, "el título del chip también es vigente");
+
+    await cell.locator(".agenda-day-surface").click();
+    await page.waitForFunction(() => document.querySelector("[data-agenda-inspector]")?.textContent?.includes("Moha Ejemplo"));
+    await cell.locator(".agenda-day-event").first().click();
+    await openedDetail(page);
+    await page.waitForFunction(() => document.querySelector("#agenda-detail-modal")?.textContent?.includes("Moha Ejemplo"));
+    ok("26 · un cliente renombrado aparece con su nombre vigente en chip, inspector y detalle; no queda rastro del antiguo");
+    await page.close();
+  }
+
   console.log(`\nAgenda citas browser contract: PASS · ${results.length} escenarios · build real, red aislada, ningún correo enviado`);
 } catch (error) {
   console.error("AGENDA CITAS BROWSER CONTRACT FAILED");

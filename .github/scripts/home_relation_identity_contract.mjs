@@ -138,8 +138,8 @@ assert.match(html, /Juan Pablo Ruiz Martín/);
 assert.match(html, /juan\.ruiz@example\.com/);
 assert.match(
   html,
-  /data-home-relation-avatar="false"[\s\S]*?data-avatar-initials="J"[\s\S]*?home-entity-relation-fallback[^>]*>J</,
-  "A missing photo must use Microsoft Persona initials from global AvatarSystem, never a fabricated asset"
+  /data-home-relation-avatar="false"[\s\S]*?data-avatar-initials="JM"[\s\S]*?home-entity-relation-fallback[^>]*>JM</,
+  "A missing photo must use the canonical initials (first + last token) from global AvatarSystem, never a fabricated asset"
 );
 
 assert.match(

@@ -1298,7 +1298,20 @@ function createController(host, context = {}) {
 
   function onViewClick(event) {
     const target = event.target?.closest?.("[data-agenda-action]");
-    if (!target || destroyed || !host.contains(target)) return;
+    if (destroyed) return;
+
+    if (!target) {
+      /* Un clic en cualquier zona de una casilla que no sea una acción (el
+         hueco entre citas, el borde) selecciona ese día: la casilla entera es
+         la fecha, no sólo la superficie que queda libre. */
+      const cell = event.target?.closest?.("[data-agenda-cell]");
+      if (cell && host.contains(cell) && cell.dataset.agendaDate) {
+        selectDate(cell.dataset.agendaDate);
+      }
+      return;
+    }
+
+    if (!host.contains(target)) return;
 
     const action = target.dataset.agendaAction || "";
 

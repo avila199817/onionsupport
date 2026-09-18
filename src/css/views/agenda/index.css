@@ -755,6 +755,9 @@
     outline-offset: 1px;
   }
 
+  /* La lista de citas ocupa el resto de la casilla pero NO recibe clics:
+     sólo sus botones. Así la zona vacía de un día con citas sigue llegando
+     a la superficie de selección que hay debajo. */
   .agenda-day-events {
     position: relative;
     z-index: 1;
@@ -768,6 +771,12 @@
     padding: 0;
     overflow: hidden;
     list-style: none;
+    pointer-events: none;
+  }
+
+  .agenda-day-event,
+  .agenda-day-more {
+    pointer-events: auto;
   }
 
   .agenda-day-events > li {

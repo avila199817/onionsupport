@@ -88,7 +88,7 @@ const USUARIOS_MODULE_NAME = "usuarios";
 const USUARIOS_VIEW_NAME = "UsuariosView";
 const USUARIOS_CANONICAL_PATH = "/usuarios";
 const USUARIOS_INDEX_VERSION =
-  "usuarios.index.v15.pending-activation-resend";
+  "usuarios.index.v16.activation-delivery";
 const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
 const USUARIOS_INDEX_SOURCE = "views.usuarios.index";
 
@@ -406,14 +406,27 @@ function buildUsuariosCsv(items = []) {
     ...rows,
   ].map((row) => row.map(csvEscape).join(";")).join("\r\n");
 }
-function downloadTextFile(content = "", filename = "usuarios.csv") {
+function downloadTextFile(
+  content = "",
+  filename = "usuarios.csv",
+  mimeType = "text/csv;charset=utf-8"
+) {
   if (!isBrowser()) return false;
   try {
-    const blob = new Blob(["\uFEFF", String(content || "")], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob(
+      ["\uFEFF", String(content || "")],
+      {
+        type:
+          cleanText(
+            mimeType,
+            "text/plain;charset=utf-8"
+          ),
+      }
+    );
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = cleanText(filename, "usuarios.csv");
+    anchor.download = cleanText(filename, "descarga.txt");
     anchor.rel = "noopener";
     anchor.hidden = true;
     document.body.appendChild(anchor);
@@ -458,7 +471,85 @@ function usuarioEmail(item = {}) {
   ).toLowerCase();
 }
 
-function renderUsuarioActivationConfirmation(root, { user } = {}) {
+function usuarioFirstName(item = {}) {
+  return (
+    usuarioDisplayName(item)
+      .split(/\s+/u)
+      .filter(Boolean)[0] ||
+    "usuario"
+  );
+}
+
+function buildManualActivationTemplate(
+  user = {},
+  result = {}
+) {
+  const name =
+    usuarioFirstName(user);
+  const email =
+    cleanText(
+      result?.email,
+      usuarioEmail(user)
+    ).toLowerCase();
+  const activationUrl =
+    cleanText(
+      result?.activationUrl,
+      ""
+    );
+
+  if (!activationUrl) {
+    throw new Error(
+      "USUARIOS_MANUAL_ACTIVATION_URL_REQUIRED"
+    );
+  }
+
+  return [
+    email ? `Para: ${email}` : "",
+    "Asunto: Activación de tu cuenta · Onion Support",
+    "",
+    `Hola ${name},`,
+    "",
+    "Te envío un nuevo enlace de activación para que puedas finalizar el alta de tu cuenta de Onion Support y crear tu contraseña de acceso.",
+    "",
+    "Puedes activar la cuenta desde el siguiente enlace:",
+    "",
+    activationUrl,
+    "",
+    "Este enlace es nuevo y será válido durante las próximas 24 horas. Si habías recibido algún enlace anterior, utiliza únicamente este, ya que los anteriores han quedado invalidados.",
+    "",
+    "Una vez accedas al enlace, podrás establecer tu contraseña y completar la activación de la cuenta.",
+    "",
+    "Si tienes cualquier problema durante el proceso, respóndeme a este mismo correo y lo revisamos.",
+    "",
+    "Un saludo,",
+    "",
+  ]
+    .filter((line, index, lines) =>
+      line !== "" ||
+      index > 1 ||
+      Boolean(lines[0])
+    )
+    .join("\r\n");
+}
+
+function manualActivationFilename(user = {}) {
+  const id =
+    getUsuarioId(user)
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 100) ||
+    "usuario";
+
+  return `activacion-manual-${id}.txt`;
+}
+
+function renderUsuarioActivationConfirmation(
+  root,
+  {
+    user,
+    onDeliveryChange = null,
+  } = {}
+) {
   const name = usuarioDisplayName(user);
   const email = usuarioEmail(user);
   const titleId = "usuarios-resend-activation-confirm-title";
@@ -481,20 +572,60 @@ function renderUsuarioActivationConfirmation(root, { user } = {}) {
     height: "auto",
     header: `<div class="usuarios-resend-confirm-heading">
       <span class="usuarios-resend-confirm-eyebrow">Cuenta pendiente</span>
-      <h2 id="${titleId}">¿Reenviar enlace de activación?</h2>
+      <h2 id="${titleId}">Activación de cuenta</h2>
     </div>`,
     bodyClass: "usuarios-resend-confirm-body",
     body: `<span class="usuarios-resend-confirm-icon" aria-hidden="true">↻</span>
       <div class="usuarios-resend-confirm-copy">
-        <p id="${descriptionId}">Se enviará un enlace nuevo a <strong>${escapeHtml(email || "su correo")}</strong>. El enlace anterior dejará de ser válido y el nuevo caducará en 24 horas.</p>
+        <p id="${descriptionId}">Se generará un enlace nuevo para <strong>${escapeHtml(email || "su correo")}</strong>. El enlace anterior dejará de ser válido y el nuevo caducará en 24 horas.</p>
         <div class="usuarios-resend-confirm-meta">
           <span>${escapeHtml(name)}</span>
           ${email ? `<span>${escapeHtml(email)}</span>` : ""}
         </div>
+        <fieldset class="usuarios-resend-delivery" aria-label="Método de entrega">
+          <label class="usuarios-resend-delivery-option">
+            <input type="radio" name="usuarios-activation-delivery" value="email" data-usuarios-activation-delivery="email" checked>
+            <span class="usuarios-resend-delivery-copy">
+              <strong>Enviar automáticamente</strong>
+              <span>Onion Support enviará el template de activación al correo del usuario.</span>
+            </span>
+          </label>
+          <label class="usuarios-resend-delivery-option">
+            <input type="radio" name="usuarios-activation-delivery" value="manual" data-usuarios-activation-delivery="manual">
+            <span class="usuarios-resend-delivery-copy">
+              <strong>Generar envío manual</strong>
+              <span>No se enviará correo automático. Se descargará un .txt con el mensaje y el enlace para enviarlo desde tu correo.</span>
+            </span>
+          </label>
+        </fieldset>
       </div>`,
     footer: `<button type="button" class="usuarios-resend-confirm-btn usuarios-resend-confirm-btn--cancel" data-usuarios-resend-confirm-action="cancel">Cancelar</button>
-      <button type="button" class="usuarios-resend-confirm-btn usuarios-resend-confirm-btn--confirm" data-usuarios-resend-confirm-action="confirm">Volver a enviar</button>`,
+      <button type="button" class="usuarios-resend-confirm-btn usuarios-resend-confirm-btn--confirm" data-usuarios-resend-confirm-action="confirm">Continuar</button>`,
   });
+
+  for (
+    const input
+    of root.querySelectorAll(
+      "[data-usuarios-activation-delivery]"
+    )
+  ) {
+    input.addEventListener(
+      "change",
+      () => {
+        if (
+          input.checked &&
+          isFunction(onDeliveryChange)
+        ) {
+          onDeliveryChange(
+            cleanText(
+              input.value,
+              "email"
+            )
+          );
+        }
+      }
+    );
+  }
 
   return {
     panel: root.querySelector(MODAL_SHELL_SELECTORS.panel),
@@ -517,10 +648,12 @@ function confirmUsuarioActivationResend({
     ) {
       return activeUsuarioActivationConfirm.promise;
     }
-    return Promise.resolve(false);
+    return Promise.resolve("");
   }
 
-  const promise = openModalConfirmation({
+  let selectedDelivery = "email";
+
+  const confirmationPromise = openModalConfirmation({
     host: {
       id: USUARIOS_RESEND_CONFIRM_ROOT_ID,
       attributes: {
@@ -528,13 +661,33 @@ function confirmUsuarioActivationResend({
       },
     },
     render: (root) =>
-      renderUsuarioActivationConfirmation(root, { user }),
+      renderUsuarioActivationConfirmation(
+        root,
+        {
+          user,
+          onDeliveryChange:
+            (value) => {
+              selectedDelivery =
+                value === "manual"
+                  ? "manual"
+                  : "email";
+            },
+        }
+      ),
     opener,
     signal,
     bodyClasses: [
       "usuarios-resend-confirm-open",
     ],
   });
+
+  const promise =
+    confirmationPromise.then(
+      (confirmed) =>
+        confirmed
+          ? selectedDelivery
+          : ""
+    );
 
   activeUsuarioActivationConfirm = {
     userId,
@@ -1458,9 +1611,9 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     const confirmation = new AbortController();
     resendConfirmationAbort = confirmation;
 
-    let confirmed = false;
+    let delivery = "";
     try {
-      confirmed = await confirmUsuarioActivationResend({
+      delivery = await confirmUsuarioActivationResend({
         user,
         opener,
         signal: confirmation.signal,
@@ -1472,7 +1625,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     }
 
     if (
-      !confirmed ||
+      !delivery ||
       destroyed ||
       !routeActive() ||
       !admin()
@@ -1488,6 +1641,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         await resendUsuarioActivationRequestApi(
           id,
           {
+            delivery,
             signal:
               context.signal,
           }
@@ -1499,7 +1653,32 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
           usuarioEmail(user)
         );
 
-      if (result?.mail?.sent === true) {
+      if (delivery === "manual") {
+        const text =
+          buildManualActivationTemplate(
+            user,
+            result
+          );
+
+        if (
+          !downloadTextFile(
+            text,
+            manualActivationFilename(user),
+            "text/plain;charset=utf-8"
+          )
+        ) {
+          throw new Error(
+            "USUARIOS_MANUAL_ACTIVATION_DOWNLOAD_FAILED"
+          );
+        }
+
+        showToast(
+          email
+            ? `Enlace nuevo generado. Se ha descargado la plantilla manual para ${email}.`
+            : "Enlace nuevo generado. Se ha descargado la plantilla manual.",
+          "success"
+        );
+      } else if (result?.mail?.sent === true) {
         showToast(
           email
             ? `Nuevo enlace de activación enviado a ${email}.`
@@ -1510,7 +1689,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         showToast(
           cleanText(
             result?.message,
-            "Se ha generado un enlace nuevo, pero el correo no se ha podido entregar. Puedes volver a intentarlo."
+            "Se ha generado un enlace nuevo, pero el correo no se ha podido entregar. Puedes volver a intentarlo en modo manual."
           ),
           "warning"
         );
@@ -1540,7 +1719,9 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       showToast(
         humanErrorText(
           resendError,
-          "No se pudo volver a enviar el enlace de activación."
+          delivery === "manual"
+            ? "No se pudo generar la activación manual."
+            : "No se pudo volver a enviar el enlace de activación."
         ),
         "error"
       );

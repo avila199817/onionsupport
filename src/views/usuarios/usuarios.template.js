@@ -36,7 +36,7 @@ import { statusTone } from "../../core/status-tone.js";
 
 
 const USUARIOS_TEMPLATE_VERSION =
-  "usuarios.template.v29.pending-activation-resend";
+  "usuarios.template.v30.activation-delivery";
 export const USUARIOS_ACTIONS = Object.freeze({
   DETAIL: "detail",
   RESEND_ACTIVATION: "resend-activation",
@@ -264,10 +264,10 @@ function renderStatusChip(item = {}, state = {}) {
   }
 
   const actionLabel = busy
-    ? `Reenviando activación a ${name}`
-    : `Volver a enviar el enlace de activación a ${name}`;
+    ? `Procesando activación de ${name}`
+    : `Gestionar la activación pendiente de ${name}`;
 
-  return `<button type="button" class="usuarios-chip usuarios-chip--pending usuarios-chip--action${busy ? " is-busy" : ""}" data-status-tone="${attr(statusTone(status))}" data-usuarios-action="${USUARIOS_ACTIONS.RESEND_ACTIVATION}" data-action="${USUARIOS_ACTIONS.RESEND_ACTIVATION}" data-user-id="${attr(id)}" aria-label="${attr(actionLabel)}" title="${attr(actionLabel)}" aria-busy="${busy ? "true" : "false"}" ${busy ? 'disabled aria-disabled="true"' : ""}><span class="usuarios-chip-dot" aria-hidden="true"></span><span>${escapeHtml(busy ? "Enviando…" : label)}</span></button>`;
+  return `<button type="button" class="usuarios-chip usuarios-chip--pending usuarios-chip--action${busy ? " is-busy" : ""}" data-status-tone="${attr(statusTone(status))}" data-usuarios-action="${USUARIOS_ACTIONS.RESEND_ACTIVATION}" data-action="${USUARIOS_ACTIONS.RESEND_ACTIVATION}" data-user-id="${attr(id)}" aria-label="${attr(actionLabel)}" title="${attr(actionLabel)}" aria-busy="${busy ? "true" : "false"}" ${busy ? 'disabled aria-disabled="true"' : ""}><span class="usuarios-chip-dot" aria-hidden="true"></span><span>${escapeHtml(busy ? "Procesando…" : label)}</span></button>`;
 }
 function renderRow(item = {}, state = {}) {
   const id = getId(item);

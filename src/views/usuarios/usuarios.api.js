@@ -4746,7 +4746,7 @@ export async function resendUsuarioActivationRequest(
 
   if (
     delivery === "manual" &&
-    !/^https:\/\/www\.onionsupport\.com\/activate-account\/[^/?#\s]+$/i.test(
+    !/^https:\/\/(?:www\.)?onionsupport\.com\/activate-account\/[^/?#\s]+$/i.test(
       activationUrl
     )
   ) {

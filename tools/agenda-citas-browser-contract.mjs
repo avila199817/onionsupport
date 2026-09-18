@@ -1438,6 +1438,66 @@ try {
     await page.close();
   }
 
+  /* 27 · PINTURA DE CITAS · SIN OPACIDAD LAVADA, CON TOKENS DEL SISTEMA */
+  {
+    const citas = [
+      {
+        id: "CITA-PAINT-1",
+        userId: "usr-ana",
+        destinatarioNombre: "Ana Pérez",
+        fechaLocal: ANCHOR,
+        horaLocal: "10:00",
+        lugar: "Oficina",
+        nota: "",
+        estado: "programada",
+        version: 1,
+      },
+      {
+        id: "CITA-PAINT-2",
+        userId: "usr-bea",
+        destinatarioNombre: "Bea López",
+        fechaLocal: ANCHOR,
+        horaLocal: "11:00",
+        lugar: "Oficina",
+        nota: "",
+        estado: "cancelada",
+        canceladaEn: "2026-01-02T00:00:00.000Z",
+        version: 1,
+      },
+    ];
+    const { page } = await openAgenda(browser, { citas });
+    const cell = page.locator(`[data-agenda-cell="true"][data-agenda-date="${ANCHOR}"]`);
+
+    for (const theme of ["dark", "light"]) {
+      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      const paints = await cell.locator(".agenda-day-event").evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const style = getComputedStyle(node);
+          return {
+            cancelada: node.classList.contains("is-cancelada"),
+            background: style.backgroundColor,
+            color: style.color,
+            opacity: style.opacity,
+          };
+        })
+      );
+
+      const programada = paints.find((paint) => !paint.cancelada);
+      const cancelada = paints.find((paint) => paint.cancelada);
+      assert.equal(programada?.opacity, "1", `${theme}: la cita programada no reduce opacidad`);
+      assert.equal(cancelada?.opacity, "1", `${theme}: la cita cancelada no reduce opacidad`);
+      assert.equal(programada?.background, "rgb(15, 108, 189)",
+        `${theme}: la cita programada usa --agenda-blue-strong sin mezcla translúcida`);
+      assert.notEqual(cancelada?.background, "rgba(0, 0, 0, 0)",
+        `${theme}: la cita cancelada conserva una superficie semántica visible`);
+      assert.equal(programada?.color, "rgb(255, 255, 255)",
+        `${theme}: texto operativo conserva contraste sobre el azul fuerte`);
+    }
+
+    ok("27 · citas programadas/canceladas usan pintura intensa del sistema en light y dark, sin opacity");
+    await page.close();
+  }
+
   console.log(`\nAgenda citas browser contract: PASS · ${results.length} escenarios · build real, red aislada, ningún correo enviado`);
 } catch (error) {
   console.error("AGENDA CITAS BROWSER CONTRACT FAILED");

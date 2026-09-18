@@ -476,7 +476,7 @@ function usuarioFirstName(item = {}) {
     usuarioDisplayName(item)
       .split(/\s+/u)
       .filter(Boolean)[0] ||
-    "Hola"
+    "usuario"
   );
 }
 

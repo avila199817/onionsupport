@@ -74,7 +74,7 @@ assert.match(resendApi, /delivery === "manual"[\s\S]*?source\.activationUrl/u,
   "activationUrl sólo puede leerse en el modo manual explícito");
 assert.match(resendApi, /USUARIO_ACTIVATION_MANUAL_URL_INVALID/u,
   "El enlace manual debe validarse antes de llegar a la vista");
-assert.match(resendApi, /\^https:\\\/\\\/www\\\.onionsupport\\\.com\\\/activate-account\\\//u,
+assert.match(resendApi, /\^https:\\\/\\\/\(\?:www\\\.\)\?onionsupport\\\.com\\\/activate-account\\\//u,
   "El enlace manual debe quedar limitado al host y ruta canónicos");
 assert.match(resendApi, /\.\.\.\(delivery === "manual"[\s\S]*?activationUrl/u,
   "Sólo la respuesta manual debe exponer activationUrl a la vista");

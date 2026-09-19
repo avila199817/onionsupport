@@ -799,8 +799,17 @@ function initScrollPipeline(refs, cleanups, host, activeState) {
 
   addEvent(cleanups, scrollTarget, "scroll", scheduler.schedule, { passive: true });
 
-  function invalidate() {
-    state.metricsDirty = true;
+  function scheduleProgress() {
+    if (activeState.initialPositionPending) {
+      // Initial positioning follows the first observed layout, before rail
+      // writes. Viewport invalidation alone must not start it before layout.
+      if (state.metricsDirty) return;
+      scheduler.cancel();
+      activeState.realign?.();
+      scheduler.schedule();
+      return;
+    }
+
     scheduler.schedule();
     // The same structural invalidation keeps a requested fragment aligned
     // while the layout settles, until the visitor scrolls away from it.
@@ -811,6 +820,11 @@ function initScrollPipeline(refs, cleanups, host, activeState) {
       return;
     }
     activeState.realign?.();
+  }
+
+  function invalidate() {
+    state.metricsDirty = true;
+    scheduleProgress();
   }
 
   addEvent(cleanups, window, "resize", invalidate, { passive: true });
@@ -824,7 +838,13 @@ function initScrollPipeline(refs, cleanups, host, activeState) {
   let resizeObserver = null;
 
   if ("ResizeObserver" in window) {
-    resizeObserver = new ResizeObserver(invalidate);
+    resizeObserver = new ResizeObserver(() => {
+      // ResizeObserver runs after layout. Cache geometry here, then leave
+      // progress writes to the existing frame so mount writes cannot force
+      // a whole-page layout from the first animation-frame callback.
+      measureGeometry();
+      scheduleProgress();
+    });
     resizeObserver.observe(refs.root);
     if (refs.nav) resizeObserver.observe(refs.nav);
     if (refs.customScrollbar) resizeObserver.observe(refs.customScrollbar);
@@ -897,10 +917,9 @@ function initScrollPipeline(refs, cleanups, host, activeState) {
     addEvent(cleanups, refs.customScrollbar, "lostpointercapture", stop);
   }
 
-  // The Router is still preparing a hidden host here. Measure in the next
-  // frame, after the rest of the mount/commit writes have been batched, instead
-  // of forcing a whole-page layout in the middle of renderPublicHomeView().
-  scheduler.schedule();
+  // The observer supplies the first geometry after the hidden host commits.
+  // Browsers without ResizeObserver retain the frame-based fallback.
+  if (!resizeObserver) scheduler.schedule();
 
   cleanups.push(() => {
     scheduler.cancel();
@@ -1267,6 +1286,7 @@ function initInitialPosition(refs, host, activeState, cleanups) {
   const position = () => {
     frame = 0;
     if (!refs.root.isConnected) return;
+    activeState.initialPositionPending = false;
     const hash = window.location.hash;
     if (hash && scrollToHash(hash, refs, host, activeState, {
       behavior: "auto", replace: false, focus: true, cleanups,
@@ -1295,7 +1315,9 @@ function initInitialPosition(refs, host, activeState, cleanups) {
     cancelFrame(frame);
     activeState.realign = null;
   });
-  schedule();
+  // ResizeObserver requests the initial position after mount/commit layout.
+  // Hash changes and late intake insertion still use their existing events.
+  if (!("ResizeObserver" in window)) schedule();
 }
 
 function appAuth() {
@@ -1322,7 +1344,13 @@ export function renderPublicHomeView(container, context = {}) {
   const cleanups = [];
   const view = mountTemplate(container);
   const refs = getRefs(view);
-  const activeState = { activeHash: "", alignedTop: null, settleUntil: 0, realign: null };
+  const activeState = {
+    activeHash: "",
+    alignedTop: null,
+    settleUntil: 0,
+    realign: null,
+    initialPositionPending: true,
+  };
 
   /*
     Se resuelve ANTES de cualquier medida, pero por contrato DOM, no por

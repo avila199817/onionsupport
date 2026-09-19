@@ -1330,7 +1330,7 @@
      ASSET TOKENS
   ========================================================= */
   --asset-favicon: url("/src/media/img/favicon_black_circle.png");
-  --asset-logo-support: url("/src/media/img/favicon_support.png");
+  --asset-logo-support: url("/src/media/img/favicon_support.webp");
   --asset-logo-dark: url("/src/media/img/favicon_white.png");
   --asset-logo-light: url("/src/media/img/favicon_black.png");
   --asset-logo-circle: url("/src/media/img/favicon_black_circle.png");

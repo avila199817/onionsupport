@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PUBLIC_CSS_POLICY } from "./public-css-minify.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const VALIDATOR = resolve(ROOT, "tools/validate-dist.mjs");
@@ -59,6 +60,11 @@ try {
   for (const path of COMPATIBILITY_DIRECTORIES) {
     await cp(resolve(SOURCE, path), resolve(candidate, path), { recursive: true });
   }
+  try {
+    await cp(resolve(SOURCE, PUBLIC_CSS_POLICY), resolve(candidate, PUBLIC_CSS_POLICY));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
 
   const baseline = runValidator(candidate);
   assert.equal(
@@ -66,6 +72,18 @@ try {
     0,
     `Candidate inventory baseline failed:\n${baseline.stdout}${baseline.stderr}`
   );
+
+  const publicCssPath = "src/css/views/public/index.css";
+  const publicCss = await readFile(resolve(candidate, publicCssPath));
+  await writeFile(resolve(candidate, publicCssPath), Buffer.concat([
+    publicCss,
+    Buffer.from("\n.integrity-probe { --candidate-tamper: 1; }\n"),
+  ]));
+  const alteredCss = runValidator(candidate);
+  assert.notEqual(alteredCss.status, 0, "An allowlisted CSS change absent from dist was accepted.");
+  assert.match(`${alteredCss.stdout}${alteredCss.stderr}`,
+    /Dist static asset differs from trusted candidate transform: src\/css\/views\/public\/index\.css/);
+  await writeFile(resolve(candidate, publicCssPath), publicCss);
 
   const addedPath = resolve(candidate, "src/css/__candidate_inventory_addition__.css");
   await writeFile(addedPath, ".candidate-inventory-addition{}\n", "utf8");
@@ -85,7 +103,7 @@ try {
     /Release path is outside the exact allowlist: src\/css\/core\/noscript\.css/
   );
 
-  console.log("Candidate inventory regression: PASS (addition + removal)");
+  console.log("Candidate inventory regression: PASS (addition + removal + public CSS fidelity)");
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }

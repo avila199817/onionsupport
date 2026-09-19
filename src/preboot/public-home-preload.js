@@ -54,6 +54,8 @@
       {
         rel: "preload",
         as: "image",
+        // Adelantar el retrato junto al titular en el hero de dos columnas.
+        media: "(min-width: 1041px)",
         href: "/src/media/img/Cristian_Avila_224.webp",
         type: "image/webp",
         imageSrcset: heroImageSrcset,
@@ -69,6 +71,7 @@
       link.rel = hint.rel;
       link.href = hint.href;
       if (hint.as) link.as = hint.as;
+      if (hint.media) link.media = hint.media;
       if (hint.type) link.type = hint.type;
       if (hint.imageSrcset) link.setAttribute("imagesrcset", hint.imageSrcset);
       if (hint.imageSizes) link.setAttribute("imagesizes", hint.imageSizes);

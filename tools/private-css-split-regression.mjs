@@ -82,6 +82,12 @@ async function loadPlugin(privateSource) {
     if (name === "./tools/invoice-api-split.mjs") {
       return wrapped(name, { invoiceApiSplitOutput: () => ({}) });
     }
+    if (name === "./tools/public-css-minify.mjs") {
+      return wrapped(name, {
+        publicCssMinifyEnabled: () => false,
+        publicCompatibilityCssBytes: (_path, source) => source,
+      });
+    }
     assert.ok(["node:fs/promises", "node:path", "node:os", "node:url"].includes(name), `Unexpected dependency: ${name}`);
     return wrapped(name, await import(name));
   });

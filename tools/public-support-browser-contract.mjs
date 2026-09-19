@@ -34,10 +34,15 @@ const mocks = new Map([
     };
   `],
   ["/src/features/avatar-system/index.js", `
+    window.__avatarRuntimeLoaded = true;
     export function resolveAvatarPresentation() {
       return { fingerprint: "fixture", email: "", username: "", initials: "TU" };
     }
-    export default { mount() {}, syncHost() {} };
+    export default {
+      resolve: resolveAvatarPresentation,
+      mount() { window.__avatarMounts = (window.__avatarMounts || 0) + 1; },
+      syncHost() { window.__avatarSyncs = (window.__avatarSyncs || 0) + 1; },
+    };
   `],
   ["/src/core/media.js", "export const sanitizeRuntimeImageUrl = (value) => value || '';"],
 ]);
@@ -54,6 +59,7 @@ const fixture = `<!doctype html><html lang="es"><meta charset="utf-8">
 </style>
 <button id="outside-before">Outside before</button>
 <main id="view-container"><section data-public-home="true">
+  <a href="/login" data-public-home-login="true">Panel cliente</a>
   <div class="public-home-content"><div class="public-home-hero"></div></div>
 </section></main><button id="outside-after">Outside after</button>
 <script type="module">
@@ -111,6 +117,12 @@ try {
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  const avatarRequests = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/src/features/avatar-system/index.js") {
+      avatarRequests.push(request.url());
+    }
+  });
   const field = (name) => page.locator(`${FORM} [name="${name}"]`);
   const submit = page.locator(`${FORM} button[type="submit"]`);
   async function load(authenticated = false) {
@@ -144,6 +156,47 @@ try {
       input.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
     }, value);
   }
+
+  // The anonymous form must not fetch the avatar runtime. Delay its first
+  // authenticated request to exercise logout during a real dynamic import.
+  await load();
+  assert.equal(avatarRequests.length, 0, "anonymous intake must not request the avatar runtime");
+  const login = page.locator("[data-public-home-login]");
+  let releaseAvatar;
+  const avatarGate = new Promise((resolve) => { releaseAvatar = resolve; });
+  const delayedAvatar = async (route) => {
+    await avatarGate;
+    await route.continue();
+  };
+  await page.route("**/src/features/avatar-system/index.js", delayedAvatar);
+  const setSession = (authenticated) => page.evaluate((next) => {
+    window.__formSession = next
+      ? { authenticated: true, currentUser: { id: "fixture-user", fullName: "Ana Prueba", email: "ana@example.test" } }
+      : {};
+    document.dispatchEvent(new Event("public-home:session-hydrated"));
+  }, authenticated);
+  const avatarRequested = page.waitForRequest((request) => new URL(request.url()).pathname === "/src/features/avatar-system/index.js");
+  await setSession(true);
+  await avatarRequested;
+  await setSession(false);
+  releaseAvatar();
+  await page.waitForFunction(() => window.__avatarRuntimeLoaded === true);
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  assert.equal(await login.textContent(), "Panel cliente", "late avatar import must not restore a logged-out identity");
+  assert.equal(await page.locator(".public-support-account").count(), 0);
+  assert.equal(await page.evaluate(() => window.__avatarMounts || 0), 0);
+  assert.equal(await page.evaluate(() => window.__avatarSyncs || 0), 0);
+  await setSession(true);
+  await page.waitForSelector(".public-support-account-name");
+  assert.equal(await page.locator(".public-support-account-name").textContent(), "Ana Prueba");
+  assert.equal(await login.getAttribute("href"), "/@fixture-user");
+  assert.ok(await page.evaluate(() => window.__avatarMounts > 0 && window.__avatarSyncs > 0));
+  assert.equal(avatarRequests.length, 1, "session changes must reuse the loaded authority");
+  await setSession(false);
+  await page.waitForFunction(() => document.querySelector("[data-public-home-login]")?.textContent === "Panel cliente");
+  assert.equal(await login.getAttribute("href"), "/login");
+  assert.equal(await page.locator(".public-support-account").count(), 0);
+  await page.unroute("**/src/features/avatar-system/index.js", delayedAvatar);
 
   // Real empty-form validation and progressive postal autofill share accessible errors.
   await load();
@@ -255,7 +308,7 @@ try {
   assert.equal(await page.locator(OVERLAY).isHidden(), true);
   assert.deepEqual(errors, [], "isolated real form modules must not throw");
   await context.close();
-  console.log("Public support browser: PASS · real form modules · validation/postal/phone · single submission · focus · retry identity · accepted envelope · unmount cancellation");
+  console.log("Public support browser: PASS · real form modules · lazy session avatar/stale logout · validation/postal/phone · single submission · focus · retry identity · accepted envelope · unmount cancellation");
 } finally {
   if (browser) await browser.close();
   await new Promise((done) => server.close(done));

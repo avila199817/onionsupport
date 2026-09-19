@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
@@ -281,6 +283,119 @@ assert.doesNotMatch(
   );
 }
 
+// Exercise the actual workflow adapter against an already-deployed verifier that
+// has the original Python API and no CLI support for --production-root.
+{
+  const googleStep = verificationWorkflow
+    .split("- name: Verify Google measurement bootstrap exactly", 2)[1]
+    ?.split("\n      - name:", 1)[0];
+  assert.ok(googleStep, "The Google production verification step must remain present.");
+  assert.match(googleStep, /RELEASE_MODE: \$\{\{ steps\.release\.outputs\.mode \}\}/,
+    "Google verification must use the resolved production release mode.");
+  const run = googleStep.match(/        run: \|\n([\s\S]*)/)?.[1];
+  assert.ok(run, "The Google workflow adapter must have an executable run block.");
+  const script = run.replace(/^ {10}/gm, "");
+  const fixture = await mkdtemp(resolve(tmpdir(), "onion-google-workflow-"));
+  const contractPath = ".github/scripts/google_measurement_contract.py";
+  const cssPath = "src/analytics/google-consent.css";
+  const sourceCss = ".consent { color: red; }\n";
+  const compiledCss = ".consent{color:red}";
+  const sourceRoot = resolve(fixture, "expected-main");
+  const artifactRoot = resolve(fixture, "expected-artifact/dist");
+  const callsPath = resolve(fixture, "calls.jsonl");
+  const livePath = resolve(fixture, "deployed.css");
+  const put = async (relative, contents) => {
+    const path = resolve(fixture, relative);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, contents);
+  };
+  try {
+    await put(`verification-tooling/${contractPath}`, `
+import json
+import os
+from pathlib import Path
+
+def _record(kind, root, **kwargs):
+    with open(os.environ["GOOGLE_FIXTURE_CALLS"], "a") as calls:
+        calls.write(json.dumps(dict(kind=kind, root=str(root), **kwargs)) + "\\n")
+
+def validate_source(root):
+    _record("source", root)
+    return [] if (root / "source.marker").read_text() == "valid" else ["source rejected"]
+
+def verify_production(root, base_url, revision, attempts, delay):
+    _record("production", root, base_url=base_url, revision=revision, attempts=attempts, delay=delay)
+    asset = root / "${cssPath}"
+    if not asset.is_file():
+        return ["production asset missing"]
+    return [] if asset.read_bytes() == Path(os.environ["GOOGLE_FIXTURE_LIVE"]).read_bytes() else ["production bytes differ"]
+
+if __name__ == "__main__":
+    raise RuntimeError("The trusted legacy verifier has no new CLI argument")
+`);
+    for (const checkout of ["workflow-tooling", "expected-main", "candidate"]) {
+      await put(`${checkout}/${contractPath}`, 'raise RuntimeError("candidate verifier must never execute")\n');
+    }
+    await put(`expected-main/${cssPath}`, sourceCss);
+    await put("expected-main/source.marker", "valid");
+    await put(`expected-artifact/dist/${cssPath}`, compiledCss);
+
+    const invoke = async (mode, deployedCss) => {
+      await writeFile(callsPath, "");
+      await writeFile(livePath, deployedCss);
+      const result = spawnSync("bash", ["-c", script], {
+        cwd: fixture,
+        env: {
+          ...process.env,
+          RELEASE_MODE: mode,
+          PUBLIC_SITE_URL: "https://production.invalid",
+          EXPECTED_SHA: "a".repeat(40),
+          GOOGLE_FIXTURE_CALLS: callsPath,
+          GOOGLE_FIXTURE_LIVE: livePath,
+        },
+        encoding: "utf8",
+      });
+      assert.ifError(result.error);
+      const calls = (await readFile(callsPath, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+      return { ...result, calls };
+    };
+    const productionCall = (root) => ({
+      kind: "production", root, base_url: "https://production.invalid",
+      revision: "a".repeat(40), attempts: 3, delay: 5,
+    });
+    const compiled = await invoke("compiled-dist", compiledCss);
+    assert.equal(compiled.status, 0, compiled.stderr);
+    assert.deepEqual(compiled.calls, [{ kind: "source", root: sourceRoot }, productionCall(artifactRoot)],
+      "Compiled releases validate source wiring and compare the artifact's emitted bytes.");
+    const legacy = await invoke("legacy-root", sourceCss);
+    assert.equal(legacy.status, 0, legacy.stderr);
+    assert.deepEqual(legacy.calls, [{ kind: "source", root: sourceRoot }, productionCall(sourceRoot)],
+      "Legacy releases retain source-root byte comparison.");
+    const unknownMode = await invoke("unknown", compiledCss);
+    assert.equal(unknownMode.status, 1, unknownMode.stderr);
+    assert.match(unknownMode.stderr, /Unknown release mode/);
+    assert.deepEqual(unknownMode.calls, [], "Unknown release modes must fail before validation.");
+
+    await put("expected-main/source.marker", "invalid");
+    const invalidSource = await invoke("compiled-dist", compiledCss);
+    assert.equal(invalidSource.status, 1, invalidSource.stderr);
+    assert.match(invalidSource.stderr, /source rejected/);
+    assert.deepEqual(invalidSource.calls, [{ kind: "source", root: sourceRoot }],
+      "Invalid source must block production inspection.");
+    await put("expected-main/source.marker", "valid");
+
+    const mismatch = await invoke("compiled-dist", sourceCss);
+    assert.equal(mismatch.status, 1, mismatch.stderr);
+    assert.match(mismatch.stderr, /production bytes differ/);
+    await rm(resolve(artifactRoot, cssPath));
+    const missing = await invoke("compiled-dist", compiledCss);
+    assert.equal(missing.status, 1, missing.stderr);
+    assert.match(missing.stderr, /production asset missing/);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+}
+
 console.log("Production dist workflow regression: PASS");
 console.log("- build and browser validation run in the no-secret job");
 console.log("- a fresh runner validates the exact artifact before token access");
@@ -289,3 +404,4 @@ console.log("- external verification supports legacy base PRs and compiled main"
 console.log("- manual rollback is pinned to the verified legacy SHA");
 console.log("- the production gate expects a deployed revision, never a moving branch tip");
 console.log("- the skew classifier resolves from the workflow's own checkout, not the trusted one");
+console.log("- Google verification uses the trusted API with separate source and emitted-byte roots");

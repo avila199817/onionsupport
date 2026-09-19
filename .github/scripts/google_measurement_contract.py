@@ -425,7 +425,7 @@ def fetch_live(
 
 
 def verify_production(
-    root: Path,
+    production_root: Path,
     base_url: str,
     revision: str,
     attempts: int,
@@ -434,7 +434,12 @@ def verify_production(
     errors: list[str] = []
 
     for relative_path in PRODUCTION_ASSETS:
-        expected = (root / relative_path).read_bytes()
+        expected_path = production_root / relative_path
+        try:
+            expected = expected_path.read_bytes()
+        except OSError as error:
+            errors.append(f"{relative_path}: no se puede leer el activo productivo esperado {expected_path}: {error}")
+            continue
         last_error = ""
 
         for attempt in range(1, attempts + 1):
@@ -459,7 +464,7 @@ def verify_production(
                     break
 
                 last_error = (
-                    f"{relative_path}: contenido productivo distinto al commit "
+                    f"{relative_path}: contenido productivo distinto al artefacto esperado "
                     f"(prod={sha256(deployed)[:16]} "
                     f"local={sha256(expected)[:16]})"
                 )
@@ -475,7 +480,8 @@ def verify_production(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default=".")
+    parser.add_argument("--root", default=".", help="Source tree for semantic validation")
+    parser.add_argument("--production-root", help="Expected deployed bytes; defaults to --root for legacy releases")
     parser.add_argument("--base-url")
     parser.add_argument("--revision", default="local")
     parser.add_argument("--attempts", type=int, default=1)
@@ -486,6 +492,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     root = Path(args.root).resolve()
+    production_root = Path(args.production_root).resolve() if args.production_root else root
 
     if args.attempts < 1:
         print("ERROR: --attempts debe ser >= 1", file=sys.stderr)
@@ -497,9 +504,10 @@ def main() -> int:
     errors = validate_source(root)
 
     if not errors and args.base_url:
+        print(f"Google measurement roots: source={root} · production={production_root}")
         errors.extend(
             verify_production(
-                root,
+                production_root,
                 args.base_url,
                 args.revision,
                 args.attempts,

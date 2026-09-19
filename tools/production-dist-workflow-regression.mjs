@@ -155,6 +155,26 @@ assert.doesNotMatch(
   "The external compiled verifier must never treat the source checkout as an artifact envelope."
 );
 
+{
+  const googleStep = verificationWorkflow
+    .split("- name: Verify Google measurement bootstrap exactly", 2)[1]
+    .split("\n      - name:", 1)[0];
+
+  assert.ok(
+    googleStep.includes('production_root="expected-main"') &&
+      googleStep.includes('production_root="expected-main/dist"') &&
+      googleStep.includes('--production-root "${production_root}"'),
+    "Google production byte verification must compare compiled releases against their built dist, while preserving the legacy source root."
+  );
+  assert.ok(
+    googleStep.indexOf('production_root="expected-main"') <
+      googleStep.indexOf('production_root="expected-main/dist"') &&
+      googleStep.indexOf('production_root="expected-main/dist"') <
+      googleStep.indexOf('--production-root "${production_root}"'),
+    "Google production root selection must be resolved before the verifier runs."
+  );
+}
+
 /* =========================================================
    Production verification must reason about immutable identities, never about a moving
    main. The gate used to expect production to serve `github.event.pull_request.base.sha`

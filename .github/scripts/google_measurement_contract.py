@@ -425,7 +425,7 @@ def fetch_live(
 
 
 def verify_production(
-    root: Path,
+    expected_root: Path,
     base_url: str,
     revision: str,
     attempts: int,
@@ -434,7 +434,13 @@ def verify_production(
     errors: list[str] = []
 
     for relative_path in PRODUCTION_ASSETS:
-        expected = (root / relative_path).read_bytes()
+        expected_path = expected_root / relative_path
+        if not expected_path.is_file():
+            errors.append(
+                f"{relative_path}: asset esperado inexistente en {expected_root}"
+            )
+            continue
+        expected = expected_path.read_bytes()
         last_error = ""
 
         for attempt in range(1, attempts + 1):
@@ -477,6 +483,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
     parser.add_argument("--base-url")
+    parser.add_argument(
+        "--production-root",
+        help=(
+            "Raíz de bytes desplegables esperados. "
+            "Por defecto usa --root para releases legacy."
+        ),
+    )
     parser.add_argument("--revision", default="local")
     parser.add_argument("--attempts", type=int, default=1)
     parser.add_argument("--delay", type=float, default=5.0)
@@ -486,6 +499,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     root = Path(args.root).resolve()
+    production_root = (
+        Path(args.production_root).resolve()
+        if args.production_root
+        else root
+    )
 
     if args.attempts < 1:
         print("ERROR: --attempts debe ser >= 1", file=sys.stderr)
@@ -499,7 +517,7 @@ def main() -> int:
     if not errors and args.base_url:
         errors.extend(
             verify_production(
-                root,
+                production_root,
                 args.base_url,
                 args.revision,
                 args.attempts,

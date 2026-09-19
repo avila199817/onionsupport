@@ -424,9 +424,15 @@ jobs:
             exit 0
           fi
 
+          production_root="expected-main"
+          if [[ "${{ steps.release.outputs.mode }}" == "compiled-dist" ]]; then
+            production_root="expected-main/dist"
+          fi
+
           python3 -m py_compile "${contract}"
           python3 "${contract}" \
             --root expected-main \
+            --production-root "${production_root}" \
             --base-url "${{ steps.canonical.outputs.site_url }}" \
             --revision "${{ steps.revision.outputs.sha }}" \
             --attempts 3 \

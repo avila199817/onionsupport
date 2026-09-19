@@ -37,6 +37,7 @@ export const INCIDENCIAS_ACTIONS = Object.freeze({
 
 const DEFAULT_ROUTE = "/incidencias";
 const DEFAULT_VISIBLE_ROWS = 20;
+const DEFAULT_SKELETON_ROWS = 6;
 const DEFAULT_CURRENCY = "EUR";
 const DEFAULT_SORT_ORDER = "desc";
 const DEFAULT_SORT_MODE = "date";
@@ -903,8 +904,8 @@ function renderThead() {
   return `<thead><tr>${INCIDENCIAS_TABLE_COLUMNS.map((c) => `<th class="${at(c.thClass)}" scope="col" data-column="${at(c.key)}">${escapeHtml(c.label)}</th>`).join("")}</tr></thead>`;
 }
 
-function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
-  const count = Math.max(4, parseAmount(rows, DEFAULT_VISIBLE_ROWS, AMOUNT_POLICIES.coerced));
+function renderTableLoading(rows = DEFAULT_SKELETON_ROWS) {
+  const count = Math.min(DEFAULT_SKELETON_ROWS, Math.max(4, parseAmount(rows, DEFAULT_SKELETON_ROWS, AMOUNT_POLICIES.coerced)));
   return `
     <div class="incidencias-table-wrap is-loading" data-incidencias-table-wrap="true" data-incidencias-focus-fallback="true" tabindex="-1">
       <span class="incidencias-visually-hidden" role="status" aria-live="polite" aria-atomic="true">Cargando incidencias...</span>
@@ -1010,7 +1011,7 @@ function renderHistory(vm = {}) {
         <div class="incidencias-history-copy"><h2 class="incidencias-history-title">Historial de incidencias</h2><p class="incidencias-history-subtitle">${escapeHtml(subtitle)}</p></div>
         ${renderFilters(vm)}
       </div>
-      ${initialLoading ? renderTableLoading(DEFAULT_VISIBLE_ROWS) : `<div class="incidencias-table-wrap${refreshing ? " is-refreshing" : ""}" data-incidencias-table-wrap="true" data-incidencias-scroll-mode="infinite">${refreshing ? renderRefreshOverlay() : ""}${renderTable(vm)}</div>`}
+      ${initialLoading ? renderTableLoading(DEFAULT_SKELETON_ROWS) : `<div class="incidencias-table-wrap${refreshing ? " is-refreshing" : ""}" data-incidencias-table-wrap="true" data-incidencias-scroll-mode="infinite">${refreshing ? renderRefreshOverlay() : ""}${renderTable(vm)}</div>`}
     </section>
   `;
 }

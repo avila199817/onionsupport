@@ -29,7 +29,8 @@ def require(condition: bool, message: str) -> None:
 # while skeleton rows paint.
 require(
     "incidencias-visually-hidden" in INCIDENCIAS_TEMPLATE
-    and "renderTableLoading(DEFAULT_VISIBLE_ROWS)" in INCIDENCIAS_TEMPLATE,
+    and "renderTableLoading(DEFAULT_SKELETON_ROWS)" in INCIDENCIAS_TEMPLATE
+    and "const DEFAULT_SKELETON_ROWS = 6;" in INCIDENCIAS_TEMPLATE,
     "Incidencias reference loading contract changed; review parity intentionally",
 )
 

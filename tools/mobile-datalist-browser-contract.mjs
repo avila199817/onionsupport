@@ -97,9 +97,34 @@ async function snapshot(page, view) {
     const table = document.querySelector(`.${view}-table`);
     const shell = table.closest(`.${view}-table-shell`);
     const heading = table.querySelector("thead");
+    const shellBox = rect(shell);
+    const layout = (node) => {
+      const style = getComputedStyle(node);
+      return {
+        node: `${node.tagName}.${String(node.className).replaceAll(" ", ".")}`,
+        box: rect(node), scrollWidth: node.scrollWidth, clientWidth: node.clientWidth,
+        display: style.display, position: style.position, width: style.width,
+        minWidth: style.minWidth, maxWidth: style.maxWidth, boxSizing: style.boxSizing,
+        overflowX: style.overflowX, overflowY: style.overflowY, font: style.font,
+        margin: style.margin, padding: style.padding,
+        transition: style.transition,
+        animations: node.getAnimations().map((animation) => ({
+          property: animation.transitionProperty || animation.animationName,
+          state: animation.playState, time: animation.currentTime,
+        })),
+      };
+    };
+    const shellOverflow = shell.scrollWidth > shell.clientWidth + 1;
     return {
       rows, tableDisplay: getComputedStyle(table).display,
-      shellOverflow: shell.scrollWidth > shell.clientWidth + 1,
+      shellOverflow,
+      shellDiagnostics: shellOverflow ? {
+        shell: layout(shell), table: layout(table),
+        outside: [...shell.querySelectorAll("*")].filter((node) => {
+          const box = rect(node);
+          return box.width > 0 && (box.x < shellBox.x - 1 || box.right > shellBox.right + 1);
+        }).map(layout).slice(0, 24),
+      } : null,
       pageOverflow: document.documentElement.scrollWidth > innerWidth + 1,
       heading: { box: rect(heading), display: getComputedStyle(heading).display, clip: getComputedStyle(heading).clipPath },
     };
@@ -116,7 +141,7 @@ function verifyGeometry(data, view, width, homeSurface) {
       assert.ok(row.cells.every((cell) => cell.display === "table-cell"), `${label}: desktop debe conservar celdas de tabla`);
       continue;
     }
-    assert.equal(data.shellOverflow, false, `${label}: overflow horizontal del listado`);
+    assert.equal(data.shellOverflow, false, `${label}: overflow horizontal del listado: ${JSON.stringify(data.shellDiagnostics)}`);
     assert.equal(row.overflow, false, `${label}: contenido desborda la fila`);
     assert.deepEqual(row.identityClips, [], `${label}: identidad o email largo truncado`);
     assert.deepEqual(row.surface, homeSurface, `${label}: superficie distinta de Home`);
@@ -176,6 +201,30 @@ async function focusRing(page, locator) {
   });
 }
 
+async function verifyImmediateAdaptation(page, view) {
+  const adaptation = await page.evaluate((name) => {
+    const table = document.querySelector(`.${name}-table`);
+    const shell = table.closest(`.${name}-table-shell`);
+    // Reproduce the real adapter's class change from the unannotated table.
+    // Settle only the fixture's starting state, then measure in the same task
+    // as annotation: waiting for an animation would conceal a visible jump.
+    table.classList.remove("ui-datalist");
+    getComputedStyle(table).minWidth;
+    for (const animation of table.getAnimations()) animation.finish();
+    const before = table.getBoundingClientRect().width;
+    table.classList.add("ui-datalist");
+    return {
+      before, after: table.getBoundingClientRect().width, available: shell.clientWidth,
+      minWidth: getComputedStyle(table).minWidth,
+      animations: table.getAnimations().map((animation) => ({ property: animation.transitionProperty, state: animation.playState })),
+    };
+  }, view);
+  assert.ok(adaptation.before > adaptation.available, `${view}: la regresión debe partir del ancho desktop`);
+  assert.ok(adaptation.after <= adaptation.available + 1, `${view}: la adaptación móvil debe ser inmediata con reduced motion: ${JSON.stringify(adaptation)}`);
+  assert.equal(adaptation.animations.some(({ property }) => /(?:width|height|size)/.test(property || "")), false,
+    `${view}: no debe animarse la geometría al adaptar la tabla: ${JSON.stringify(adaptation)}`);
+}
+
 async function verifyInteractions(page, view, homeFocus) {
   if (view === "incidencias") {
     const row = page.locator(selectorFor(view)).first();
@@ -233,6 +282,10 @@ try {
           const afterHome = await snapshot(warm.page, view);
           verifyGeometry(afterHome, view, width, surface);
           assert.deepEqual(geometryKey(afterHome), geometryKey(first), `${view} @ ${width}: estilos dependen de haber visitado Home`);
+          if (width === 390 && theme === "light") {
+            await verifyImmediateAdaptation(cold.page, view);
+            cases += 1;
+          }
           if (width === 390) await verifyInteractions(cold.page, view, homeFocus);
           assert.deepEqual(cold.pageErrors, [], `${view} @ ${width}: errores de navegador`);
           assert.equal(cold.writes.filter(({ path }) => !path.startsWith("/api/auth/")).length, 0, "Ninguna escritura de dominio");
@@ -248,13 +301,17 @@ try {
   }
 
   // Hold the list response until the real loading state has been measured.
-  for (const view of ["facturas", "clientes"]) {
+  for (const [view, path, skeletonSelector] of [
+    ["incidencias", "/api/tickets", ".incidencias-row--skeleton"],
+    ["facturas", "/api/facturas", ".facturas-table-loading-row"],
+    ["clientes", "/api/clientes/page", ".clientes-table-loading-row"],
+  ]) {
     let release;
-    const pending = { path: view === "clientes" ? "/api/clientes/page" : "/api/facturas", promise: new Promise((done) => { release = done; }) };
+    const pending = { path, promise: new Promise((done) => { release = done; }) };
     const session = await newSession(browser, server.origin, 320, pending);
     try {
       await session.page.goto(`${server.origin}${ACCOUNT}/${view}`, { waitUntil: "load" });
-      const skeleton = session.page.locator(`.${view}-table-loading-row`).first();
+      const skeleton = session.page.locator(skeletonSelector).first();
       await skeleton.waitFor({ state: "visible" });
       await session.page.evaluate(() => document.fonts.ready);
       // Stats may replace a visible loading row before its list response arrives.
@@ -268,18 +325,40 @@ try {
           if (!row?.isConnected) return null;
           const bounds = row.getBoundingClientRect();
           const style = getComputedStyle(row);
+          const rows = [...document.querySelectorAll(selector)];
           return {
             fits: bounds.width > 0 && bounds.x >= 0 && bounds.right <= innerWidth + 1 && row.scrollWidth <= row.clientWidth + 1,
             x: bounds.x, right: bounds.right, width: bounds.width,
             scrollWidth: row.scrollWidth, clientWidth: row.clientWidth,
             columns: style.gridTemplateColumns,
+            rowCount: rows.length,
+            parts: rows.map((placeholder) => {
+              const rowBox = placeholder.getBoundingClientRect();
+              return [...placeholder.querySelectorAll(".incidencias-skeleton")].map((part) => {
+                const box = part.getBoundingClientRect();
+                return {
+                  name: part.className, width: box.width, height: box.height,
+                  fits: box.x >= rowBox.x - 1 && box.right <= rowBox.right + 1 && box.y >= rowBox.y - 1 && box.bottom <= rowBox.bottom + 1,
+                };
+              });
+            }),
           };
-        }, `.${view}-table-loading-row`);
+        }, skeletonSelector);
         if (loading?.width > 0 && JSON.stringify(previous) === JSON.stringify(loading)) break;
         previous = loading;
       }
       assert.ok(loading?.width > 0, `${view}: skeleton desmontado antes de medir`);
       assert.equal(loading.fits, true, `${view}: el skeleton se desborda a 320px: ${JSON.stringify(loading)}`);
+      if (view === "incidencias") {
+        assert.equal(loading.rowCount, 6, "Incidencias debe crear sólo seis filas de carga");
+        for (const parts of loading.parts) {
+          assert.equal(parts.length, 6, "Cada fila de carga conserva sus seis columnas");
+          for (const part of parts) {
+            assert.ok(part.width > 0 && part.height > 0 && part.fits,
+              `Incidencias: cada placeholder debe tener dimensión visible sin desbordar: ${JSON.stringify(part)}`);
+          }
+        }
+      }
       release();
       await ready(session.page, view);
       cases += 1;
@@ -288,7 +367,7 @@ try {
       await session.context.close();
     }
   }
-  console.log(`Mobile datalist browser: PASS (${cases} escenarios, entrada fría/caliente, Home, texto largo, acciones y carga).`);
+  console.log(`Mobile datalist browser: PASS (${cases} escenarios, entrada fría/caliente, Home, texto largo, acciones, carga y adaptación inmediata).`);
 } finally {
   await browser?.close();
   await server.close();

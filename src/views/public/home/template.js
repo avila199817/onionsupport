@@ -26,7 +26,7 @@ const CRISTIAN_PROFILE_PHOTO_WEBP_224 = "src/media/img/Cristian_Avila_224.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_480 = "src/media/img/Cristian_Avila_480.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_640 = "src/media/img/Cristian_Avila_640.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_960 = "src/media/img/Cristian_Avila_960.webp";
-const PROFILE_HEADER_LOGO = "src/media/img/favicon_support.png";
+const PROFILE_HEADER_LOGO = "src/media/img/favicon_support.webp";
 
 const BUSINESS = {
   ...PUBLIC_SITE,
@@ -300,7 +300,7 @@ function renderHeroVisual() {
           <div class="public-home-command-portrait">
             <picture class="public-home-command-picture">
               <source type="image/webp" srcset="${escapeAttr(profilePhotoWebpSrcset)}" sizes="${escapeAttr(profilePhotoSizes)}">
-              <img class="public-home-command-photo" src="${escapeAttr(profilePhoto)}" alt="${escapeAttr(BUSINESS.ownerName)} - ${escapeAttr(BUSINESS.name)}" width="480" height="600" loading="eager" decoding="async" fetchpriority="high" draggable="false">
+              <img class="public-home-command-photo" src="${escapeAttr(profilePhoto)}" alt="${escapeAttr(BUSINESS.ownerName)} - ${escapeAttr(BUSINESS.name)}" width="480" height="600" loading="lazy" decoding="async" fetchpriority="auto" draggable="false">
             </picture>
           </div>
 

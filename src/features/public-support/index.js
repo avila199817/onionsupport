@@ -22,7 +22,6 @@ import { AppCore } from "../../core/index.js";
 import { mutationsTouchSelector } from "../../core/dom-mutations.js";
 import { createAsyncScope } from "../../core/async-scope.js";
 import Http from "../../core/http.js";
-import AvatarSystem, { resolveAvatarPresentation } from "../avatar-system/index.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { cleanText, codeKey } from "../../core/presentation-text.js";
 import { safeObject, firstNonBlank } from "../../core/objects.js";
@@ -60,6 +59,8 @@ let scanFrame = 0;
 let mountRoot = null;
 let installed = false;
 let destroyed = false;
+let AvatarSystem = null;
+let avatarRuntimePromise = null;
 
 function state() {
   try {
@@ -270,10 +271,28 @@ function syncIdentity(root) {
     return false;
   }
 
+  // Anonymous intake has no avatar. Load its shared authority only for an
+  // authenticated identity, then rescan the current session and mounted DOM:
+  // the visitor may have logged out or navigated while the import was pending.
+  if (!AvatarSystem) {
+    if (!avatarRuntimePromise) {
+      avatarRuntimePromise = import("../avatar-system/index.js")
+        .then((module) => {
+          AvatarSystem = module.default;
+          queueScan();
+        })
+        .catch(() => {
+          // Keep the intake usable; a later session event may retry the import.
+        })
+        .finally(() => { avatarRuntimePromise = null; });
+    }
+    return false;
+  }
+
   const name = fullName(user) || email(user) || "Mi cuenta";
   const src = avatar(user);
   const href = panelHref(current, user);
-  const presentation = resolveAvatarPresentation({
+  const presentation = AvatarSystem.resolve({
     ...(user && typeof user === "object" ? user : {}),
     displayName: name,
     email: email(user),

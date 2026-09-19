@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vite";
 import { invoiceApiSplitOutput } from "./tools/invoice-api-split.mjs";
+import { publicCompatibilityCssBytes, publicCssMinifyEnabled } from "./tools/public-css-minify.mjs";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
 
@@ -52,9 +53,9 @@ const STATIC_FILES = Object.freeze([
  * Build-foundation compatibility boundary.
  *
  * RouteStyles, preboot and a small number of templates still resolve assets
- * through literal /src URLs. They remain byte-identical in this phase so the
- * introduction of a build cannot change runtime behaviour. The next CSS-entry
- * phase removes this boundary and lets Vite fingerprint those resources too.
+ * through literal /src URLs. They remain byte-identical unless the candidate
+ * activates the trusted minifier for the finite public CSS allowlist. Asset
+ * paths and route ownership stay unchanged; all other copies remain exact.
  */
 const COMPATIBILITY_DIRECTORIES = Object.freeze([
   "src/analytics",
@@ -180,6 +181,7 @@ async function filesBelow(relativeDirectory) {
 }
 
 function onionStaticArtifacts() {
+  const minifyPublicCss = publicCssMinifyEnabled(ROOT);
   return {
     name: "onion-static-artifacts",
     apply: "build",
@@ -203,7 +205,7 @@ function onionStaticArtifacts() {
         this.emitFile({
           type: "asset",
           fileName,
-          source: await readFile(sourcePath),
+          source: publicCompatibilityCssBytes(fileName, await readFile(sourcePath), minifyPublicCss),
         });
       }
     },

@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { lstat, readFile, readdir } from "node:fs/promises";
 import { posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { publicCompatibilityCssBytes, publicCssMinifyEnabled } from "./public-css-minify.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const DIST = resolve(ROOT, process.env.ONION_BUILD_OUT_DIR || "dist");
@@ -237,6 +238,7 @@ for (const path of METADATA_FILES) {
 
 if (CANDIDATE_SOURCE) {
   try {
+    const minifyPublicCss = publicCssMinifyEnabled(candidateRoot);
     const byteExactPaths = new Set([
       ...EXACT_COPY_FILES,
       ...expectedCompatibility,
@@ -256,8 +258,9 @@ if (CANDIDATE_SOURCE) {
         readFile(emitted.absolutePath),
         readFile(candidatePath),
       ]);
-      if (!emittedBytes.equals(candidateBytes)) {
-        errors.push(`Dist exact-copy asset differs from candidate source: ${path}`);
+      const expectedBytes = publicCompatibilityCssBytes(path, candidateBytes, minifyPublicCss);
+      if (!emittedBytes.equals(expectedBytes)) {
+        errors.push(`Dist static asset differs from trusted candidate transform: ${path}`);
       }
     }
   } catch (error) {

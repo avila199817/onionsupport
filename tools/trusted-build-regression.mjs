@@ -15,8 +15,11 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { compareArtifactRoots } from "./compare-build-artifacts.mjs";
 import { stageTrustedBuild } from "./stage-trusted-build.mjs";
 import { verifyArtifactEnvelope } from "./verify-artifact-envelope.mjs";
+import { runPublicCssMinifyRegression } from "./public-css-minify-regression.mjs";
 
 const SHA = "a".repeat(40);
+
+runPublicCssMinifyRegression();
 
 async function write(root, path, contents) {
   const target = resolve(root, path);

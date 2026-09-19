@@ -308,8 +308,8 @@ function activityItem(item = {}, vm = {}) {
       data-home-entity-id="${attr(entityId)}"
     >
       ${interactive
-        ? `<button type="button" class="home-entity-row home-entity-row--activity" ${relationAttribute} ${triggerAttributes}>${content}</button>`
-        : `<div class="home-entity-row home-entity-row--activity home-entity-row--static" ${relationAttribute}>${content}</div>`}
+        ? `<button type="button" class="home-entity-row ui-entity-row home-entity-row--activity" ${relationAttribute} ${triggerAttributes}>${content}</button>`
+        : `<div class="home-entity-row ui-entity-row home-entity-row--activity home-entity-row--static" ${relationAttribute}>${content}</div>`}
     </li>
   `;
 }

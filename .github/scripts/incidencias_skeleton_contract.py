@@ -21,13 +21,15 @@ if not errors:
     skeleton_css = SKELETON_CSS.read_text(encoding="utf-8")
 
     required_template = (
-        "function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS)",
+        "function renderTableLoading(rows = DEFAULT_SKELETON_ROWS)",
+        "const DEFAULT_SKELETON_ROWS = 6;",
+        "const count = Math.min(DEFAULT_SKELETON_ROWS,",
         "renderColgroup()",
         "renderThead()",
         "incidencias-row--skeleton",
         "incidencias-skeleton incidencias-skeleton--${at(c.key)}",
         "const initialLoading = vm.loading && !vm.visibleItems.length;",
-        "initialLoading ? renderTableLoading(DEFAULT_VISIBLE_ROWS)",
+        "initialLoading ? renderTableLoading(DEFAULT_SKELETON_ROWS)",
         "const refreshing = vm.refreshing && vm.visibleItems.length;",
     )
     for token in required_template:
@@ -56,13 +58,13 @@ if not errors:
         ".incidencias-row--skeleton:nth-child(4) {",
         ".incidencias-row--skeleton:nth-child(5) {",
         ".incidencias-row--skeleton:nth-child(6) {",
-        ".incidencias-row--skeleton:nth-child(n+7) { display: none; }",
+        ".incidencias-skeleton { max-inline-size: 100%; }",
         ".incidencias-skeleton--main { inline-size: 100%; min-inline-size: 0; }",
-        ".incidencias-skeleton--status { inline-size: min(64px, 100%); }",
-        ".incidencias-skeleton--created { inline-size: min(78px, 100%); }",
-        ".incidencias-skeleton--updated { inline-size: min(var(--inc-skeleton-updated-width), 100%); }",
-        ".incidencias-skeleton--amount { inline-size: min(58px, 100%); }",
-        ".incidencias-skeleton--attachments { inline-size: min(46px, 100%); }",
+        ".incidencias-skeleton--status { inline-size: 64px; }",
+        ".incidencias-skeleton--created { inline-size: 78px; }",
+        ".incidencias-skeleton--updated { inline-size: var(--inc-skeleton-updated-width); }",
+        ".incidencias-skeleton--amount { inline-size: 58px; }",
+        ".incidencias-skeleton--attachments { inline-size: 46px; }",
     )
     for token in required_local:
         if token not in css:

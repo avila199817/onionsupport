@@ -467,32 +467,6 @@
 .facturas-skeleton--actions { inline-size: 180px; }
 
 @media (max-width: 680px) {
-  .ui-datalist[data-mobile-datalist-layout="facturas"] .facturas-main {
-    align-items: start;
-  }
-
-  .ui-datalist[data-mobile-datalist-layout="facturas"] .facturas-main-copy,
-  .ui-datalist[data-mobile-datalist-layout="facturas"] .facturas-factura-line {
-    inline-size: 100%;
-    min-inline-size: 0;
-    max-inline-size: 100%;
-  }
-
-  .ui-datalist[data-mobile-datalist-layout="facturas"] :is(
-    .facturas-factura-id,
-    .facturas-system-id,
-    .facturas-factura-client,
-    .facturas-factura-contact,
-    .facturas-factura-email
-  ) {
-    min-inline-size: 0;
-    max-inline-size: 100%;
-    overflow: visible;
-    text-overflow: clip;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-
   .facturas-empty[role="status"]:not(:has(.facturas-btn)) {
     min-block-size: 300px;
     padding: 14px 14px 21px;

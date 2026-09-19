@@ -296,7 +296,7 @@ function renderSpinner(label = "Cargando...") {
 
 function renderTableLoading(rows = 6) {
   const count = Math.max(4, Number.isFinite(Number(rows)) ? Number(rows) : 6);
-  return `<div class="clientes-table-loading" aria-hidden="true">${Array.from({ length: count }).map(() => `<div class="clientes-table-loading-row"><span class="clientes-skeleton clientes-skeleton--avatar"></span><div class="clientes-table-loading-copy"><span class="clientes-skeleton clientes-skeleton--xs"></span><span class="clientes-skeleton clientes-skeleton--lg"></span><span class="clientes-skeleton clientes-skeleton--md"></span></div><span class="clientes-skeleton clientes-skeleton--pill"></span><span class="clientes-skeleton clientes-skeleton--date"></span><span class="clientes-skeleton clientes-skeleton--contact"></span><span class="clientes-skeleton clientes-skeleton--amount"></span></div>`).join("")}</div>`;
+  return `<div class="clientes-table-loading" aria-hidden="true">${Array.from({ length: count }).map(() => `<div class="clientes-table-loading-row ui-datalist-placeholder"><span class="clientes-skeleton clientes-skeleton--avatar"></span><div class="clientes-table-loading-copy"><span class="clientes-skeleton clientes-skeleton--xs"></span><span class="clientes-skeleton clientes-skeleton--lg"></span><span class="clientes-skeleton clientes-skeleton--md"></span></div><span class="clientes-skeleton clientes-skeleton--pill"></span><span class="clientes-skeleton clientes-skeleton--date"></span><span class="clientes-skeleton clientes-skeleton--contact"></span><span class="clientes-skeleton clientes-skeleton--amount"></span></div>`).join("")}</div>`;
 }
 
 function renderRefreshOverlay() {

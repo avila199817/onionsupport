@@ -329,16 +329,16 @@
   --inc-skeleton-client-width: 58%;
 }
 
-/* Seis filas cubren el viewport sin crear un historial fantasma de 20 filas. */
-.incidencias-row--skeleton:nth-child(n+7) { display: none; }
-
 .incidencias-row--skeleton > .incidencias-cell { vertical-align: middle; }
+/* Ancho intrínseco para flex; el máximo evita el ciclo de porcentajes del
+   placeholder cuando la celda móvil calcula su tamaño por contenido. */
+.incidencias-skeleton { max-inline-size: 100%; }
 .incidencias-skeleton--main { inline-size: 100%; min-inline-size: 0; }
-.incidencias-skeleton--status { inline-size: min(64px, 100%); }
-.incidencias-skeleton--created { inline-size: min(78px, 100%); }
-.incidencias-skeleton--updated { inline-size: min(var(--inc-skeleton-updated-width), 100%); }
-.incidencias-skeleton--amount { inline-size: min(58px, 100%); }
-.incidencias-skeleton--attachments { inline-size: min(46px, 100%); }
+.incidencias-skeleton--status { inline-size: 64px; }
+.incidencias-skeleton--created { inline-size: 78px; }
+.incidencias-skeleton--updated { inline-size: var(--inc-skeleton-updated-width); }
+.incidencias-skeleton--amount { inline-size: 58px; }
+.incidencias-skeleton--attachments { inline-size: 46px; }
 
 .incidencias-alert {
   min-inline-size: 0;

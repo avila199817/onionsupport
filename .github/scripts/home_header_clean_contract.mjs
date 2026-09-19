@@ -133,16 +133,16 @@ for (const trigger of entityTriggers) {
   assert.doesNotMatch(trigger, /data-route=/);
 }
 
-assert.match(html, /class="home-entity-row home-entity-row--activity"/);
-assert.match(html, /class="home-entity-row home-entity-row--invoice"/);
+assert.match(html, /class="home-entity-row ui-entity-row home-entity-row--activity"/);
+assert.match(html, /class="home-entity-row ui-entity-row home-entity-row--invoice"/);
 assert.match(
   html,
-  /class="home-entity-row home-entity-row--activity"[^>]*data-entity-type="incidencia"[^>]*data-entity-stay-view="home"[^>]*data-entity-open-mode="in-place"/,
+  /class="home-entity-row ui-entity-row home-entity-row--activity"[^>]*data-entity-type="incidencia"[^>]*data-entity-stay-view="home"[^>]*data-entity-open-mode="in-place"/,
   "Incidencia rows must open their canonical modal without owner-route navigation"
 );
 assert.match(
   html,
-  /class="home-entity-row home-entity-row--invoice"[^>]*data-entity-type="factura"[^>]*data-entity-stay-view="home"[^>]*data-entity-open-mode="in-place"[^>]*data-entity-preload="detail"/,
+  /class="home-entity-row ui-entity-row home-entity-row--invoice"[^>]*data-entity-type="factura"[^>]*data-entity-stay-view="home"[^>]*data-entity-open-mode="in-place"[^>]*data-entity-preload="detail"/,
   "Invoice rows must open in-place and retain bounded detail intent preload"
 );
 assert.match(html, /<progress max="100"/);

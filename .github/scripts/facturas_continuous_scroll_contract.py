@@ -207,8 +207,10 @@ require(CONFIRMATION, "lifecycle.deactivate({ restoreFocus: false })", "Cleanup 
 require(CONFIRMATION, "restoreModalFocus(opener)", "Confirmation must return focus through the shared guard")
 reject(INDEX, "window.confirm(", "Payment and resend must both use the product confirmation")
 require(CONFIRMATION, "onBackdrop: () => settle(false)", "Confirmation backdrop must cancel through the shared lifecycle")
-require(STYLE, '.ui-datalist[data-mobile-datalist-layout="facturas"]', "Mobile Facturas identity must have a dedicated no-clipping contract")
-require(STYLE, "overflow-wrap: anywhere", "Mobile Facturas identity must wrap long values instead of clipping them")
+MOBILE_LIST = (ROOT / "src/css/compositions/mobile-datalist.css").read_text(encoding="utf-8")
+require(MOBILE_LIST, ".facturas-factura-email", "Facturas identity must participate in the shared mobile wrapping contract")
+require(MOBILE_LIST, "overflow-wrap: anywhere", "Mobile identity must wrap long values instead of clipping them")
+reject(STYLE, "data-mobile-datalist-layout", "Route CSS must not fork the shared mobile geometry")
 
 if errors:
     for error in errors:

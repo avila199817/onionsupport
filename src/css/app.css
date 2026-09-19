@@ -86,6 +86,7 @@
 @import url("./compositions/private-fullview-routes.css") layer(compositions);
 @import url("./compositions/private-admin-interactions.css") layer(compositions);
 @import url("./compositions/private-create-modal.css") layer(compositions);
+@import url("./compositions/entity-list.css") layer(compositions);
 @import url("./compositions/mobile-datalist.css") layer(compositions);
 @import url("./compositions/private-amounts.css") layer(compositions);
 

@@ -8,9 +8,9 @@
 .home-view-root {
   --home-extreme-gap: clamp(12px, 1.15vw, 18px);
   --home-extreme-panel-padding: clamp(12px, 1vw, 16px);
-  --home-extreme-row-radius: var(--radius-lg, 14px);
-  --home-extreme-icon-size: 44px;
-  --home-extreme-row-min: 84px;
+  --home-extreme-row-radius: var(--entity-list-row-radius);
+  --home-extreme-icon-size: var(--entity-list-leading-size);
+  --home-extreme-row-min: var(--entity-list-row-min);
 }
 
 /* =========================================================

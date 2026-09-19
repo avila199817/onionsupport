@@ -373,8 +373,8 @@ body.public-home-no-scroll .main-content {
   cursor: pointer;
   touch-action: none;
 
-  backdrop-filter: blur(14px) saturate(1.12);
   -webkit-backdrop-filter: blur(14px) saturate(1.12);
+  backdrop-filter: blur(14px) saturate(1.12);
 
   transition:
     inline-size .18s ease,
@@ -529,8 +529,8 @@ body.public-home-no-scroll .main-content {
   background: rgb(3 7 18 / .82);
 
   box-shadow: 0 10px 32px rgb(0 0 0 / .20);
-  backdrop-filter: blur(18px) saturate(1.12);
   -webkit-backdrop-filter: blur(18px) saturate(1.12);
+  backdrop-filter: blur(18px) saturate(1.12);
 
   transition:
     transform .28s ease,
@@ -1330,8 +1330,8 @@ body.public-home-no-scroll .main-content {
     0 10px 28px rgb(0 0 0 / .16),
     inset 0 1px 0 rgb(255 255 255 / .12);
 
-  backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
 }
 
 .public-home-command-hero {
@@ -1684,8 +1684,8 @@ body.public-home-no-scroll .main-content {
     0 12px 32px rgb(0 0 0 / .16),
     inset 0 1px 0 rgb(255 255 255 / .09);
 
-  backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
 }
 
 .public-home-service-card::before,
@@ -2435,8 +2435,8 @@ a.public-home-service-card:hover,
       0 28px 82px rgb(0 0 0 / .50),
       inset 0 1px 0 rgb(255 255 255 / .10);
 
-    backdrop-filter: blur(24px) saturate(1.18);
     -webkit-backdrop-filter: blur(24px) saturate(1.18);
+    backdrop-filter: blur(24px) saturate(1.18);
 
     opacity: 0;
     visibility: hidden;
@@ -2603,8 +2603,8 @@ a.public-home-service-card:hover,
   .public-home-service-card,
   .public-home-price-card,
   .public-home-faq-item {
-    backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .public-home-nav {

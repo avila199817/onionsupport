@@ -136,6 +136,7 @@ python3 .github/scripts/facturas_loading_parity_contract.py
 python3 .github/scripts/incidencias_skeleton_contract.py
 python3 .github/scripts/public_site_policy_regression.py
 python3 .github/scripts/ui_authority_transition_contract.py
+python3 .github/scripts/mobile_datalist_transition_contract.py
 python3 .github/scripts/google_measurement_wiring_contract.py
 
 # Keep the local source gate aligned with the UI checks required by PR CI.

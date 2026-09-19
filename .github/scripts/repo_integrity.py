@@ -282,6 +282,7 @@ def validate_ui_foundation_contract(errors: list[str]) -> None:
     app_path = SRC / "css" / "app.css"
     guardrails_path = SRC / "css" / "core" / "guardrails.css"
     datalist_path = SRC / "css" / "compositions" / "mobile-datalist.css"
+    entity_list_path = SRC / "css" / "compositions" / "entity-list.css"
     datalist_feature_path = SRC / "features" / "mobile-datalist" / "index.js"
 
     try:
@@ -292,6 +293,7 @@ def validate_ui_foundation_contract(errors: list[str]) -> None:
 
     required_app = (
         "@layer tokens, reset, core, layout, components, views, auth, compositions, loading, guardrails;",
+        '@import url("./compositions/entity-list.css") layer(compositions);',
         '@import url("./compositions/mobile-datalist.css") layer(compositions);',
         '@import url("./components/skeleton.css") layer(loading);',
         '@import url("./core/guardrails.css") layer(guardrails);',
@@ -351,13 +353,10 @@ def validate_ui_foundation_contract(errors: list[str]) -> None:
     else:
         datalist_text = datalist_path.read_text(encoding="utf-8")
         required_datalist = (
-            "@layer compositions",
             ".ui-datalist",
-            '.ui-datalist[data-mobile-datalist-layout="incidencias"]',
-            '.ui-datalist[data-mobile-datalist-layout="facturas"]',
-            '.ui-datalist[data-mobile-datalist-layout="clientes"]',
-            '.ui-datalist[data-mobile-datalist-layout="usuarios"]',
             "@media (max-width: 680px)",
+            "var(--entity-list-meta-gap)",
+            "content: attr(data-mobile-label)",
         )
         for snippet in required_datalist:
             if snippet not in datalist_text:
@@ -369,6 +368,68 @@ def validate_ui_foundation_contract(errors: list[str]) -> None:
             errors.append(
                 "src/css/compositions/mobile-datalist.css :: compositions no puede usar !important"
             )
+
+        # The original six-column placement restarted implicit grid rows when
+        # DOM column order differed from CSS slot order. One wrapping flow must
+        # govern every domain, while primary content and actions span the row.
+        datalist_source = re.sub(r"/\*.*?\*/", "", datalist_text, flags=re.DOTALL)
+        datalist_rules = re.findall(r"([^{}]+)\{([^{}]*)\}", datalist_source)
+        row_rules = [body for selector, body in datalist_rules if selector.strip() == ".ui-datalist-row"]
+        if not any(
+            re.search(r"\bdisplay\s*:\s*flex\s*;", body)
+            and re.search(r"\bflex-wrap\s*:\s*wrap\s*;", body)
+            for body in row_rules
+        ):
+            errors.append("src/css/compositions/mobile-datalist.css :: la fila debe usar un flujo flex común con wrap")
+
+        for slot in ("primary", "actions"):
+            if not any(
+                f'[data-mobile-slot="{slot}"]' in selector
+                and "::" not in selector
+                and re.search(r"\b(?:flex-basis\s*:\s*100%|flex\s*:\s*[\d.]+\s+[\d.]+\s+100%)\s*;", body)
+                for selector, body in datalist_rules
+            ):
+                errors.append(f"src/css/compositions/mobile-datalist.css :: el slot {slot} debe ocupar toda la fila")
+
+        for forbidden in (r"^\s*@layer\b", r"data-mobile-datalist-layout", r"\bgrid-column\s*:"):
+            if re.search(forbidden, datalist_source, re.MULTILINE):
+                errors.append(f"src/css/compositions/mobile-datalist.css :: regresión de autoridad/geometría: {forbidden}")
+
+    if not entity_list_path.is_file():
+        errors.append("src/css/compositions/entity-list.css :: falta autoridad compartida de filas")
+    else:
+        entity_list_text = entity_list_path.read_text(encoding="utf-8")
+        for snippet in (
+            ".ui-entity-row",
+            "--entity-list-row-radius:",
+            "--entity-list-row-padding:",
+            "--entity-list-meta-gap:",
+            "--entity-list-title-size:",
+            "var(--data-table-row-border",
+        ):
+            if snippet not in entity_list_text:
+                errors.append(f"src/css/compositions/entity-list.css :: falta autoridad compartida: {snippet}")
+        entity_layers = re.findall(r"^\s*@layer\s+([^;{]+)", entity_list_text, re.MULTILINE)
+        if [layer.strip() for layer in entity_layers] != ["entity-list"] or "!important" in entity_list_text:
+            errors.append("src/css/compositions/entity-list.css :: sólo se permite la subcapa aislada entity-list, sin !important ni compositions anidada")
+        if not re.search(
+            r"@media\s*\(min-width:\s*681px\)\s*\{\s*\.ui-datalist-row\.ui-entity-row\s*\{\s*all:\s*revert-layer;\s*\}",
+            entity_list_text,
+        ):
+            errors.append("src/css/compositions/entity-list.css :: las tablas desktop deben revertir sólo la superficie entity-list")
+
+    for entry_path in (app_path, SRC / "css" / "private.css"):
+        try:
+            entry_text = entry_path.read_text(encoding="utf-8")
+        except OSError as error:
+            errors.append(f"{entry_path.relative_to(ROOT)} :: ilegible: {error}")
+            continue
+        shared_import = '@import url("./compositions/entity-list.css") layer(compositions);'
+        adapter_import = '@import url("./compositions/mobile-datalist.css") layer(compositions);'
+        if shared_import not in entry_text or adapter_import not in entry_text:
+            errors.append(f"{entry_path.relative_to(ROOT)} :: debe cargar la autoridad EntityList y su adaptador en compositions")
+        elif entry_text.index(shared_import) > entry_text.index(adapter_import):
+            errors.append(f"{entry_path.relative_to(ROOT)} :: EntityList debe preceder a su adaptador móvil")
 
     if not datalist_feature_path.is_file():
         errors.append("src/features/mobile-datalist/index.js :: falta adaptador DataList")
@@ -386,6 +447,8 @@ def validate_ui_foundation_contract(errors: list[str]) -> None:
                 errors.append(
                     f"src/features/mobile-datalist/index.js :: falta contrato DataList: {snippet}"
                 )
+        if not re.search(r'row\.classList\.add\([^)]*[\'"]ui-entity-row[\'"]', datalist_feature_text):
+            errors.append("src/features/mobile-datalist/index.js :: cada fila debe consumir la autoridad ui-entity-row")
 
     try:
         index_text = (ROOT / "index.html").read_text(encoding="utf-8")

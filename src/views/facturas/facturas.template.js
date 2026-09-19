@@ -850,7 +850,7 @@ function renderRow(item = {}, state = {}) {
 
 function renderTableLoading(rows = DEFAULT_SKELETON_ROWS) {
   return `<div class="facturas-table-loading" aria-hidden="true">${Array.from({ length: rows }).map(() => `
-    <div class="facturas-table-loading-row">
+    <div class="facturas-table-loading-row ui-datalist-placeholder">
       <span class="facturas-skeleton facturas-skeleton--avatar"></span>
       <div class="facturas-table-loading-copy"><span class="facturas-skeleton facturas-skeleton--xs"></span><span class="facturas-skeleton facturas-skeleton--lg"></span><span class="facturas-skeleton facturas-skeleton--md"></span></div>
       <span class="facturas-skeleton facturas-skeleton--pill"></span><span class="facturas-skeleton facturas-skeleton--date"></span><span class="facturas-skeleton facturas-skeleton--amount"></span><span class="facturas-skeleton facturas-skeleton--ticket"></span><span class="facturas-skeleton facturas-skeleton--actions"></span>

@@ -170,12 +170,14 @@ const [
   homeTemplateBilling,
   homeCss,
   homeExtremeEntitiesCss,
+  entityListCss,
 ] = await Promise.all([
   read("src/views/home/home.template.js"),
   read("src/views/home/home.template.activity.js"),
   read("src/views/home/home.template.billing.js"),
   read("src/css/views/home/index.css"),
   read("src/css/compositions/home-extreme-entities.css"),
+  read("src/css/compositions/entity-list.css"),
 ]);
 
 const homeTemplate = [
@@ -201,8 +203,8 @@ assert.match(
   homeTemplate,
   /entityTriggerAttributes\("factura", id, "home\.invoices"\)/
 );
-assert.match(homeTemplate, /class="home-entity-row home-entity-row--activity"/);
-assert.match(homeTemplate, /class="home-entity-row home-entity-row--invoice"/);
+assert.match(homeTemplate, /class="home-entity-row ui-entity-row home-entity-row--activity"/);
+assert.match(homeTemplate, /class="home-entity-row ui-entity-row home-entity-row--invoice"/);
 assert.doesNotMatch(homeTemplate, /class="home-entity-hit-target"/);
 assert.doesNotMatch(homeTemplate, /home-activity-entity-button/);
 assert.doesNotMatch(homeTemplate, /home-invoice-entity-button/);
@@ -210,7 +212,18 @@ assert.doesNotMatch(homeTemplate, /home-invoice-entity-button/);
 assert.match(homeCss, /HOME ENTITY INTERACTION LAYER/);
 assert.match(
   homeExtremeEntitiesCss,
-  /\.home-view-root \.home-entity-row\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?display:\s*grid;/
+  /\.home-view-root \.home-entity-row\s*\{[^}]*?display:\s*grid;/,
+  "Home retains its semantic button geometry"
+);
+assert.match(
+  entityListCss,
+  /\.ui-entity-row\s*\{[^}]*?appearance:\s*none;/,
+  "Home consumes the shared row surface instead of a private button reset"
+);
+assert.doesNotMatch(
+  homeExtremeEntitiesCss,
+  /\.home-view-root \.home-entity-row\s*\{[^}]*(?:appearance|border|background|box-shadow|font):/,
+  "Home row geometry must not duplicate the shared surface"
 );
 /* La fila enfocada se distingue. El ANILLO ya no lo pinta esta hoja: lo pinta
    la autoridad (components/focus-system.css) con un `outline`, que es lo que

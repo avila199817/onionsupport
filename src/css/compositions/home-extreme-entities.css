@@ -9,7 +9,7 @@
 .home-view-root .home-invoice-list {
   min-inline-size: 0;
   display: grid;
-  gap: 8px;
+  gap: var(--entity-list-gap);
   margin: 0;
   padding: var(--home-extreme-panel-padding);
   list-style: none;
@@ -24,7 +24,7 @@
   padding: 0;
 
   border: 0;
-  border-radius: var(--home-extreme-row-radius);
+  border-radius: var(--entity-list-row-radius);
   background: transparent;
   box-shadow: none;
 }
@@ -36,39 +36,17 @@
 }
 
 .home-view-root .home-entity-row {
-  appearance: none;
   inline-size: 100%;
   min-inline-size: 0;
-  min-block-size: var(--home-extreme-row-min);
+  min-block-size: var(--entity-list-row-min);
 
   display: grid;
   grid-template-columns:
-    var(--home-extreme-icon-size)
+    var(--entity-list-leading-size)
     minmax(0, 1fr)
     auto;
   align-items: center;
-  gap: 13px;
-
-  margin: 0;
-  padding: 11px 12px;
-
-  border: 1px solid var(--data-table-row-border, var(--border-default));
-  border-radius: inherit;
-  background: var(--solid-bg-1, transparent);
-  color: var(--text);
-  box-shadow: inset 0 1px 0 var(--border-subtle, transparent);
-
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-
-  transition:
-    border-color var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-standard);
+  gap: var(--entity-list-column-gap);
 }
 
 .home-view-root .home-entity-row:hover {
@@ -97,8 +75,8 @@
 }
 
 .home-view-root .home-entity-leading {
-  inline-size: var(--home-extreme-icon-size);
-  block-size: var(--home-extreme-icon-size);
+  inline-size: var(--entity-list-leading-size);
+  block-size: var(--entity-list-leading-size);
   display: grid;
   place-items: center;
 
@@ -142,7 +120,7 @@
   min-inline-size: 0;
   display: grid;
   align-content: center;
-  gap: 6px;
+  gap: var(--entity-list-copy-gap);
 }
 
 .home-view-root .home-entity-eyebrow,
@@ -151,12 +129,12 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--entity-list-meta-gap);
 }
 
 .home-view-root .home-entity-kind {
   color: var(--text-muted);
-  font-size: 9px;
+  font-size: var(--entity-list-label-size);
   font-weight: var(--weight-bold);
   line-height: 1;
   letter-spacing: .085em;
@@ -167,7 +145,7 @@
   min-inline-size: 0;
   overflow: hidden;
   color: var(--text-strong);
-  font-size: 12px;
+  font-size: var(--entity-list-title-size);
   font-weight: var(--weight-bold);
   line-height: 1.35;
   text-wrap: pretty;
@@ -179,7 +157,7 @@
 
 .home-view-root .home-entity-meta time {
   color: var(--text-muted);
-  font-size: 9.5px;
+  font-size: var(--entity-list-meta-size);
   font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -188,7 +166,7 @@
 .home-view-root .home-entity-id,
 .home-view-root .home-status {
   padding: 3px 7px;
-  font-size: 9px;
+  font-size: var(--entity-list-label-size);
 }
 
 .home-view-root .home-entity-open {
@@ -204,7 +182,7 @@
   border-radius: var(--radius-pill);
   color: var(--text-muted);
 
-  font-size: 9.5px;
+  font-size: var(--entity-list-meta-size);
   font-weight: var(--weight-semibold);
   line-height: 1;
   white-space: nowrap;
@@ -249,4 +227,3 @@
 .home-view-root .home-invoice-summary .home-entity-open {
   min-inline-size: 0;
 }
-

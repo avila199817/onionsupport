@@ -304,8 +304,9 @@
   inline-size: 100%;
   min-inline-size: 0;
   max-inline-size: 100%;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
+  /* MobileDataList entrega el overflow; desktop conserva scroll de tabla. */
+  overflow-x: var(--private-table-overflow, auto);
+  overscroll-behavior-inline: var(--private-table-overscroll, contain);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -328,7 +329,7 @@
   .usuarios-table,
   .ui-table
 ) {
-  max-inline-size: none;
+  max-inline-size: var(--private-table-max, none);
 }
 
 :where(

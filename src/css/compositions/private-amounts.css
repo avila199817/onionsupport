@@ -109,24 +109,6 @@
 }
 
 /* =========================================================
-   MOBILE DATALIST
-   El slot monetario conserva la alineación derecha de Facturas.
-========================================================= */
-
-@media (max-width: 680px) {
-  .ui-datalist-cell[data-mobile-slot="amount"] :is(
-    .facturas-total-stack,
-    .incidencias-importe-chip,
-    .clientes-total-stack
-  ) {
-    align-items: end;
-    justify-content: end;
-    justify-items: end;
-    text-align: end;
-  }
-}
-
-/* =========================================================
    FORCED COLORS
 ========================================================= */
 

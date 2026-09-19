@@ -13,7 +13,7 @@
 import { cleanText } from "../../core/presentation-text.js";
 
 export const MOBILE_DATALIST_VERSION =
-  "mobile-datalist.v1-semantic-table-card-composition";
+  "mobile-datalist.v2-shared-entity-list";
 
 const VIEW_CONTAINER_SELECTOR =
   "#view-container, [data-view-container='true']";
@@ -168,7 +168,7 @@ function enhanceCell(cell, {
 function enhanceRow(row, config, labels = []) {
   if (!row?.classList || !config) return false;
 
-  row.classList.add("ui-datalist-row");
+  row.classList.add("ui-datalist-row", "ui-entity-row");
   row.dataset.mobileCard = "true";
 
   const cells = Array.from(row.children || [])

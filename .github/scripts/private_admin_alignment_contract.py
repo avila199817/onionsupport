@@ -29,6 +29,7 @@ app_css = read("src/css/app.css")
 private_css = read("src/css/private.css")
 mobile_js = read("src/features/mobile-datalist/index.js")
 mobile_css = read("src/css/compositions/mobile-datalist.css")
+entity_list_css = read("src/css/compositions/entity-list.css")
 parity_css = read("src/css/compositions/private-admin-parity.css")
 interactions_css = read("src/css/compositions/private-admin-interactions.css")
 status_css = read("src/css/components/status-system.css")
@@ -40,6 +41,8 @@ for entry_name, entry in (("app.css", app_css), ("private.css", private_css)):
         './compositions/private-admin-parity.css',
         './compositions/private-admin-interactions.css',
         './compositions/private-create-modal.css',
+        './compositions/entity-list.css',
+        './compositions/mobile-datalist.css',
         './components/avatar-system.css',
     ):
         require(shared_css in entry, f"{entry_name} must import {shared_css}")
@@ -153,7 +156,19 @@ for view in CRUD_VIEWS:
         require(marker not in template, f"{view} template reintroduced manual pagination marker: {marker}")
 
     require(f'layout: "{view}"' in mobile_js, f"mobile datalist JS must include {view}")
-    require(f'data-mobile-datalist-layout="{view}"' in mobile_css, f"mobile datalist CSS must include {view}")
+    require(
+        "data-mobile-datalist-layout" not in styles,
+        f"{view} CSS must not override the shared mobile listing geometry",
+    )
+
+require(
+    "data-mobile-datalist-layout" not in mobile_css,
+    "mobile datalist CSS must compose semantic slots through one cross-view geometry",
+)
+require(
+    "@layer entity-list {" in entity_list_css and "@layer compositions" not in entity_list_css,
+    "shared row surface must be isolated in its own sublayer, without nesting compositions again",
+)
 
 for domain in ("facturas", "clientes", "usuarios"):
     for token in (

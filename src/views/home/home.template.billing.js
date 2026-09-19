@@ -116,8 +116,8 @@ function invoiceItem(invoice = {}) {
       data-home-entity-id="${attr(id)}"
     >
       ${interactive
-        ? `<button type="button" class="home-entity-row home-entity-row--invoice" ${relationAttribute} ${triggerAttributes}>${content}</button>`
-        : `<div class="home-entity-row home-entity-row--invoice home-entity-row--static" ${relationAttribute}>${content}</div>`}
+        ? `<button type="button" class="home-entity-row ui-entity-row home-entity-row--invoice" ${relationAttribute} ${triggerAttributes}>${content}</button>`
+        : `<div class="home-entity-row ui-entity-row home-entity-row--invoice home-entity-row--static" ${relationAttribute}>${content}</div>`}
     </li>
   `;
 }

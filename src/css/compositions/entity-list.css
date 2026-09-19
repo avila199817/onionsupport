@@ -1,0 +1,79 @@
+/* =========================================================
+   ONION SUPPORT — ENTITY LIST
+
+   Superficie y densidad compartidas por Home y los listados privados.
+   Home conserva la geometría de sus botones; MobileDataList adapta la tabla
+   semántica. Ambos consumen esta autoridad, cargada con el área privada.
+   El entrypoint asigna layer(compositions). La subcapa entity-list aísla
+   esta superficie: en desktop, las tablas revierten sólo esta subcapa y
+   conservan todos los estilos previos de su dominio y de la paridad privada.
+   Home consume la superficie a cualquier ancho, sin duplicar declaraciones.
+========================================================= */
+
+@layer entity-list {
+
+:root {
+  --entity-list-gap: 8px;
+  --entity-list-row-radius: var(--radius-lg, 14px);
+  --entity-list-row-min: 84px;
+  --entity-list-leading-size: 44px;
+  --entity-list-column-gap: 13px;
+  --entity-list-row-padding: 11px 12px;
+  --entity-list-meta-gap: 6px;
+  --entity-list-copy-gap: 6px;
+  --entity-list-title-size: 12px;
+  --entity-list-meta-size: 9.5px;
+  --entity-list-label-size: 9px;
+}
+
+.ui-entity-row {
+  appearance: none;
+  margin: 0;
+  padding: var(--entity-list-row-padding);
+  border: 1px solid var(--data-table-row-border, var(--border-default));
+  border-radius: var(--entity-list-row-radius);
+  background: var(--solid-bg-1, transparent);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 var(--border-subtle, transparent);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+@container (max-width: 760px) {
+  .ui-entity-row,
+  .ui-datalist-placeholder {
+    --entity-list-row-min: 78px;
+    --entity-list-leading-size: 40px;
+    --entity-list-column-gap: 10px;
+    --entity-list-row-padding: 10px;
+  }
+}
+
+@media (min-width: 681px) {
+  .ui-datalist-row.ui-entity-row {
+    all: revert-layer;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-entity-row {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .ui-entity-row {
+    border-color: CanvasText;
+  }
+}
+
+} /* @layer entity-list */

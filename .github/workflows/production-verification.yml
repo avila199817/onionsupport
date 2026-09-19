@@ -414,6 +414,10 @@ jobs:
         run: bash .github/ci/verify_production.sh
 
       - name: Verify Google measurement bootstrap exactly
+        env:
+          RELEASE_MODE: ${{ steps.release.outputs.mode }}
+          PUBLIC_SITE_URL: ${{ steps.canonical.outputs.site_url }}
+          EXPECTED_SHA: ${{ steps.revision.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -425,9 +429,32 @@ jobs:
           fi
 
           python3 -m py_compile "${contract}"
-          python3 "${contract}" \
-            --root expected-main \
-            --base-url "${{ steps.canonical.outputs.site_url }}" \
-            --revision "${{ steps.revision.outputs.sha }}" \
-            --attempts 3 \
-            --delay 5
+          # Use the trusted module's existing API: deployed revisions before this
+          # transition do not have --production-root. Only input selection belongs
+          # to this workflow; both validators still come from the pinned checkout.
+          python3 - "${contract}" <<'PY'
+          import importlib.util
+          import os
+          import sys
+          from pathlib import Path
+
+          spec = importlib.util.spec_from_file_location("google_contract", Path(sys.argv[1]).resolve())
+          contract = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(contract)
+          source_root = Path("expected-main").resolve()
+          mode = os.environ["RELEASE_MODE"]
+          if mode not in ("compiled-dist", "legacy-root"):
+              raise SystemExit(f"Unknown release mode: {mode}")
+          production_root = Path("expected-artifact/dist").resolve() if mode == "compiled-dist" else source_root
+          print(f"Google measurement roots: source={source_root} · production={production_root}")
+          errors = contract.validate_source(source_root)
+          if not errors:
+              errors = contract.verify_production(
+                  production_root, os.environ["PUBLIC_SITE_URL"], os.environ["EXPECTED_SHA"], 3, 5
+              )
+          for error in errors:
+              print(f"ERROR: {error}", file=sys.stderr)
+          if errors:
+              raise SystemExit(1)
+          print("Google measurement source and production contract: PASS")
+          PY

@@ -506,6 +506,13 @@ jobs:
           [[ "$(node --version)" == "v22.23.2" ]]
           [[ "$(npm --version)" == "10.9.8" ]]
 
+      # Provenance regressions and CSS fidelity use the compiler from the
+      # immutable base lockfile. Install it in the validator's own workspace.
+      - name: Install locked trusted validator dependencies
+        working-directory: trusted-validator
+        shell: bash
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: Prove trusted provenance regressions
         working-directory: trusted-validator
         shell: bash

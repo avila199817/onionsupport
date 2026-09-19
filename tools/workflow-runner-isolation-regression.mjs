@@ -23,6 +23,23 @@ const candidateJob = jobSection("build_candidate_dist", "validate_dist_artifact"
 const validationJob = jobSection("validate_dist_artifact", "deploy_preview");
 const previewJob = jobSection("deploy_preview", "close_preview");
 
+function assertValidatorDependencyInstall(job) {
+  const install = job.match(/      - name: Install locked trusted validator dependencies\n[\s\S]*?(?=\n      - name:)/)?.[0];
+  assert.ok(install, "Trusted validator must install its own locked dependencies.");
+  assert.match(install, /working-directory: trusted-validator\n/, "Validator dependencies come from the immutable base checkout.");
+  assert.match(install, /run: npm ci --ignore-scripts --no-audit --no-fund\n/, "Locked validator installation must not run lifecycle scripts.");
+  assert.ok(job.indexOf(install) < job.indexOf("      - name: Prove trusted provenance regressions\n"),
+    "Validator compiler dependencies must exist before provenance regressions execute.");
+}
+assertValidatorDependencyInstall(validationJob);
+const validatorInstall = validationJob.match(/      - name: Install locked trusted validator dependencies\n[\s\S]*?(?=\n      - name:)/)[0];
+assert.throws(() => assertValidatorDependencyInstall(validationJob.replace(validatorInstall, "")), /must install/);
+assert.throws(() => assertValidatorDependencyInstall(validationJob.replace(validatorInstall,
+  validatorInstall.replace("working-directory: trusted-validator", "working-directory: candidate-data"))), /immutable base/);
+assert.throws(() => assertValidatorDependencyInstall(validationJob.replace(validatorInstall,
+  validatorInstall.replace("--ignore-scripts ", ""))), /lifecycle scripts/);
+assert.throws(() => assertValidatorDependencyInstall(`${validationJob.replace(validatorInstall, "")}\n${validatorInstall}\n      - name: End fixture\n`), /must exist before/);
+
 assert.equal(
   (candidateJob.match(/npm run test:browser:dist/g) || []).length,
   1,

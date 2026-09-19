@@ -24,6 +24,7 @@ export function runPublicCssMinifyRegression() {
 @layer auth {
   .hero { background-image: url("../media/portrait.webp"); --caption: "space preserved"; color: red; }
   .logo { background-image: url("/src/media/logo.webp"), url("data:image/svg+xml,<svg/>"); }
+  .glass { -webkit-backdrop-filter: blur(18px) saturate(1.12); backdrop-filter: blur(18px) saturate(1.12); }
   @media (prefers-reduced-motion: reduce) { .hero { transition: none; } }
 }
 `);
@@ -43,6 +44,8 @@ export function runPublicCssMinifyRegression() {
     assert.ok(compact.equals(publicCompatibilityCssBytes(cssPath, source, true)), "deterministic output");
     assert.match(compact.toString(), /--caption:"space preserved"/, "quoted custom properties preserve whitespace");
     assert.match(compact.toString(), /prefers-reduced-motion:reduce/, "reduced-motion condition remains");
+    assert.match(compact.toString(), /[;{]backdrop-filter:/, "standard backdrop-filter survives minification");
+    assert.match(compact.toString(), /[;{]-webkit-backdrop-filter:/, "Safari backdrop-filter compatibility survives minification");
     assert.doesNotMatch(compact.toString(), /sourceMappingURL|__CSS_DEPENDENCY_/, "no maps or rewritten dependency placeholders");
     for (const name of ["src/css/app.css", "src/css/private.css", "src/css/views/home/index.css", "src/analytics/google-tag.js", "src/css/views/public/index.css?other", "../src/css/views/public/index.css"]) {
       assert.equal(publicCompatibilityCssBytes(name, source, true), source, `only the exact public allowlist transforms: ${name}`);
@@ -79,10 +82,12 @@ export function runPublicCssMinifyRegression() {
   }
 
   // Parse both representations, ignoring formatting/source locations, to check
-  // exact asset URLs and cascade layer order on the real allowlisted sources.
+  // exact asset URLs, cascade layer order and backdrop-filter declarations on
+  // the real allowlisted sources. Standard declarations must follow manual
+  // prefixed fallbacks: the pinned minifier otherwise keeps only the prefix.
   const { transform } = createRequire(import.meta.resolve("vite/package.json"))("lightningcss");
   function paintBoundaries(code) {
-    const result = { layers: [], urls: [] };
+    const result = { layers: [], urls: [], backdropFilters: [] };
     transform({ filename: cssPath, code, visitor: {
       Rule(rule) {
         if (rule.type === "layer-statement") result.layers.push([rule.type, rule.value.names]);
@@ -93,6 +98,11 @@ export function runPublicCssMinifyRegression() {
         }
       },
       Url(url) { result.urls.push(url.url); },
+      Declaration(declaration) {
+        if (declaration.property === "backdrop-filter" && declaration.vendorPrefix.length === 0) {
+          result.backdropFilters.push(declaration.value);
+        }
+      },
     } });
     return result;
   }
@@ -102,10 +112,10 @@ export function runPublicCssMinifyRegression() {
   ]) {
     const emitted = publicCompatibilityCssBytes(name, original, true);
     assert.ok(emitted.length < original.length, `${name}: production minifier removes source overhead`);
-    assert.deepEqual(paintBoundaries(emitted), paintBoundaries(original), `${name}: asset references and cascade order are unchanged`);
+    assert.deepEqual(paintBoundaries(emitted), paintBoundaries(original), `${name}: asset references, cascade order and backdrop filters are unchanged`);
     assert.equal(publicCompatibilityCssBytes(name, original, false), original, `${name}: inactive tooling is byte-exact`);
   }
-  console.log("Public CSS minify regression: PASS · inactive/rollback bytes · strict policy/symlinks · finite allowlist · deterministic transform · URLs/layers/reduced motion");
+  console.log("Public CSS minify regression: PASS · inactive/rollback bytes · strict policy/symlinks · finite allowlist · deterministic transform · URLs/layers/reduced motion/backdrop filters");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runPublicCssMinifyRegression();

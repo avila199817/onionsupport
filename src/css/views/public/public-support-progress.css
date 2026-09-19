@@ -36,8 +36,8 @@ body.public-support-submission-active {
     radial-gradient(circle at 50% 38%, rgb(25 151 255 / .16), transparent 30%),
     linear-gradient(180deg, rgb(2 8 18 / .88), rgb(1 5 13 / .96));
 
-  backdrop-filter: blur(18px) saturate(1.08);
   -webkit-backdrop-filter: blur(18px) saturate(1.08);
+  backdrop-filter: blur(18px) saturate(1.08);
 
   cursor: progress;
 }

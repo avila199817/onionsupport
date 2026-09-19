@@ -202,27 +202,54 @@ async function focusRing(page, locator) {
 }
 
 async function verifyImmediateAdaptation(page, view) {
-  const adaptation = await page.evaluate((name) => {
+  const adaptation = await page.evaluate(async (name) => {
     const table = document.querySelector(`.${name}-table`);
     const shell = table.closest(`.${name}-table-shell`);
-    // Reproduce the real adapter's class change from the unannotated table.
+    const nodes = [shell, ...shell.querySelectorAll("*")];
+    const adapterClasses = new Set([
+      "ui-datalist-shell", "ui-datalist", "ui-datalist-body", "ui-datalist-row",
+      "ui-entity-row", "ui-datalist-cell", "ui-datalist-actions",
+    ]);
+    const annotations = nodes.map((node) => ({ node, classes: [...node.classList].filter((className) => adapterClasses.has(className)) }));
+    const geometry = () => {
+      const origin = shell.getBoundingClientRect();
+      return nodes.map((node) => {
+        const box = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return {
+          node: `${node.tagName}.${String(node.className).replaceAll(" ", ".")}`,
+          x: box.x - origin.x, y: box.y - origin.y, width: box.width, height: box.height,
+          padding: style.padding, border: style.borderWidth, gap: style.gap,
+        };
+      });
+    };
+    // Reproduce all real adapter annotations, including tbody padding and copy.
     // Settle only the fixture's starting state, then measure in the same task
     // as annotation: waiting for an animation would conceal a visible jump.
-    table.classList.remove("ui-datalist");
-    getComputedStyle(table).minWidth;
-    for (const animation of table.getAnimations()) animation.finish();
+    for (const { node, classes } of annotations) node.classList.remove(...classes);
+    geometry();
+    for (const animation of shell.getAnimations({ subtree: true })) {
+      if (Number.isFinite(animation.effect?.getComputedTiming().endTime)) animation.finish();
+    }
     const before = table.getBoundingClientRect().width;
-    table.classList.add("ui-datalist");
+    for (const { node, classes } of annotations) node.classList.add(...classes);
+    const immediate = geometry();
+    const after = table.getBoundingClientRect().width;
+    const available = shell.clientWidth;
+    const animations = shell.getAnimations({ subtree: true }).map((animation) => ({ property: animation.transitionProperty, state: animation.playState }));
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
     return {
-      before, after: table.getBoundingClientRect().width, available: shell.clientWidth,
-      minWidth: getComputedStyle(table).minWidth,
-      animations: table.getAnimations().map((animation) => ({ property: animation.transitionProperty, state: animation.playState })),
+      before, after, available, immediate, settled: geometry(), animations,
+      connected: nodes.every((node) => node.isConnected),
     };
   }, view);
   assert.ok(adaptation.before > adaptation.available, `${view}: la regresión debe partir del ancho desktop`);
-  assert.ok(adaptation.after <= adaptation.available + 1, `${view}: la adaptación móvil debe ser inmediata con reduced motion: ${JSON.stringify(adaptation)}`);
-  assert.equal(adaptation.animations.some(({ property }) => /(?:width|height|size)/.test(property || "")), false,
-    `${view}: no debe animarse la geometría al adaptar la tabla: ${JSON.stringify(adaptation)}`);
+  assert.ok(adaptation.connected, `${view}: la tabla no debe reemplazarse durante la medición de su adaptación`);
+  const diagnostic = JSON.stringify({ before: adaptation.before, after: adaptation.after, available: adaptation.available, animations: adaptation.animations });
+  assert.ok(adaptation.after <= adaptation.available + 1, `${view}: la adaptación móvil debe ser inmediata con reduced motion: ${diagnostic}`);
+  assert.equal(adaptation.animations.some(({ property }) => /(?:width|height|size|padding|margin|gap|font|line-height|transform|grid|flex|top|left|right|bottom)/.test(property || "")), false,
+    `${view}: no debe animarse la geometría al adaptar la tabla: ${diagnostic}`);
+  assert.deepEqual(adaptation.immediate, adaptation.settled, `${view}: la anotación debe aplicar toda la geometría en el mismo frame`);
 }
 
 async function verifyInteractions(page, view, homeFocus) {

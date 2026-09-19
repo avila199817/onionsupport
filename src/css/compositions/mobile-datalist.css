@@ -29,9 +29,6 @@
     border-spacing: 0;
     table-layout: auto;
     background: transparent;
-    /* El reset de movimiento reducido fija 1ms globalmente: sin property:none
-       animaría el min-width desktop al anotar la tabla, incluso en teléfono. */
-    transition: none;
   }
 
   .ui-datalist > colgroup { display: none; }

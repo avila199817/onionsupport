@@ -2403,8 +2403,10 @@ pre::-webkit-scrollbar-thumb:hover {
     animation-iteration-count:
       1 !important;
 
+    /* Una duración positiva activa transiciones en elementos cuyo valor por
+       defecto es transition-property: all, incluso si no tenían animación. */
     transition-duration:
-      1ms !important;
+      0ms !important;
 
     scroll-behavior:
       auto !important;

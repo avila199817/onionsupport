@@ -373,8 +373,11 @@ try {
     publicSupport.scan();
     window.publicExperience = (await import("/src/features/public-home-experience/index.js")).default;
     publicExperience.scan();
-    window.publicHost = root.querySelector(".public-support-account-avatar");
   });
+  // The public adapter loads its authority only after confirming the session.
+  // Capture the host after that async mount, rather than retaining a null node.
+  await page.waitForSelector(".public-support-account-avatar");
+  await page.evaluate(() => { window.publicHost = document.querySelector(".public-support-account-avatar"); });
   await page.waitForFunction(() => publicHost?.dataset.avatarState === "fallback");
   assert.equal(await page.evaluate(() => publicHost.querySelector("img")), null, "Untrusted HTTPS image hosts must be rejected by the shared media policy");
   assert.equal(await page.evaluate(() => publicHost.dataset.avatarInitials), "AL");
